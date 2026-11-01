@@ -1,0 +1,81 @@
+name: oneshot checks
+on: [push, pull_request]
+jobs:
+  web-and-worker:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: oneshot_test
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: oneshot_indexer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oneshot_test -d oneshot_indexer_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ONESHOT_INDEXER_TEST_DATABASE_URL: postgresql://oneshot_test:local_ci_only@127.0.0.1:5432/oneshot_indexer_test
+      ONESHOT_API_TEST_DATABASE_URL: postgresql://oneshot_test:local_ci_only@127.0.0.1:5432/oneshot_indexer_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  contabo-containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: docker compose version
+      - run: CI=true bash deploy/contabo/ci-smoke.sh
+  local-evm:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: oneshot_test
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: oneshot_indexer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oneshot_test -d oneshot_indexer_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ONESHOT_INDEXER_TEST_DATABASE_URL: postgresql://oneshot_test:local_ci_only@127.0.0.1:5432/oneshot_indexer_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - run: npm ci
+      - run: npm run contracts:test
+      - run: npm run contracts:smoke
+      - name: Verify local NFT launch, guarded floor, continuous indexing and recovery
+        run: npx vitest run apps/api/lib/server/nft-launch.integration.test.ts apps/api/lib/server/nft-checkout.integration.test.ts apps/api/lib/server/nft-floor.integration.test.ts apps/api/lib/server/nft-watch.integration.test.ts
+        env:
+          ONESHOT_RUN_NFT_LAUNCH_INTEGRATION: 'true'
+      - run: npm run build:api
+      - name: Rehearse bounded local capacity
+        run: npm run test:capacity -- --database-url "$ONESHOT_INDEXER_TEST_DATABASE_URL" --profile smoke --output .local/qa/capacity-ci.json

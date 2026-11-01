@@ -1,0 +1,5 @@
+vendor/decode-uri-component/index.cjs text eol=lf
+vendor/decode-uri-component/LICENSE text eol=lf
+deploy/**/*.sh text eol=lf
+deploy/**/Dockerfile text eol=lf
+deploy/**/*.Dockerfile text eol=lf

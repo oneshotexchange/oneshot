@@ -1,0 +1,62 @@
+{
+  "name": "oneshot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1",
+    "protobufjs": "7.6.6",
+    "ws@^8.0.0": "8.21.0",
+    "decode-uri-component": "$decode-uri-component"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:setup": "node scripts/setup-local.mjs",
+    "db:local": "node deploy/local/db.mjs",
+    "test:database": "node deploy/local/db.mjs test",
+    "test:capacity": "tsx scripts/local-capacity-rehearsal.ts",
+    "dev:web": "npm run dev --workspace @b20/web",
+    "dev:api": "npm run dev --workspace @oneshot/api",
+    "build": "npm run build:web && npm run build:api",
+    "build:web": "npm run build --workspace @b20/web",
+    "build:api": "npm run build --workspace @oneshot/api",
+    "start": "npm run start:api",
+    "start:api": "npm run start --workspace @oneshot/api",
+    "preview:web": "npm run start --workspace @b20/web",
+    "check:deployment": "node scripts/check-deployment.mjs",
+    "deploy:web": "node scripts/deploy-web.mjs",
+    "worker": "tsx scripts/zero-worker.ts",
+    "indexer:local": "tsx apps/indexer/src/cli.ts",
+    "indexer:watch": "tsx apps/indexer/src/cli.ts --watch",
+    "preview:indexed": "tsx scripts/local-indexed-fixture.ts",
+    "legacy:worker": "npm run start --workspace @b20/worker",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit --project scripts/tsconfig.json",
+    "test": "vitest run",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "legacy:verify:deployment": "tsx scripts/verify-deployment.ts",
+    "contracts:build": "forge build --root contracts-evm",
+    "contracts:test": "forge test --root contracts-evm",
+    "contracts:smoke": "tsx scripts/local-evm-smoke.ts",
+    "verify:network": "tsx scripts/verify-zero-network.ts",
+    "verify:nft": "tsx scripts/verify-local-nft.ts"
+  },
+  "devDependencies": {
+    "decode-uri-component": "file:vendor/decode-uri-component",
+    "@openzeppelin/contracts": "5.6.1",
+    "@types/node": "22.18.12",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "viem": "2.57.7"
+  }
+}

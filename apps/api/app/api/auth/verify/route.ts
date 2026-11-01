@@ -1,0 +1,3 @@
+import { api, json, readJson, rateLimit } from '../../../../lib/server/http';
+import { proofSchema, verifyChallenge } from '../../../../lib/server/auth';
+export const POST=api(async request=>{const proof=proofSchema.parse(await readJson(request));rateLimit(`verify:${proof.address}`,10);const result=await verifyChallenge(proof,process.env.NEXT_PUBLIC_APP_URL||request.nextUrl.origin);const response=json({address:result.address,expiresAt:result.expiresAt});response.cookies.set('b20_session',result.token,{httpOnly:true,secure:request.nextUrl.protocol==='https:',sameSite:'strict',path:'/',maxAge:86400});return response;});

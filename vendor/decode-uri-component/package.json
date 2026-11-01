@@ -1,0 +1,16 @@
+{
+  "name": "decode-uri-component",
+  "version": "0.5.0+oneshot.cjs.1",
+  "private": true,
+  "description": "Local CommonJS packaging of the unchanged upstream decode-uri-component 0.5.0 algorithm",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./index.cjs",
+  "exports": {
+    "require": "./index.cjs",
+    "default": "./index.cjs"
+  },
+  "sideEffects": false,
+  "files": ["index.cjs", "LICENSE", "README.md"],
+  "engines": { "node": ">=14.16" }
+}

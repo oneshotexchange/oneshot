@@ -1,0 +1,35 @@
+node_modules/
+.next/
+.next-indexed-preview/
+.wrangler/
+deploy/contabo/secrets/
+deploy/contabo/restore/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+.tools/
+.aptos/
+.local/
+*.tsbuildinfo
+*.log
+.DS_Store
+contracts/**/build/
+contracts-evm/out/
+contracts-evm/cache/
+contracts-evm/broadcast/
+
+# Private workspace instructions, research and local tooling
+AGENTS.md
+.agents/
+.codex/
+.aws/
+docs/
+*.patch
+*.diff
+
+# Superseded hosting configuration
+/railway.web.toml
+/railway.worker.toml
+/contracts/

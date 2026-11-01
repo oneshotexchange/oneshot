@@ -1,0 +1,4 @@
+import { api, ApiError } from '../../../../../lib/server/http';
+import { getRecord } from '../../../../../lib/server/store';
+import { readMedia } from '../../../../../lib/server/media';
+export const GET=api(async (_request,context)=>{const {manifest,serial}=await context.params;if(!/^[a-f0-9]{64}$/.test(manifest)||!/^\d+\.json$/.test(serial))throw new ApiError(404,'NOT_FOUND','Metadata not found.');const snapshot=await getRecord('snapshots',manifest);const item=snapshot?.items?.find((i:any)=>i.serial===Number(serial.slice(0,-5)));if(!item)throw new ApiError(404,'NOT_FOUND','Metadata not found.');const asset=await readMedia(item.metadataId);return new Response(new Uint8Array(asset.buffer),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=31536000,immutable','X-Content-Type-Options':'nosniff'}});});

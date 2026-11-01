@@ -1,0 +1,181 @@
+name: oneshot
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+x-database-client: &database-client
+  PGHOST: db
+  PGPORT: '5432'
+  PGUSER: oneshot
+  PGDATABASE: ${POSTGRES_APP_DB:-oneshot}
+  PGPASSWORD_FILE: /run/secrets/postgres_password
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --data-checksums --auth-host=scram-sha-256
+    secrets:
+      - postgres_admin_password
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-oneshot.sh:ro
+    networks: [database]
+    command:
+      - postgres
+      - -c
+      - shared_buffers=768MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=60
+      - -c
+      - max_wal_size=1GB
+    shm_size: 256mb
+    mem_limit: 3g
+    cpus: 2
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U postgres -d postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+
+  migrate:
+    image: oneshot-migrate:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/contabo/Dockerfile
+      target: migrate
+    environment: *database-client
+    secrets: [postgres_password]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [database]
+    restart: 'no'
+    mem_limit: 1g
+    cpus: 1
+    logging: *logging
+
+  api:
+    image: oneshot-api:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/contabo/Dockerfile
+      target: api
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ./secrets/api.env
+        format: raw
+    environment:
+      <<: *database-client
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=1536
+      HOSTNAME: 0.0.0.0
+      PORT: '3001'
+      ONESHOT_API_URL: https://${API_DOMAIN:?Set API_DOMAIN in .env}
+      NEXT_PUBLIC_APP_URL: ${WEB_ORIGIN:?Set WEB_ORIGIN in .env}
+    secrets: [postgres_password]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [database, edge]
+    expose: ['3001']
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *logging
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *logging
+
+  backup:
+    profiles: [operations]
+    image: oneshot-backup:pg17
+    build:
+      context: .
+      dockerfile: backup.Dockerfile
+    env_file:
+      - path: ./secrets/backup.env
+        format: raw
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGDATABASE: ${POSTGRES_APP_DB:-oneshot}
+      PGPASSWORD_FILE: /run/secrets/postgres_admin_password
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_CACHE_DIR: /backup/cache
+      AWS_DEFAULT_REGION: auto
+      AWS_REGION: auto
+    secrets: [postgres_admin_password, restic_password]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - backup_work:/backup
+      - ./restore:/restore
+    networks: [database, edge]
+    mem_limit: 768m
+    cpus: 0.75
+    restart: 'no'
+    logging: *logging
+
+networks:
+  database:
+    internal: true
+  edge:
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  backup_work:
+
+secrets:
+  postgres_admin_password:
+    file: ./secrets/postgres_admin_password
+  postgres_password:
+    file: ./secrets/postgres_password
+  restic_password:
+    file: ./secrets/restic_password

@@ -1,0 +1,28 @@
+{
+  "name": "@b20/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3000 --strictPort",
+    "build": "vite build --logLevel warn && node ../../scripts/verify-web-artifact.mjs",
+    "start": "vite preview --host 127.0.0.1 --port 3000 --strictPort",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aptos-labs/ts-sdk": "7.5.0",
+    "@aptos-labs/wallet-adapter-react": "8.3.3",
+    "@b20/sdk": "*",
+    "@oneshot/evm": "*",
+    "@privy-io/react-auth": "3.51.0",
+    "lightweight-charts": "5.2.1",
+    "lucide-react": "1.60.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.4",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "vite": "8.3.4"
+  }
+}

@@ -1,0 +1,350 @@
+/* The original workspace keeps every existing color fallback. New editions opt
+   into shared semantic roles, including dialogs, inputs and indexed records. */
+:root {
+  --accent: #57E6C1;
+  --accent-ink: #0C2820;
+  --accent-soft: #57E6C110;
+  --accent-line: #57E6C138;
+  --surface-raised: #171C22;
+  --surface-hover: #202832;
+  --input-bg: #0E1318;
+  --subtle: #89939F;
+  --sidebar-bg: #0E1115;
+  --header-bg: #0E1115;
+  --hero-bg: #141C1D;
+  --hero-ink: #F5F3EE;
+  --hero-muted: #95ABA5;
+  --shadow: #00000055;
+  --positive: #57E6C1;
+  --negative: #CFAE8C;
+  --chart-surface: #11151A;
+  --chart-text: #A6ADB7;
+  --chart-grid: #252D36;
+  --chart-border: #2A313A;
+  --chart-up: #96BD88;
+  --chart-down: #CFA98F;
+  --chart-crosshair: #B4CBA0;
+  --chart-label: #7C9C64;
+}
+
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) {
+  --mint: var(--accent);
+  --mint-dark: var(--accent);
+  --charcoal: var(--surface-raised);
+  --soft: var(--surface-raised);
+  --theme-ink: var(--ink);
+  --theme-muted: var(--muted);
+  --theme-subtle: var(--subtle);
+  --theme-accent: var(--accent-text, var(--accent));
+  --theme-accent-ink: var(--accent-ink);
+  --theme-accent-soft: var(--accent-soft);
+  --theme-accent-line: var(--accent-line);
+  --theme-surface: var(--surface);
+  --theme-surface-raised: var(--surface-raised);
+  --theme-hover: var(--surface-hover);
+  --theme-input: var(--input-bg);
+  --theme-line: var(--line);
+  --theme-line-strong: var(--line-strong);
+  --theme-sidebar: var(--sidebar-bg);
+  --theme-header: var(--header-bg);
+  --theme-feature-surface: var(--feature-surface);
+  --theme-overlay: var(--overlay);
+  --theme-hero-bg: var(--hero-bg);
+  --theme-hero-ink: var(--hero-ink);
+  --theme-hero-muted: var(--hero-muted);
+  --theme-hero-accent: var(--hero-accent);
+  --theme-hero-line: var(--hero-line);
+  --theme-hero-glow: var(--hero-glow);
+  --theme-warning-ink: var(--warning-ink);
+  --theme-warning-soft: var(--warning-soft);
+  --theme-warning-surface: var(--warning-soft);
+  --theme-warning-line: var(--warning-line);
+  --theme-backdrop: var(--backdrop);
+  --theme-shadow: var(--shadow);
+  --theme-chart-grid: var(--chart-grid);
+}
+
+/* Onyx & 24-Karat — warm black, brushed gold, cream and polished silver. */
+html[data-theme="onyx"] {
+  color-scheme: dark;
+  --bg: #0A0A0A;
+  --surface: #121211;
+  --surface-raised: #1B1A17;
+  --surface-hover: #26231C;
+  --input-bg: #0E0E0D;
+  --sidebar-bg: #0D0D0C;
+  --header-bg: #10100F;
+  --ink: #F4EADE;
+  --muted: #BFC1C2;
+  --subtle: #9F9B92;
+  --line: #302B20;
+  --line-strong: #76613A;
+  --accent: #C69B3C;
+  --accent-ink: #171207;
+  --accent-soft: #C69B3C12;
+  --accent-line: #C69B3C45;
+  --amber: #D8B675;
+  --action-bg: #C69B3C;
+  --action-hover: #D9B55F;
+  --action-ink: #171207;
+  --feature-surface: #18160F;
+  --overlay: #15130FEF;
+  --hero-bg: #17150F;
+  --hero-ink: #F4EADE;
+  --hero-muted: #B8B1A0;
+  --hero-accent: #D7B565;
+  --hero-line: #5B4824;
+  --hero-glow: #C69B3C13;
+  --warning-ink: #D8B675;
+  --warning-soft: #D8B6750A;
+  --warning-line: #D8B67530;
+  --backdrop: #000000BF;
+  --shadow: #00000066;
+  --positive: #ACC8AA;
+  --negative: #E0A18C;
+  --chart-surface: #121211;
+  --chart-text: #BFC1C2;
+  --chart-grid: #302B20;
+  --chart-border: #302B20;
+  --chart-up: #C69B3C;
+  --chart-down: #BFC1C2;
+  --chart-crosshair: #D7B565;
+  --chart-label: #8B6B28;
+}
+
+/* Brut Champagne — natural paper, pale champagne, warm taupe and charcoal. */
+html[data-theme="champagne"] {
+  color-scheme: light;
+  --bg: #F4EADE;
+  --surface: #FFFCF6;
+  --surface-raised: #F3E9D6;
+  --surface-hover: #EDE0C8;
+  --input-bg: #FCF7EE;
+  --sidebar-bg: #EEE2CF;
+  --header-bg: #F9F2E7;
+  --ink: #2B2B2B;
+  --muted: #6F6154;
+  --subtle: #786A5C;
+  --line: #DDCFB9;
+  --line-strong: #A5906F;
+  --accent: #8A7968;
+  --accent-text: #6F5C45;
+  --accent-ink: #FFFCF6;
+  --accent-soft: #EBDAB066;
+  --accent-line: #B29A6A80;
+  --amber: #8A6633;
+  --action-bg: #2B2B2B;
+  --action-hover: #514738;
+  --action-ink: #F4EADE;
+  --feature-surface: #EBDAB059;
+  --overlay: #FFFCF6F2;
+  --hero-bg: #EBDAB0;
+  --hero-ink: #2B2B2B;
+  --hero-muted: #625340;
+  --hero-accent: #7A603C;
+  --hero-line: #C9B68D;
+  --hero-glow: #FFFCF63D;
+  --warning-ink: #805A2D;
+  --warning-soft: #E5CC920D;
+  --warning-line: #A8844B4D;
+  --backdrop: #312B2480;
+  --shadow: #4B382A1A;
+  --positive: #387257;
+  --negative: #AD5448;
+  --chart-surface: #FFFCF6;
+  --chart-text: #6F6154;
+  --chart-grid: #E3D9C8;
+  --chart-border: #DDCFB9;
+  --chart-up: #6C846B;
+  --chart-down: #B47562;
+  --chart-crosshair: #8A7968;
+  --chart-label: #6F5C45;
+}
+
+/* Vice — Miami dusk, pink neon, washed coral, sea glass and midnight violet. */
+html[data-theme="vice"] {
+  color-scheme: dark;
+  --bg: #110F1C;
+  --surface: #1A1729;
+  --surface-raised: #252036;
+  --surface-hover: #302640;
+  --input-bg: #131120;
+  --sidebar-bg: #141120;
+  --header-bg: #171323;
+  --ink: #FFF2E9;
+  --muted: #C1B5CD;
+  --subtle: #A497B4;
+  --line: #382C46;
+  --line-strong: #8D587E;
+  --accent: #FF8CC6;
+  --accent-ink: #32152B;
+  --accent-soft: #FF8CC613;
+  --accent-line: #FF8CC640;
+  --amber: #FFBA91;
+  --action-bg: #FF8CC6;
+  --action-hover: #FFA8D5;
+  --action-ink: #32152B;
+  --feature-surface: #231A31;
+  --overlay: #1A1529EE;
+  --hero-bg: #291C36;
+  --hero-ink: #FFF2E9;
+  --hero-muted: #D3B8CE;
+  --hero-accent: #FFB48F;
+  --hero-line: #7C4569;
+  --hero-glow: #EC6FA32B;
+  --warning-ink: #FFBC92;
+  --warning-soft: #FFA3780A;
+  --warning-line: #FFBA9133;
+  --backdrop: #090514C9;
+  --shadow: #07031166;
+  --positive: #77E3D4;
+  --negative: #FFA18F;
+  --chart-surface: #1A1729;
+  --chart-text: #C1B5CD;
+  --chart-grid: #382C46;
+  --chart-border: #382C46;
+  --chart-up: #77E3D4;
+  --chart-down: #FF8CC6;
+  --chart-crosshair: #FFB48F;
+  --chart-label: #96577B;
+}
+
+/* Native controls and feedback remain legible on both dark and light editions. */
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .button-primary {
+  background: var(--action-bg);
+  border-color: var(--action-bg);
+  color: var(--action-ink);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .button-primary:hover:not(:disabled) {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+  color: var(--action-ink);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(button, a, input, textarea, select):focus-visible {
+  outline-color: var(--accent);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) ::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(.sidebar, .topbar, .network-banner, .panel, .stat, .form-section, .settings-panel, .modal, .hero-card) {
+  transition: background-color .24s ease, border-color .24s ease;
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(.main-nav a.active, .main-nav a.active-sub) {
+  box-shadow: inset 2px 0 var(--accent);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(.empty-icon, .principle-icon, .success-icon, .status-row-icon) {
+  color: var(--accent-text, var(--accent));
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .chart-empty {
+  background-image: linear-gradient(var(--chart-grid) 1px, transparent 1px), linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .skeleton {
+  background-image: linear-gradient(90deg, var(--surface-raised) 20%, var(--surface-hover) 50%, var(--surface-raised) 80%);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .creator-note-mark {
+  color: var(--accent-soft);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .holder-bar>span { background: var(--accent); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .collection-banner-abstract {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 40px var(--feature-surface), 0 0 0 41px var(--accent-line), 0 0 0 80px var(--feature-surface), 0 0 0 81px var(--accent-soft);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .nft-art-card { box-shadow: 0 15px 25px var(--shadow); }
+
+/* Shared illustration geometry; each edition supplies its own material palette. */
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) {
+  --art-bright: var(--accent);
+  --art-dark: var(--accent-ink);
+  --art-mid: var(--accent);
+  --art-line: var(--accent-line);
+  --art-card: var(--surface-raised);
+  --art-card-ink: var(--ink);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-grid {
+  background-image: linear-gradient(var(--art-line) 1px, transparent 1px), linear-gradient(90deg, var(--art-line) 1px, transparent 1px);
+  opacity: .45;
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-orbit { border-color: var(--art-bright); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(.orbit-one:after, .orbit-three:before, .art-float-dot) {
+  background: var(--art-bright);
+  box-shadow: 0 0 15px var(--art-line);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-core {
+  background: linear-gradient(145deg, var(--art-bright), var(--art-mid));
+  border-color: var(--art-bright);
+  box-shadow: inset -7px -6px 16px #00000020, 0 20px 48px var(--shadow);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-core:after { border-color: var(--art-line); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-core-symbol i { background: var(--art-dark); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-float {
+  background: var(--art-card);
+  border-color: var(--art-line);
+  color: var(--art-card-ink);
+  box-shadow: 0 14px 25px var(--shadow);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-float-one>svg {
+  color: var(--accent-text, var(--accent));
+  background: var(--accent-soft);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) :is(.art-float-one span:not(.art-float-dot), .art-coordinate) { color: var(--hero-muted); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-float-two span { color: var(--art-card-ink); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-card-back { background: var(--art-mid); color: var(--art-dark); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .nft-art-circle {
+  background: var(--art-bright);
+  box-shadow: inset 23px -14px 0 var(--art-dark);
+}
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .art-card-front { background: var(--art-bright); color: var(--art-dark); border-color: var(--art-line); }
+html:is([data-theme="onyx"], [data-theme="champagne"], [data-theme="vice"]) .nft-art-asterisk { color: var(--art-mid); }
+
+html[data-theme="onyx"] :is(.page-heading h1, .hero-copy h2, .creator-note h3),
+html[data-theme="champagne"] :is(.page-heading h1, .hero-copy h2, .creator-note h3) {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  letter-spacing: -.045em;
+}
+html[data-theme="onyx"] .hero-card { box-shadow: inset 0 1px #D7B56512; }
+html[data-theme="onyx"] { --art-bright: #E8D09A; --art-mid: #B48932; --art-dark: #4B3712; --art-line: #E8D09A40; }
+html[data-theme="onyx"] .art-core { border-radius: 50%; transform: rotate(-10deg); }
+html[data-theme="onyx"] .art-core:after { border-radius: 50%; }
+html[data-theme="onyx"] .art-orbit { border-style: dashed; opacity: .25; }
+html[data-theme="onyx"] .sidebar { border-right-color: #C69B3C26; }
+
+html[data-theme="champagne"] { --art-bright: #FFF8E7; --art-mid: #C8AE77; --art-dark: #7C6540; --art-line: #9C82503B; --art-card: #F8EFDDF2; --art-card-ink: #4B4030; }
+html[data-theme="champagne"] .hero-card { box-shadow: 0 8px 30px #8A79680B, inset 0 1px #FFFCF6; }
+html[data-theme="champagne"] .hero-copy h2 em { font-style: italic; }
+html[data-theme="champagne"] .art-core { border-radius: 45% 45% 22px 22px; transform: rotate(-9deg); }
+html[data-theme="champagne"] .art-core:after { border-radius: 45% 45% 17px 17px; }
+html[data-theme="champagne"] .art-orbit { opacity: .25; }
+html[data-theme="champagne"] :is(.panel, .stat, .settings-panel, .form-section) { box-shadow: 0 3px 16px #8A796805; }
+html[data-theme="champagne"] .mode-option.selected .mode-check { color: #FFFCF6; }
+
+html[data-theme="vice"] { --art-bright: #FFE2DD; --art-mid: #FF8CC6; --art-dark: #4E204D; --art-line: #FFB6DB55; --art-card: #261B35ED; --art-card-ink: #FFE5EF; }
+html[data-theme="vice"] :is(.page-heading h1, .hero-copy h2) { font-weight: 800; letter-spacing: -.055em; }
+html[data-theme="vice"] .hero-copy h2 em { color: #FFB48F; }
+html[data-theme="vice"] .hero-card { background: linear-gradient(112deg, #261C34 35%, #432447 100%); border-color: #94527466; }
+html[data-theme="vice"] .hero-art {
+  background: radial-gradient(circle at 55% 48%, #FFAB8A 0 26%, transparent 26.4%), linear-gradient(180deg, #713F8140, #D96F8A40 65%, #3E254926);
+}
+html[data-theme="vice"] .hero-art:before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: .72;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 480 360'%3E%3Cg fill='%23271C37'%3E%3Cpath d='M377 360c-6-62-8-105 1-173l7-1c-5 67-3 114 8 174z'/%3E%3Cpath d='M381 192c-37-45-69-36-89-23 37-5 59 3 89 23M381 190c-39-17-66 4-72 30 24-24 45-27 72-30M381 191c-8-45-36-62-67-56 29 10 47 29 67 56M382 191c4-53 31-74 59-70-27 16-44 36-59 70M382 191c34-38 68-30 83-11-36-8-56-2-83 11M382 191c40-6 56 19 54 43-14-26-29-37-54-43'/%3E%3C/g%3E%3C/svg%3E") center/cover no-repeat;
+}
+html[data-theme="vice"] .art-grid {
+  background-image: repeating-linear-gradient(0deg, transparent 0 14px, #291C362E 14px 17px);
+  opacity: .9;
+  mask-image: linear-gradient(transparent 20%, #000 70%);
+}
+html[data-theme="vice"] .art-core { transform: rotate(-12deg); box-shadow: inset -7px -6px 16px #9B418333, 0 20px 48px #130B2455; }
+html[data-theme="vice"] .status-dot { background: #77E3D4; }
+html[data-theme="vice"] .art-orbit { border-color: #FFD5D9; opacity: .3; }
+html[data-theme="vice"] .brand-period { color: #77E3D4; }
+html[data-theme="vice"] .creator-note { border-color: #FF8CC629; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] :is(.sidebar, .topbar, .network-banner, .panel, .stat, .form-section, .settings-panel, .modal, .hero-card) { transition: none; }
+}

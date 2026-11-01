@@ -1,0 +1,26 @@
+{
+  "name": "@oneshot/api",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "dev": "node ../../scripts/dev-api.mjs",
+    "build": "next build --webpack",
+    "start": "next start --hostname 0.0.0.0 --port 3001",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aptos-labs/ts-sdk": "7.5.0",
+    "@aws-sdk/client-s3": "3.1154.0",
+    "@b20/sdk": "*",
+    "@oneshot/evm": "*",
+    "@privy-io/node": "0.36.0",
+    "jose": "6.2.13",
+    "next": "16.4.2",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "sharp": "0.35.5",
+    "zod": "3.25.76"
+  }
+}

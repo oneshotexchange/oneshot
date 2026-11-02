@@ -63,9 +63,7 @@ async function request(path, status, init = {}) {
 }
 await request('/api/health', 200);
 const ready = await (await request('/api/ready', 200)).json();
-assert.equal(ready.ready, true);
-assert.equal(ready.checks.databaseAvailable, true);
-assert.equal(ready.storageAvailabilityVerified, false);
+assert.deepEqual(ready, { service: 'oneshot-api', ready: true });
 await request('/api/does-not-exist', 404);
 await request('/api/health', 405, { method: 'POST' });
 await request('/api/oneshot/session', 401);

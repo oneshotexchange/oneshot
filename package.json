@@ -14,6 +14,7 @@
     "uuid": "11.1.1",
     "protobufjs": "7.6.6",
     "ws@^8.0.0": "8.21.0",
+    "abitype@1.2.3": { "zod": "4.6.7" },
     "decode-uri-component": "$decode-uri-component"
   },
   "scripts": {

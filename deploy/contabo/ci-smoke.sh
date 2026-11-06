@@ -29,18 +29,21 @@ ENV
 cat > secrets/api.env <<'ENV'
 PRIVY_APP_ID=oneshot_ci_dummy
 PRIVY_APP_SECRET=ci_dummy_not_a_real_secret
+ONESHOT_ADMIN_PASSWORD=oneshot_ci_dummy_admin_password
 S3_BUCKET=oneshot-ci-dummy
 S3_REGION=auto
 S3_ENDPOINT=https://example.r2.cloudflarestorage.com
 S3_ACCESS_KEY_ID=ci_dummy
 S3_SECRET_ACCESS_KEY=ci_dummy
 ENV
+printf 'ONESHOT_ADMIN_PASSWORD=oneshot_ci_dummy_admin_password\n' > secrets/worker.env
 printf '\nBACKUP_MIN_FREE_MIB=64\n' >> secrets/backup.env
 compose config --quiet
-compose --profile operations build api migrate backup
+compose --profile operations build api migrate genesis-worker backup
 compose up -d --wait db
 compose run --rm migrate
 compose up -d --no-deps --wait api
+compose run --rm --no-deps genesis-worker node scripts/genesis-worker.mjs
 # Validate the real proxy config without obtaining a certificate or binding ports.
 compose run --rm --no-deps proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 

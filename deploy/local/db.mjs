@@ -124,7 +124,7 @@ try {
     const environment = { ...process.env, ONESHOT_INDEXER_TEST_DATABASE_URL: testUrl, ONESHOT_API_TEST_DATABASE_URL: testUrl };
     // The integration fixture must never receive an ambient production DB URL.
     delete environment.DATABASE_URL;
-    execute(process.execPath, [resolve(repository, 'node_modules/vitest/vitest.mjs'), 'run', 'apps/indexer/test/postgres.integration.test.ts', 'apps/api/lib/server/postgres.integration.test.ts', 'apps/api/lib/server/genesis-store.integration.test.ts', 'apps/api/lib/server/indexed-nfts.integration.test.ts', 'apps/api/lib/server/nft-launch-store.integration.test.ts', 'apps/api/lib/server/nft-launch-progress-store.integration.test.ts', 'scripts/lib/capacity-indexer-workload.integration.test.ts', 'apps/indexer/test/watch-lease.integration.test.ts'], {
+    execute(process.execPath, [resolve(repository, 'node_modules/vitest/vitest.mjs'), 'run', 'apps/indexer/test/postgres.integration.test.ts', 'apps/api/lib/server/postgres.integration.test.ts', 'apps/api/lib/server/schema.integration.test.ts', 'apps/api/lib/server/genesis-store.integration.test.ts', 'apps/api/lib/server/indexed-nfts.integration.test.ts', 'apps/api/lib/server/nft-launch-store.integration.test.ts', 'apps/api/lib/server/nft-launch-progress-store.integration.test.ts', 'scripts/lib/capacity-indexer-workload.integration.test.ts', 'apps/indexer/test/watch-lease.integration.test.ts'], {
       stdio: 'inherit', env: environment,
     });
   } else {

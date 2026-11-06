@@ -1,3 +1,7 @@
+BEGIN;
+-- Serialize initialization in the same schema, including concurrent first runs.
+SELECT pg_advisory_xact_lock(hashtext('oneshot_app_schema'), hashtext(current_schema()));
+
 CREATE TABLE IF NOT EXISTS b20_app_records (
   namespace TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -52,3 +56,4 @@ CREATE INDEX IF NOT EXISTS oneshot_genesis_pending ON oneshot_genesis_jobs(next_
   WHERE value->>'state'<>'done';
 CREATE TABLE IF NOT EXISTS oneshot_genesis_budget (day DATE PRIMARY KEY, reads INTEGER NOT NULL CHECK (reads>=0));
 CREATE TABLE IF NOT EXISTS oneshot_genesis_audit (id UUID PRIMARY KEY, value JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+COMMIT;

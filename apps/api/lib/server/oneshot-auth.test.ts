@@ -31,6 +31,13 @@ function fixture() {
 }
 
 describe('oneshot server Privy authentication', () => {
+  it('projects a verified X identity without requiring a wallet and drops unsafe avatar origins', async () => {
+    const { authenticate, getUser } = fixture();
+    getUser.mockResolvedValue({id:USER_ID,linked_accounts:[{type:'twitter_oauth',subject:'12345',username:'person',name:'A person',profile_picture_url:'https://untrusted.example/avatar',verified_at:NOW-1}]});
+    expect(await authenticate(request())).toMatchObject({linkedAddresses:[],xAccount:{id:'12345',username:'person',avatarUrl:null}});
+    getUser.mockResolvedValue({id:USER_ID,linked_accounts:[{type:'twitter_oauth',subject:'12345',username:'person',verified_at:NOW+100}]});
+    expect((await authenticate(request())).xAccount).toBeUndefined();
+  });
   it('uses only verified claims and freshly retrieved linked Ethereum addresses', async () => {
     const { authenticate, verifyAccessToken, getUser } = fixture();
     getUser.mockResolvedValue({ id: USER_ID, linked_accounts: [

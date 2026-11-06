@@ -106,6 +106,30 @@ services:
       start_period: 30s
     logging: *logging
 
+  genesis-worker:
+    image: oneshot-genesis-worker:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/contabo/Dockerfile
+      target: genesis-worker
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ./secrets/worker.env
+        format: raw
+    environment:
+      ONESHOT_API_URL: http://127.0.0.1:3001
+    network_mode: service:api
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.25
+    logging: *logging
+
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped

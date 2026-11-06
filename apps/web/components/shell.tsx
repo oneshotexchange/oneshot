@@ -2,7 +2,7 @@
 
 import Link from "./navigation";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, ArrowUpRight, ChevronRight, Gem, Layers2, LayoutDashboard, Menu, Plus, Search, Settings2, Wallet, X } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, Gem, Layers2, LayoutDashboard, Menu, Plus, Search, Settings2, Users, Wallet, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
 import { ThemePicker } from "./theme-picker";
@@ -11,6 +11,7 @@ const navigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
   { label: "Token markets", href: "/tokens", icon: Layers2 },
   { label: "NFT collections", href: "/nfts", icon: Gem },
+  { label: "Genesis whitelist", href: "/whitelist", icon: Users },
   { label: "Portfolio", href: "/portfolio", icon: Wallet },
   { label: "Activity", href: "/activity", icon: Activity },
 ];

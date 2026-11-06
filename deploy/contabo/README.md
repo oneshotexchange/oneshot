@@ -6,6 +6,14 @@ calls the API directly. PostgreSQL has no published port. There is no Redis,
 indexer or chain worker: the current Zero implementation does not enable one.
 R2 holds private media and separately encrypted database backups.
 
+Genesis verification retries run in a separate supervised container with a 128 MB
+memory limit. It calls the API through the API container's loopback interface and
+receives only the administrator credential from `secrets/worker.env`. Set the
+same unique `ONESHOT_ADMIN_PASSWORD` in `secrets/api.env`; the credential stays out
+of Git and image builds. The worker does not enable blockchain execution.
+Configure X OAuth and the verification provider in `secrets/api.env` before opening
+the whitelist campaign. With those credentials absent, X sign-in stays unavailable.
+
 The selected server reference is 12 GB RAM / 6 shared vCPUs with 200 GB SSD
 (or 100 GB NVMe instead). The conservative runtime caps also fit an 8 GB host;
 leaving headroom on the selected server is intentional. This is not a

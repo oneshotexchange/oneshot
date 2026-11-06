@@ -4,6 +4,9 @@ import { adminAuthenticator } from './admin-auth';
 import { oneshotStatus } from './active-network';
 import { readiness } from './readiness';
 import { api, boundedBody, json, rateLimit, ApiError } from './http';
+import { genesis } from './genesis-service';
+import { genesisAuth } from './genesis-auth';
+import { genesisCampaignSchema, genesisReviewSchema } from '../../../web/lib/genesis-schema';
 
 const credentials = z.object({ password: z.string().max(1024) }).strict();
 
@@ -19,6 +22,22 @@ export const adminApi = api(async request => {
   }
   adminAuthenticator.requireSession(request);
   rateLimit('oneshot:admin:read', 120);
+  if (path.startsWith('/api/admin/genesis')) {
+    const actor = 'admin:' + (await import('node:crypto')).createHash('sha256').update(request.headers.get('authorization') || '').digest('hex').slice(0,16);
+    if (path === '/api/admin/genesis' && request.method === 'GET') {
+      const offset = z.coerce.number().int().min(0).max(100_000).parse(request.nextUrl.searchParams.get('offset') || 0);
+      return json({ ...await genesis.admin(offset), oauthConfigured: genesisAuth.available(), providerConfigured: Boolean(process.env.GETX_API_KEY), databaseConfigured: Boolean(process.env.DATABASE_URL) });
+    }
+    if (request.method === 'POST') {
+      rateLimit('genesis:admin:write', 30);
+      const body = JSON.parse(new TextDecoder().decode(await boundedBody(request, 16_384)));
+      if (path === '/api/admin/genesis/campaign') { const input = z.object({ expectedRevision: z.number().int().positive(), campaign: genesisCampaignSchema }).strict().parse(body); return json(await genesis.configure(input.campaign, input.expectedRevision, actor)); }
+      if (path === '/api/admin/genesis/run-checks') { z.object({}).strict().parse(body); return json(await genesis.runJobs()); }
+      const match = /^\/api\/admin\/genesis\/applications\/([a-f0-9-]{36})$/.exec(path);
+      if (match) { const id = z.string().uuid().parse(match[1]); await genesis.review(id, genesisReviewSchema.parse(body), actor); return json({ ok: true }); }
+    }
+    throw new ApiError(404, 'NOT_FOUND', 'Genesis administration action not found.');
+  }
   if (path === '/api/admin/session' && request.method === 'GET') return json(adminAuthenticator.requireSession(request));
   if (path === '/api/admin/session' && request.method === 'DELETE') {
     adminAuthenticator.revoke(request);

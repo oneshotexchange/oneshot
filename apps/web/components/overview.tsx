@@ -12,6 +12,7 @@ export function Overview() {
   const [tab, setTab] = useState("tokens");
   const tokens = useApi<unknown>("/api/tokens");
   return <>
+    <Link href="/whitelist" className="genesis-home-link"><span>Meet oneshot Genesis <span>750 places in the first edition</span></span><ArrowUpRight size={16}/></Link>
     <section className="home-studio" aria-labelledby="home-title">
       <div className="home-studio-copy">
         <h1 id="home-title">Tokens for your community<br /><em>Collections for your art</em></h1>

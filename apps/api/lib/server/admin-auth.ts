@@ -60,6 +60,14 @@ export function createAdminAuthenticator(dependencies: { environment?: () => Env
   };
 }
 
-// Share the bounded in-memory store across development module reloads in this process.
-const processState = globalThis as typeof globalThis & { __oneshotAdminAuthenticator?: ReturnType<typeof createAdminAuthenticator> };
+// Reuse sessions only while their error constructor belongs to the current module
+// graph. Otherwise an old closure throws errors the API wrapper cannot recognize.
+const processState = globalThis as typeof globalThis & {
+  __oneshotAdminAuthenticator?: ReturnType<typeof createAdminAuthenticator>;
+  __oneshotAdminErrorType?: typeof ApiError;
+};
+if (processState.__oneshotAdminErrorType !== ApiError) {
+  processState.__oneshotAdminAuthenticator = undefined;
+  processState.__oneshotAdminErrorType = ApiError;
+}
 export const adminAuthenticator = processState.__oneshotAdminAuthenticator ||= createAdminAuthenticator();

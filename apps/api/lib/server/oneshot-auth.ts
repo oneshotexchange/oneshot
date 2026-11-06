@@ -8,6 +8,7 @@ export type OneshotSession = {
   /** Access-token expiry, in Unix seconds. No token or server secret is returned. */
   expiresAt: number;
   linkedAddresses: `0x${string}`[];
+  xAccount?: { id: string; username: string; name: string; avatarUrl: string | null };
 };
 
 type Environment = Record<string, string | undefined>;
@@ -112,7 +113,21 @@ export function createOneshotAuthenticator(dependencies: AuthDependencies = {}) 
       try { addresses.add(normalizeEvmAddress(account.address)); }
       catch { /* Ignore malformed provider wallet records instead of authorizing them. */ }
     }
-    return { provider: 'privy', userId: claims.user_id, sessionId: claims.session_id, expiresAt: claims.expiration, linkedAddresses: [...addresses] };
+    const twitter = profile.linked_accounts.filter((linked: unknown) => {
+      if (!linked || typeof linked !== 'object') return false;
+      const value = linked as Record<string, unknown>;
+      return value.type === 'twitter_oauth' && typeof value.subject === 'string' && /^\d{1,32}$/.test(value.subject)
+        && typeof value.username === 'string' && /^[A-Za-z0-9_]{1,15}$/.test(value.username)
+        && typeof value.verified_at === 'number' && value.verified_at > 0 && value.verified_at <= now() + 60;
+    }) as Record<string, unknown>[];
+    // Ambiguous/malformed social identities never authorize campaign actions.
+    let xAccount: OneshotSession['xAccount'];
+    if (twitter.length === 1) {
+      const account = twitter[0]; let avatarUrl: string | null = null;
+      try { const image = new URL(String(account.profile_picture_url)); if (image.protocol === 'https:' && image.hostname === 'pbs.twimg.com' && !image.username && !image.password && !image.port) avatarUrl = image.toString(); } catch { /* Optional profile image. */ }
+      xAccount = { id: String(account.subject), username: String(account.username), name: typeof account.name === 'string' ? account.name.slice(0,100) : String(account.username), avatarUrl };
+    }
+    return { provider: 'privy', userId: claims.user_id, sessionId: claims.session_id, expiresAt: claims.expiration, linkedAddresses: [...addresses], ...(xAccount ? { xAccount } : {}) };
   };
 }
 

@@ -15,5 +15,6 @@ done
 if [ ! -e .env ]; then cp .env.example .env; fi
 if [ ! -e secrets/api.env ]; then cp api.env.example secrets/api.env; fi
 if [ ! -e secrets/backup.env ]; then cp backup.env.example secrets/backup.env; fi
-chmod 0600 .env secrets/api.env secrets/backup.env
+if [ ! -e secrets/worker.env ]; then cp worker.env.example secrets/worker.env; fi
+chmod 0600 .env secrets/api.env secrets/backup.env secrets/worker.env
 printf '%s\n' 'Created missing files only. Edit .env and secrets/*.env, and save the restic key off this server.'

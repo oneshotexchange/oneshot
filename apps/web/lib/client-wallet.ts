@@ -5,6 +5,8 @@ import { emptyPrivyIdentity, publicPrivyConfig, type PrivyIdentity } from './pri
 import type { EvmWalletTransaction } from './client-nft-launch';
 
 export type WalletState = PrivyIdentity & {
+  xAccount?: { id: string; username: string; name: string; avatarUrl: string | null } | null;
+  connectX(): Promise<void>;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   linkWallet(): Promise<void>;
@@ -22,7 +24,7 @@ function unavailable(configured: boolean, reason?: string): WalletState {
   if (reason) { identity.unavailableReason = reason; identity.isLoading = false; }
   const unavailableAction = async () => { throw new Error(identity.unavailableReason || 'Sign-in is starting. Please try again.'); };
   return {
-    ...identity, connect: unavailableAction, linkWallet: unavailableAction,
+    ...identity, connect: unavailableAction, connectX: unavailableAction, linkWallet: unavailableAction,
     disconnect: async () => {}, selectWallet: () => { throw new Error('Wallet selection is unavailable.'); },
     identityScope: () => null, getAccessToken: async () => null, sendEvmTransaction: unavailableAction,
   };

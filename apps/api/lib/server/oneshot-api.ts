@@ -7,6 +7,7 @@ import { storeImage } from './media';
 import { apiOrigin } from './origins';
 import { indexedNftRead } from './indexed-nfts';
 import { nftLaunch } from './nft-launch';
+import { genesisApi } from './genesis-api';
 
 const revision = z.number().int().positive();
 const change = z.object({ expectedRevision: revision, draft: z.unknown() }).strict();
@@ -16,6 +17,7 @@ export const oneshotApi = api(async request => {
   if (!request.nextUrl.pathname.startsWith(prefix)) throw new ApiError(404, 'NOT_FOUND', 'API resource not found.');
   const segments = request.nextUrl.pathname.slice(prefix.length).replace(/\/$/,'').split('/');
   const [resource, id, operation, extra] = segments;
+  if (resource === 'genesis') return genesisApi(request);
   if (resource === 'launch' && segments.length === 2 && id === 'status' && request.method === 'GET') {
     rateLimit('oneshot:launch:status', 60);
     const status = await nftLaunch.status();

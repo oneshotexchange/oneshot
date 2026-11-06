@@ -8,7 +8,7 @@ import { publicErrorMessage } from './public-error';
 
 export { ApiError } from './errors';
 export const json = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-export async function boundedBody(request: Request, maximum = 1024 * 1024): Promise<Uint8Array> {
+export async function boundedBody(request: Pick<Request, 'body'>, maximum = 1024 * 1024): Promise<Uint8Array> {
   const reader = request.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = []; let total = 0;

@@ -11,6 +11,8 @@ import { TokenTerminal } from '../components/token-terminal';
 import { NftCreate } from '../components/nft-create';
 import { IndexedNftDiscovery, IndexedNftCollection, IndexedNftItemDetail, IndexedActivityPage, IndexedPortfolioPage } from '../components/indexed-nfts';
 import { AdminPage, SettingsPage } from '../components/workspace-pages';
+import { GenesisWhitelist } from '../components/genesis-whitelist';
+import { GenesisAuthProvider } from '../components/genesis-auth';
 import WorkspaceError from '../app/error';
 import NotFound from '../app/not-found';
 import '../app/globals.css';
@@ -34,7 +36,8 @@ function ItemPage() { const { id = '', item = '' } = useParams(); return <Indexe
 function Workspace() {
   const location = useLocation();
   useEffect(() => { window.scrollTo(0, 0); }, [location.pathname, location.search]);
-  return <Providers><Shell><PageBoundary key={location.pathname + location.search}><Routes>
+  const content = <PageBoundary key={location.pathname + location.search}><Routes>
+    <Route path="/whitelist" element={<GenesisWhitelist />} />
     <Route path="/" element={<Overview />} />
     <Route path="/tokens" element={<TokenDiscovery />} />
     <Route path="/tokens/new" element={<TokenLaunch />} />
@@ -47,8 +50,10 @@ function Workspace() {
     <Route path="/portfolio" element={<IndexedPortfolioPage />} />
     <Route path="/settings" element={<SettingsPage />} />
     <Route path="/admin" element={<AdminPage />} />
+    <Route path="/admin/genesis" element={<AdminPage />} />
     <Route path="*" element={<NotFound />} />
-  </Routes></PageBoundary></Shell></Providers>;
+  </Routes></PageBoundary>;
+  return location.pathname === '/whitelist' ? <GenesisAuthProvider>{content}</GenesisAuthProvider> : <Providers><Shell>{content}</Shell></Providers>;
 }
 
 createRoot(document.getElementById('root')!).render(<ThemeProvider><BrowserRouter><Workspace /></BrowserRouter></ThemeProvider>);

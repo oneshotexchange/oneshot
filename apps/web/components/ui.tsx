@@ -4,7 +4,12 @@ import Link from "./navigation";
 import { ArrowRight, ArrowUpRight, Check, ChevronDown, CircleAlert, ExternalLink, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { useGSAP } from '@gsap/react';
+import { gsap } from 'gsap';
 import { shortAddress } from "../lib/client-api";
+import { StudioIllustration, type StudioIllustrationKind } from './studio-illustration';
+
+gsap.registerPlugin(useGSAP);
 
 export function PageHeading({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return <div className="page-heading"><div><h1>{title}</h1>{description && <p>{description}</p>}</div>{action && <div className="heading-actions">{action}</div>}</div>;
@@ -14,7 +19,7 @@ export function Button({ children, variant = "primary", className = "", loading,
 }
 export function ButtonLink({ href, children, variant = "primary", className = "" }: { href: string; children: React.ReactNode; variant?: "primary" | "secondary" | "ghost"; className?: string }) { return <Link href={href} className={`button button-${variant} ${className}`}>{children}</Link>; }
 export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "mint" | "amber" }) { return <span className={`badge badge-${tone}`}>{children}</span>; }
-export function EmptyState({ icon: Icon, title, description, action, compact = false }: { icon?: LucideIcon; title: string; description: string; action?: React.ReactNode; compact?: boolean }) { return <div className={`empty-state ${compact ? "empty-compact" : ""}`}>{Icon && <div className="empty-icon"><Icon size={24} strokeWidth={1.4} /></div>}<h3>{title}</h3><p>{description}</p>{action}</div>; }
+export function EmptyState({ icon: Icon, illustration, title, description, action, compact = false }: { icon?: LucideIcon; illustration?: StudioIllustrationKind; title: string; description: string; action?: React.ReactNode; compact?: boolean }) { return <div className={`empty-state ${compact ? "empty-compact" : ""}`}>{illustration && !compact ? <StudioIllustration kind={illustration} /> : Icon && <div className="empty-icon"><Icon size={24} strokeWidth={1.4} /></div>}<h3>{title}</h3><p>{description}</p>{action}</div>; }
 export function ErrorState({ message, retry }: { message: string; retry?: () => void }) { return <div className="inline-message error-message"><CircleAlert size={18} /><span>{message}</span>{retry && <button onClick={retry}>Try again <ArrowRight size={14} /></button>}</div>; }
 export function Loading({ rows = 3 }: { rows?: number }) { return <div className="skeleton-list" aria-label="Loading">{Array.from({ length: rows }, (_, i) => <div className="skeleton-row" key={i}><div className="skeleton skeleton-avatar" /><div className="skeleton skeleton-line" /><div className="skeleton skeleton-number" /></div>)}</div>; }
 export function Field({ label, hint, children, required }: { label: string; hint?: string; children: React.ReactNode; required?: boolean }) { return <label className="field"><span className="field-label">{label}{required && <span className="required"> *</span>}</span>{children}{hint && <span className="field-hint">{hint}</span>}</label>; }
@@ -25,7 +30,40 @@ export function InfoRow({ label, children, accent }: { label: string; children: 
 export function Address({ value, full = false }: { value?: string; full?: boolean }) { return value ? <span className="address-link" title={value}>{full ? value : shortAddress(value)}</span> : <span className="muted">N/A</span>; }
 export function TransactionLink({ hash }: { hash: string }) { return <span className="text-link" title={hash}>Transaction {shortAddress(hash)}</span>; }
 export function SafetyNote({ children, amber = false }: { children: React.ReactNode; amber?: boolean }) { return <div className={`safety-note ${amber ? "safety-amber" : ""}`}><ShieldCheck size={17} /><div>{children}</div></div>; }
-export function Tabs({ tabs, active, onChange }: { tabs: { value: string; label: string; count?: number }[]; active: string; onChange: (value: string) => void }) { return <div className="tabs" role="tablist">{tabs.map(tab => <button key={tab.value} role="tab" aria-selected={active === tab.value} className={active === tab.value ? "active" : ""} onClick={() => onChange(tab.value)}>{tab.label}{tab.count !== undefined && <span>{tab.count}</span>}</button>)}</div>; }
+export function Tabs({ tabs, active, onChange }: { tabs: { value: string; label: string; count?: number }[]; active: string; onChange: (value: string) => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const indicator = useRef<HTMLSpanElement>(null);
+  useGSAP((_, contextSafe) => {
+    const element = root.current, line = indicator.current;
+    if (!element || !line || !contextSafe) return;
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    let positioned = false, mounted = true;
+    const update = contextSafe(() => {
+      if (!mounted) return;
+      const selected = element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (!selected || !selected.offsetWidth) return;
+      const position = { x: selected.offsetLeft, scaleX: selected.offsetWidth, duration: !positioned || reduced.matches ? 0 : .32, ease: 'power3.out', overwrite: true };
+      gsap.to(line, position);
+      element.dataset.indicator = 'true';
+      positioned = true;
+    });
+    const resize = new ResizeObserver(update);
+    resize.observe(element);
+    element.querySelectorAll('button').forEach(button => resize.observe(button));
+    const mutation = new MutationObserver(update);
+    mutation.observe(element, { attributes: true, attributeFilter: ['aria-selected'], childList: true, characterData: true, subtree: true });
+    reduced.addEventListener('change', update);
+    void document.fonts.ready.then(() => { if (mounted) update(); });
+    update();
+    return () => { mounted = false; resize.disconnect(); mutation.disconnect(); reduced.removeEventListener('change', update); delete element.dataset.indicator; };
+  }, { scope: root });
+  return <div className="tabs" role="tablist" ref={root}>{tabs.map((tab, index) => <button key={tab.value} role="tab" tabIndex={active === tab.value ? 0 : -1} aria-selected={active === tab.value} className={active === tab.value ? "active" : ""} onClick={() => onChange(tab.value)} onKeyDown={event => {
+    const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
+    if (next === null) return;
+    event.preventDefault(); onChange(tabs[next].value);
+    root.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  }}>{tab.label}{tab.count !== undefined && <span>{tab.count}</span>}</button>)}<span ref={indicator} className="tab-indicator" aria-hidden="true" /></div>;
+}
 export function Modal({ title, description, children, onClose, className = "" }: { title: string; description?: string; children: React.ReactNode; onClose: () => void; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { const previous = document.activeElement as HTMLElement | null; const bodyOverflow = document.body.style.overflow; document.body.style.overflow = "hidden"; ref.current?.querySelector<HTMLButtonElement>(".modal-heading button")?.focus(); const handleKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); if (event.key === "Tab") { const nodes = ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), a[href], input:not([disabled]), select, textarea, [tabindex="0"]'); if (!nodes?.length) return; const first = nodes[0]; const last = nodes[nodes.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }; document.addEventListener("keydown", handleKey); return () => { document.body.style.overflow = bodyOverflow; document.removeEventListener("keydown", handleKey); previous?.focus(); }; }, [onClose]);

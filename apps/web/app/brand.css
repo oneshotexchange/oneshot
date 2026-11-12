@@ -1,0 +1,145 @@
+/* oneshot identity: the original edition follows the supplied gold/onyx fold.
+   Saved alternate appearance preferences remain customer-controlled. */
+:root {
+  --brand-gold: #E6B85C;
+  --brand-ivory: #F7F3E8;
+  --brand-onyx: #171612;
+}
+
+html[data-theme="original"] {
+  --bg: #0F100F;
+  --surface: #151612;
+  --surface-raised: #1D1E19;
+  --surface-hover: #25261F;
+  --input-bg: #11120F;
+  --ink: #F7F3E8;
+  --muted: #B3B2A7;
+  --subtle: #96998B;
+  --line: #30322A;
+  --line-strong: #77715D;
+  --accent: #E6B85C;
+  --accent-ink: #201A0E;
+  --accent-soft: #E6B85C0C;
+  --accent-line: #E6B85C38;
+  --mint: var(--accent);
+  --mint-dark: var(--accent);
+  --charcoal: var(--surface-raised);
+  --soft: var(--surface-raised);
+  --amber: #E6B85C;
+  --theme-ink: var(--ink);
+  --theme-muted: var(--muted);
+  --theme-subtle: var(--subtle);
+  --theme-accent: var(--accent);
+  --theme-accent-ink: var(--accent-ink);
+  --theme-accent-soft: var(--accent-soft);
+  --theme-accent-line: var(--accent-line);
+  --theme-surface: var(--surface);
+  --theme-surface-raised: var(--surface-raised);
+  --theme-hover: var(--surface-hover);
+  --theme-input: var(--input-bg);
+  --theme-line: var(--line);
+  --theme-line-strong: var(--line-strong);
+  --theme-sidebar: #12130F;
+  --theme-header: #11120F;
+  --theme-feature-surface: #1B1B13;
+  --theme-overlay: #151612F5;
+  --theme-warning-ink: #E6C88D;
+  --theme-warning-surface: #E6B85C08;
+  --theme-warning-line: #E6B85C25;
+  --theme-backdrop: #000000B3;
+  --theme-shadow: #00000066;
+  --chart-surface: #151612;
+  --chart-text: #B3B2A7;
+  --chart-grid: #30322A;
+  --chart-border: #30322A;
+  --chart-up: #9CC6A0;
+  --chart-down: #D9A192;
+  --chart-crosshair: #E6B85C;
+  --chart-label: #887344;
+}
+
+.oneshot-logo { display: block; width: 156px; height: auto; flex: none; overflow: visible; color: var(--ink); }
+.sidebar-brand .brand { display: block; padding: 0; }
+.sidebar-brand { padding: 0 11px; margin-bottom: 30px; }
+.sidebar-brand .oneshot-logo { width: 162px; }
+.brand:focus-visible { outline-color: var(--brand-gold); border-radius: 3px; }
+html[data-theme="original"] :is(button, a, input, select, textarea):focus-visible { outline-color: var(--brand-gold); }
+.mobile-brand-link { display: none; }
+.footer-brand .oneshot-logo { width: 102px; opacity: .85; }
+
+.home-studio {
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 1fr);
+  gap: clamp(24px, 3vw, 48px);
+  padding: 24px 0 38px;
+}
+.home-studio h1 { font-size: clamp(30px, 2.85vw, 47px); line-height: 1.17; letter-spacing: -1.65px; }
+.home-studio h1 em { display: inline-block; margin-top: 5px; }
+.home-studio-copy > p { max-width: 360px; }
+.brand-artwork {
+  position: relative; margin: 0; width: 100%; max-width: 580px; justify-self: end;
+  background: #100F0C; overflow: hidden; border: 1px solid #514835; border-radius: 4px;
+  animation: brand-enter 850ms cubic-bezier(.2,.8,.2,1) both;
+}
+.brand-artwork > img {
+  display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover;
+  transition: transform 900ms cubic-bezier(.2,.8,.2,1);
+}
+.brand-artwork figcaption {
+  display: flex; justify-content: space-between; gap: 16px; padding: 12px 16px;
+  border-top: 1px solid #514835; color: #C2BAA9; font-size: 10px; letter-spacing: .02em;
+}
+.brand-artwork figcaption > span:first-child { color: var(--brand-gold); }
+@media (hover: hover) { .brand-artwork:hover > img { transform: scale(1.025); } }
+@keyframes brand-enter { from { opacity: 0; clip-path: inset(0 0 100%); } to { opacity: 1; clip-path: inset(0); } }
+
+/* The art remains gold in every edition; the surrounding UI follows preference. */
+.genesis-header .oneshot-logo, .genesis-footer .oneshot-logo { width: 170px; }
+.genesis-page .genesis-print {
+  --g-paper: #E9E2D1; --g-forest: #272417;
+  background: var(--g-paper); color: var(--g-forest); border-color: #9B8B63;
+  box-shadow: 9px 11px 0 #9B8B6322; transform: rotate(2deg);
+}
+.genesis-print .oneshot-logo { width: 108px; color: #171612; }
+.genesis-print-top { border-bottom-color: #9B8B6360; }
+.genesis-print-art { position: relative; }
+.genesis-print-art > img { display: block; width: 100%; height: 100%; object-fit: contain; padding: 14px; }
+.genesis-print-bottom { border-top-color: #9B8B6360; }
+.genesis-print:after { border-color: #9B8B6350; }
+
+.appearance-swatch-original { background: linear-gradient(120deg, #E6B85C 50%, #171612 50%); }
+.theme-scene-original { background: #151612; color: #F7F3E8; }
+.theme-scene-original .scene-message { color: #E6B85C; }
+.theme-scene-wordmark > .oneshot-logo { width: 90px; color: inherit; }
+.theme-scene-original .scene-orbit { display: none; }
+.theme-scene-original .theme-preview-mark { position: absolute; right: 20px; bottom: 30px; width: 62px; height: 62px; }
+
+.wallet-brand { display: flex; justify-content: center; padding: 0 0 22px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+.wallet-brand .oneshot-logo { width: 130px; }
+
+@media (max-width: 1200px) {
+  .home-studio { grid-template-columns: minmax(0, 1.15fr) minmax(230px, .85fr); gap: 24px; }
+  .home-studio h1 { font-size: 33px; }
+}
+@media (max-width: 900px) and (min-width: 621px) {
+  .home-studio { grid-template-columns: 1fr; }
+  .brand-artwork { max-width: none; }
+  .brand-artwork > img { max-height: 320px; object-position: center 52%; }
+}
+@media (max-width: 760px) {
+  .mobile-brand-link { display: inline-flex; }
+  .mobile-brand-link .oneshot-logo { width: 27px; height: 27px; }
+  .breadcrumb-root { display: none; }
+}
+@media (max-width: 620px) {
+  .home-studio { grid-template-columns: 1fr; gap: 27px; padding: 10px 0 25px; }
+  .home-studio h1 { font-size: clamp(27px, 7.4vw, 36px); letter-spacing: -1.1px; }
+  .home-studio-copy > p { font-size: 13px; }
+  .brand-artwork { justify-self: stretch; max-width: none; }
+  .brand-artwork > img { aspect-ratio: 1.7; object-fit: cover; object-position: center 56%; }
+  .brand-artwork figcaption { padding: 11px 13px; font-size: 9px; }
+  .genesis-header .oneshot-logo, .genesis-footer .oneshot-logo { width: 130px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-artwork, .brand-artwork > img { animation: none; transition: none; clip-path: none; transform: none; }
+}
+@media (max-width: 360px) { .breadcrumb > span:last-child { display: none; } }

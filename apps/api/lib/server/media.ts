@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import sharp from 'sharp';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { ApiError } from './errors';
-import { dataRoot, reserveMedia, getRecord } from './store';
+import { dataRoot, beginMediaUpload, commitMediaUpload, cancelMediaUpload, getRecord } from './store';
 
 let client: S3Client | undefined;
 const s3 = () => client ||= new S3Client({ region: process.env.S3_REGION || 'auto', endpoint: process.env.S3_ENDPOINT, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true', credentials: process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY ? { accessKeyId: process.env.S3_ACCESS_KEY_ID, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY } : undefined });
@@ -37,13 +37,22 @@ export async function storeBlob(buffer: Buffer, extension: 'webp' | 'json', owne
   const hash = createHash('sha256').update(buffer).digest('hex');
   const id = `${hash}.${extension}`;
   const mimeType = extension === 'json' ? 'application/json' : 'image/webp';
-  await reserveMedia(id, { hash, size: buffer.length, mimeType, owner, createdAt: new Date().toISOString() });
-  if (process.env.S3_BUCKET) {
-    await writeObject(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: `assets/${id}`, Body: buffer, ContentType: mimeType, CacheControl: 'public,max-age=31536000,immutable' }));
-  } else {
-    if (process.env.NODE_ENV === 'production') throw new ApiError(503, 'STORAGE_REQUIRED', 'Object storage must be configured before accepting hosted uploads.');
-    await mkdir(resolve(dataRoot(), 'media'), { recursive: true });
-    try { await writeFile(resolve(dataRoot(), 'media', id), buffer, { flag: 'wx' }); } catch (e: any) { if (e.code !== 'EEXIST') throw e; }
+  const upload = await beginMediaUpload(id, { hash, size: buffer.length, mimeType, owner, createdAt: new Date().toISOString() });
+  try {
+    if (process.env.S3_BUCKET) {
+      await writeObject(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: `assets/${id}`, Body: buffer, ContentType: mimeType, CacheControl: 'public,max-age=31536000,immutable' }));
+    } else {
+      await mkdir(resolve(dataRoot(), 'media'), { recursive: true });
+      try { await writeFile(resolve(dataRoot(), 'media', id), buffer, { flag: 'wx' }); } catch (e: any) { if (e.code !== 'EEXIST') throw e; }
+    }
+    if (!await commitMediaUpload(upload)) throw new ApiError(503, 'CONTENT_WRITE_UNCONFIRMED', 'Your upload could not be confirmed. Please try again.');
+  } catch (error) {
+    // A failure only cancels this attempt. Existing content and another writer's
+    // confirmation remain intact; a DB outage is recovered by lease expiry.
+    // A provider may have stored bytes before a timeout. Do not delete objects
+    // here: unreferenced objects need separate reconciliation with a grace period.
+    await cancelMediaUpload(upload).catch(() => undefined);
+    throw error;
   }
   return { url: `${origin}/api/media/${id}`, hash, mimeType, size: buffer.length };
 }

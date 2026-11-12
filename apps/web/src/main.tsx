@@ -18,6 +18,10 @@ import NotFound from '../app/not-found';
 import '../app/globals.css';
 import '../app/themes.css';
 import '../app/theme-picker.css';
+import '../app/brand.css';
+import '../app/studio-illustration.css';
+import '../app/motion.css';
+import '../app/launchpad.css';
 
 class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };

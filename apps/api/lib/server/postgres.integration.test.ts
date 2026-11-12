@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { archiveOneshotDraft, createOneshotDraft, getOneshotDraft, listOneshotDrafts, updateOneshotDraft } from './oneshot-drafts';
-import { compareAndSetRecord, database, reserveMedia } from './store';
+import { beginMediaUpload, cancelMediaUpload, commitMediaUpload, compareAndSetRecord, database, MEDIA_UPLOAD_LEASE_MS, reserveMedia } from './store';
 import type { OneshotSession } from './oneshot-auth';
 
 // Explicit opt-in only. An ambient DATABASE_URL must never select this suite's DB.
@@ -24,6 +24,8 @@ async function closeApiPool() {
 
 async function withDatabase(run: (fixture: Fixture) => Promise<void>) {
   if (!testDatabaseUrl) throw new Error('ONESHOT_API_TEST_DATABASE_URL is required.');
+  const selected = new URL(testDatabaseUrl);
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(selected.hostname) || selected.pathname !== '/oneshot_indexer_test') throw new Error('API persistence checks require the dedicated loopback test database.');
   await closeApiPool();
   vi.stubEnv('DATABASE_URL', testDatabaseUrl);
   // Missing database configuration must fail instead of silently using local files.
@@ -67,9 +69,13 @@ async function withDatabase(run: (fixture: Fixture) => Promise<void>) {
           "DELETE FROM b20_app_records WHERE namespace='media' AND id=ANY($1::text[]) AND value->>'owner'=ANY($2::text[])",
           [[...mediaIds], [...owners]],
         );
+        if (mediaIds.size) await inspect.query(
+          "DELETE FROM b20_app_records WHERE namespace='media_uploads' AND value->>'mediaId'=ANY($1::text[]) AND value->'asset'->>'owner'=ANY($2::text[])",
+          [[...mediaIds], [...owners]],
+        );
       }
     } finally {
-      try { await inspect.end(); } finally { vi.unstubAllEnvs(); }
+      try { await inspect.end(); } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
     }
   }
 }
@@ -177,6 +183,58 @@ describe.skipIf(!testDatabaseUrl)('real PostgreSQL API persistence', () => {
       expect(records.rows).toHaveLength(2);
       expect(records.rows.reduce((sum, row) => sum + Number(row.size), 0)).toBe(10);
       expect(records.rows.some(row => row.id === overflow)).toBe(false);
+    });
+  });
+
+  it('keeps duplicate upload leases durable and lets a failed writer release only its own claim', async () => {
+    await withDatabase(async ({ inspect, session, mediaId, reopen }) => {
+      const owner = session(), shared = mediaId(), different = mediaId();
+      const baseline = BigInt((await inspect.query("SELECT COALESCE(SUM((value->>'size')::bigint),0)::text AS total FROM b20_app_records WHERE namespace='media'")).rows[0].total);
+      vi.stubEnv('ONESHOT_MEDIA_QUOTA_BYTES', String(baseline + 6n));
+      const value = { size: 6, owner: owner.userId, mimeType: 'image/webp' };
+      const [failed, successful] = await Promise.all([beginMediaUpload(shared, value), beginMediaUpload(shared, value)]);
+      expect(failed.reservationId).not.toBe(successful.reservationId);
+      expect((await inspect.query("SELECT id FROM b20_app_records WHERE namespace='media' AND id=$1", [shared])).rowCount).toBe(0);
+      await expect(beginMediaUpload(different, value)).rejects.toMatchObject({ code: 'MEDIA_QUOTA_REACHED' });
+      await reopen();
+      await cancelMediaUpload(failed);
+      await expect(beginMediaUpload(different, value)).rejects.toMatchObject({ code: 'MEDIA_QUOTA_REACHED' });
+      expect(await commitMediaUpload(successful)).toBe(true);
+      await reopen();
+      const stored = (await inspect.query("SELECT value FROM b20_app_records WHERE namespace='media' AND id=$1", [shared])).rows[0].value;
+      expect(stored).toEqual(value);
+      const rewrite = await beginMediaUpload(shared, value);
+      await cancelMediaUpload(rewrite);
+      await cancelMediaUpload(failed);
+      expect(await commitMediaUpload(failed)).toBe(false);
+      expect((await inspect.query("SELECT value FROM b20_app_records WHERE namespace='media' AND id=$1", [shared])).rows[0].value).toEqual(stored);
+      expect((await inspect.query("SELECT id FROM b20_app_records WHERE namespace='media_uploads' AND value->>'mediaId'=$1", [shared])).rowCount).toBe(0);
+    });
+  });
+
+  it('serializes different-content quota races and recovers an expired interrupted upload after restart', async () => {
+    await withDatabase(async ({ inspect, session, mediaId, reopen }) => {
+      const owner = session(), candidates = [mediaId(), mediaId()];
+      const baseline = BigInt((await inspect.query("SELECT COALESCE(SUM((value->>'size')::bigint),0)::text AS total FROM b20_app_records WHERE namespace='media'")).rows[0].total);
+      vi.stubEnv('ONESHOT_MEDIA_QUOTA_BYTES', String(baseline + 6n));
+      let now = Date.now();
+      vi.spyOn(Date, 'now').mockImplementation(() => now);
+      const value = { size: 6, owner: owner.userId };
+      const races = await Promise.allSettled(candidates.map(id => beginMediaUpload(id, value)));
+      const winners = races.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof beginMediaUpload>>> => result.status === 'fulfilled');
+      expect(winners).toHaveLength(1);
+      expect((races.find(result => result.status === 'rejected') as PromiseRejectedResult).reason).toMatchObject({ code: 'MEDIA_QUOTA_REACHED' });
+      const interrupted = winners[0].value;
+      const replacementId = candidates.find(id => id !== interrupted.mediaId)!;
+      await reopen();
+      now += MEDIA_UPLOAD_LEASE_MS + 1;
+      const replacement = await beginMediaUpload(replacementId, value);
+      expect(await commitMediaUpload(interrupted)).toBe(false);
+      await cancelMediaUpload(interrupted);
+      expect(await commitMediaUpload(replacement)).toBe(true);
+      const rows = await inspect.query("SELECT id,value FROM b20_app_records WHERE namespace='media' AND id=ANY($1::text[])", [candidates]);
+      expect(rows.rows).toEqual([{ id: replacementId, value }]);
+      expect((await inspect.query("SELECT id FROM b20_app_records WHERE namespace='media_uploads' AND value->>'mediaId'=ANY($1::text[])", [candidates])).rowCount).toBe(0);
     });
   });
 });

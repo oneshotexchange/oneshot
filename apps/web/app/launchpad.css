@@ -1,0 +1,58 @@
+.launch-hero {
+  display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  align-items: center; gap: 30px; margin: -2px 0 30px;
+  min-height: 430px; padding: 16px 0 28px; border-bottom: 1px solid var(--line);
+}
+.launch-hero-copy { min-width: 0; padding: 18px 0 14px; position: relative; z-index: 1; }
+.launch-hero-intro { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 11px; margin-bottom: 25px; }
+.launch-hero-rule { width: 23px; height: 1px; background: var(--accent); }
+.launch-hero h1 { font-size: clamp(36px, 3.9vw, 62px); line-height: 1.04; font-weight: 550; letter-spacing: -.055em; }
+.launch-hero-line { display: block; overflow: hidden; padding: 2px 0 5px; margin-bottom: -2px; }
+.launch-hero-line > span { display: block; }
+.launch-hero h1 em { font: inherit; color: var(--accent); font-size: .67em; letter-spacing: -.04em; margin-top: 10px; line-height: 1.2; }
+.launch-hero-description { color: var(--muted); font-size: 13px; line-height: 1.9; max-width: 355px; margin-top: 23px; }
+.launch-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.launch-hero-actions .button { min-height: 44px; padding: 12px 16px; font-size: 12px; }
+.launch-hero-note { color: var(--muted); display: flex; align-items: center; gap: 8px; font-size: 10px; line-height: 1.6; margin-top: 18px; }
+.launch-hero-note svg { color: var(--accent); }
+.hero-studio { margin: 0; min-width: 0; position: relative; align-self: stretch; display: flex; flex-direction: column; justify-content: center; }
+.hero-studio-surface { width: 100%; aspect-ratio: 3 / 2; position: relative; overflow: hidden; border-radius: 4px; background: #100F0C; border: 1px solid #42392B; }
+.hero-studio-poster { display: block; width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; object-position: center; }
+.hero-studio figcaption { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; padding: 10px 1px 0; font-size: 9px; color: var(--muted); }
+.hero-studio figcaption button { padding: 3px 0 3px 10px; background: none; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; font-size: 9px; }
+.hero-studio figcaption button:hover { color: var(--accent); }
+.genesis-home-link { margin-top: 0; margin-bottom: 31px; }
+.genesis-home-link > .genesis-home-mark { width: 27px; height: 27px; flex: none; }
+.genesis-home-link > span:not(.genesis-home-mark) { flex: 1; }
+.empty-state > .studio-illustration { width: 154px; margin: 0 auto 12px; }
+.meta-preview > .studio-illustration { width: 210px; }
+.page-heading { padding-bottom: 23px; border-bottom: 1px solid var(--line); }
+.page-heading h1 { font-size: 32px; font-weight: 600; letter-spacing: -1.1px; }
+.page-heading p { font-size: 12px; line-height: 1.8; max-width: 610px; margin-top: 8px; }
+.section-header h2 { font-size: 18px; letter-spacing: -.5px; }
+.form-section { border-radius: 8px; }
+.form-section-title h2 { font-size: 16px; letter-spacing: -.35px; }
+.field-label { font-size: 12px; }
+.field-hint { font-size: 11px; line-height: 1.75; }
+.empty-state h3 { font-size: 16px; letter-spacing: -.35px; }
+.empty-state p { font-size: 12px; line-height: 1.8; }
+.settings-panel > h2 { font-size: 18px; letter-spacing: -.4px; }
+.settings-panel > p { font-size: 12px; line-height: 1.8; }
+.form-aside > .panel { border-top: 2px solid var(--accent-line); }
+.mode-option.selected { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.tabs { position: relative; isolation: isolate; }
+.tabs .tab-indicator { position: absolute; pointer-events: none; width: 1px; height: 2px; left: 0; bottom: -1px; border-radius: 2px; background: var(--accent); transform-origin: 0 50%; }
+.tabs[data-indicator="true"] button.active:after { display: none; }
+html[data-theme="champagne"] .launch-hero h1 { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; letter-spacing: -.045em; }
+html[data-theme="champagne"] .launch-hero h1 em { font-style: italic; }
+.genesis-print { transition: transform .75s cubic-bezier(.22,.8,.22,1), box-shadow .75s ease; }
+.genesis-print-wrap { width: 100%; max-width: 460px; justify-self: end; }
+.genesis-print-wrap .genesis-print { width: 100%; max-width: none; }
+@media (hover: hover) and (pointer: fine) { .genesis-print:hover { transform: rotate(0deg) translateY(-3px); box-shadow: 12px 18px 0 #9B8B631A; } }
+@media (min-width: 1650px) { .launch-hero { gap: 48px; } }
+@media (max-width: 1200px) { .launch-hero { grid-template-columns: minmax(0,.94fr) minmax(0,1.06fr); gap: 22px; } .launch-hero h1 { font-size: 45px; } .launch-hero-actions .button { padding: 11px 12px; font-size: 11px; } }
+@media (max-width: 1000px) and (min-width: 761px) { .launch-hero { grid-template-columns: 1fr; gap: 15px; } .launch-hero-copy { padding-top: 5px; } }
+@media (max-width: 760px) { .launch-hero { grid-template-columns: minmax(0,1fr); padding: 5px 0 25px; gap: 27px; margin-bottom: 23px; } .launch-hero h1 { font-size: clamp(38px,10.4vw,58px); } .launch-hero-copy { padding: 0; } .launch-hero-intro { margin-bottom: 21px; font-size: 10px; } .launch-hero-description { margin-top: 20px; font-size: 13px; max-width: 365px; } .launch-hero-actions { margin-top: 22px; } .launch-hero-actions .button { min-height: 43px; padding: 11px 14px; font-size: 11px; } .launch-hero-note { margin-top: 14px; } .genesis-home-link { margin-bottom: 24px; } }
+@media (max-width: 620px) { .page-heading { padding-bottom: 20px; } .page-heading h1 { font-size: 27px; } .page-heading p { font-size: 11px; max-width: 330px; } .field-label { font-size: 11px; } .field-hint { font-size: 10px; } .empty-state > .studio-illustration { width: 132px; } .empty-state h3 { font-size: 15px; } .empty-state p { font-size: 11px; } .empty-compact h3 { font-size: 13px; } }
+@media (max-width: 700px) { .genesis-print-wrap { width: 85%; max-width: 330px; justify-self: center; } }
+@media (prefers-reduced-motion: reduce) { .hero-studio-poster, .genesis-print { transition: none !important; } .hero-studio-poster { transform: none !important; } .genesis-print:hover { transform: rotate(2deg); } }

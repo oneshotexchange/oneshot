@@ -31,8 +31,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = currentTheme.appearance;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', currentTheme.browserColor);
-    const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="${currentTheme.browserColor}"/><g fill="${currentTheme.accent}" transform="rotate(-18 32 32)"><rect x="13" y="16" width="38" height="8" rx="2"/><rect x="22" y="28" width="29" height="8" rx="2"/><rect x="31" y="40" width="20" height="8" rx="2"/></g></svg>`;
-    document.querySelector('link[rel="icon"]')?.setAttribute('href', theme === 'original' ? '/icon.svg' : `data:image/svg+xml,${encodeURIComponent(icon)}`);
+    document.querySelector('link[rel="icon"]')?.setAttribute('href', '/icon.svg');
   }, [theme, currentTheme]);
 
   useEffect(() => {

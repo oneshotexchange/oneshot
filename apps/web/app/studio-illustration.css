@@ -1,0 +1,75 @@
+.studio-illustration {
+  display: block;
+  width: 200px;
+  max-width: 100%;
+  height: auto;
+  flex: none;
+  overflow: visible;
+  color: var(--muted);
+  --studio-line: var(--line-strong, var(--line));
+  --studio-paper: color-mix(in srgb, var(--surface-raised) 88%, var(--ink));
+}
+
+.studio-illustration .studio-outline {
+  stroke: var(--studio-line);
+  stroke-width: .85;
+  stroke-linejoin: round;
+}
+.studio-illustration .studio-panel { fill: var(--surface-raised); }
+.studio-illustration .studio-depth { fill: var(--surface); }
+.studio-illustration .studio-paper { fill: var(--studio-paper); }
+.studio-illustration .studio-accent { fill: var(--accent); }
+.studio-illustration .studio-quiet { fill: var(--ink); opacity: .16; }
+.studio-illustration .studio-ground,
+.studio-illustration .studio-fine {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: .75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .45;
+}
+.studio-illustration .studio-ground { opacity: .2; }
+.studio-illustration .studio-edge,
+.studio-illustration .studio-engraving {
+  fill: none;
+  stroke: var(--surface);
+  stroke-width: .9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .55;
+}
+.studio-illustration .studio-edge { opacity: .3; }
+.studio-illustration .studio-connector {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: .5;
+}
+.studio-illustration .studio-record {
+  stroke: var(--muted);
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  opacity: .65;
+}
+.studio-illustration .studio-plane-primary,
+.studio-illustration .studio-plane-secondary {
+  transform-box: fill-box;
+  transform-origin: 50% 75%;
+  transition: transform 550ms cubic-bezier(.2,.75,.2,1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .studio-illustration:hover .studio-plane-primary { transform: translateY(-3px) rotate(-1.5deg); }
+  .studio-illustration:hover .studio-plane-secondary { transform: translate(1px,1px); }
+  .studio-illustration-portfolio:hover .studio-plane-primary { transform: translate(1px,-3px); }
+  .studio-illustration-activity:hover .studio-plane-primary { transform: translateY(-2px) rotate(1deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-illustration *,
+  .studio-illustration:hover * {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

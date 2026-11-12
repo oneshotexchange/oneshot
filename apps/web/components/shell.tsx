@@ -6,6 +6,8 @@ import { Activity, ArrowUpRight, ChevronRight, Gem, Layers2, LayoutDashboard, Me
 import { useEffect, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
 import { ThemePicker } from "./theme-picker";
+import { OneshotLogo } from "./brand";
+import { usePageMotion } from "./motion";
 
 const navigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
@@ -21,6 +23,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  usePageMotion(mainRef, pathname);
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement)?.tagName) && searchRef.current?.offsetParent) {
@@ -35,7 +39,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <a href="#main-content" className="skip-link">Skip to content</a>
     {mobileOpen && <div className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}
     <aside id="main-navigation" className={'sidebar ' + (mobileOpen ? 'sidebar-open' : '')}>
-      <div className="sidebar-brand"><Link href="/" className="brand" aria-label="oneshot home"><span className="brand-symbol"><i /><i /><i /></span><span>oneshot</span></Link><button className="icon-button mobile-close" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={20} /></button></div>
+      <div className="sidebar-brand"><Link href="/" className="brand" aria-label="oneshot home"><OneshotLogo /></Link><button className="icon-button mobile-close" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={20} /></button></div>
       <nav className="main-nav" aria-label="Main navigation">{navigation.map(item => {
         const active = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(item.href + "/") && !pathname.endsWith("/new");
         return <Link key={item.href} href={item.href} className={active ? "active" : ""} onClick={() => setMobileOpen(false)}><item.icon size={18} strokeWidth={1.7} /><span>{item.label}</span></Link>;
@@ -48,13 +52,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
     </aside>
     <div className="workspace">
       <header className="topbar">
-        <div className="breadcrumb"><button className="icon-button mobile-menu" aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="main-navigation" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><span className="breadcrumb-root">oneshot</span><ChevronRight size={12} /><span>{section}</span></div>
+        <div className="breadcrumb"><button className="icon-button mobile-menu" aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="main-navigation" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><Link href="/" className="mobile-brand-link" aria-label="oneshot home"><OneshotLogo compact /></Link><span className="breadcrumb-root">oneshot</span><ChevronRight size={12} /><span>{section}</span></div>
         <form className="global-search" onSubmit={event => { event.preventDefault(); if (search.trim()) navigate('/tokens?q=' + encodeURIComponent(search.trim())); }}><Search size={15} /><input ref={searchRef} aria-keyshortcuts="/" aria-label="Search tokens or addresses" placeholder="Search tokens or addresses" value={search} onChange={event => setSearch(event.target.value)} /><kbd>/</kbd></form>
         <div className="topbar-actions"><ThemePicker /><WalletButton /></div>
       </header>
       <div className="network-banner"><span>Zero launches and trading are currently unavailable.</span></div>
-      <main id="main-content" className="main-content" key={pathname}>{children}</main>
-      <footer className="workspace-footer"><span className="brand-tiny">oneshot</span><div><a href="https://layerzero.network/zero" target="_blank" rel="noreferrer">About Zero <ArrowUpRight size={12} /></a><Link href="/settings">Settings</Link></div></footer>
+      <main id="main-content" className="main-content" key={pathname} ref={mainRef}>{children}</main>
+      <footer className="workspace-footer"><Link href="/" className="footer-brand" aria-label="oneshot home"><OneshotLogo /></Link><div><a href="https://layerzero.network/zero" target="_blank" rel="noreferrer">About Zero <ArrowUpRight size={12} /></a><Link href="/settings">Settings</Link></div></footer>
     </div>
   </div>;
 }

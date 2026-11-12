@@ -3,9 +3,9 @@ export const THEME_STORAGE_KEY = 'oneshot.appearance';
 export const themes = [
   {
     id: 'original', name: 'Original', edition: 'THE HOUSE ORIGINAL',
-    description: 'Charcoal and mint green.',
-    colors: ['#0B0D10', '#57E6C1', '#DCE7D2', '#779A83'],
-    appearance: 'dark', accent: '#57E6C1', browserColor: '#0E1115',
+    description: 'oneshot gold, onyx and ivory.',
+    colors: ['#0F100F', '#E6B85C', '#F7F3E8', '#171612'],
+    appearance: 'dark', accent: '#E6B85C', browserColor: '#0F100F',
   },
   {
     id: 'onyx', name: 'Onyx & 24-Karat', edition: 'AFTER HOURS, REFINED',

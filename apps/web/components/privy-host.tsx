@@ -6,11 +6,12 @@ import type { WalletState } from '../lib/client-wallet';
 import { sendReviewedEvmTransaction, type EvmWalletTransaction } from '../lib/client-nft-launch';
 import { emptyPrivyIdentity, evmAddress, privyIdentityScope, projectPrivyIdentity, scopedPrivyAccessToken, type PrivyUserIdentity, type PrivyWalletCandidate } from '../lib/privy-wallet-state';
 import { useTheme } from './theme-provider';
+import { OneshotLogo } from './brand';
 
 // Ethereum identities are usable before chain integration; no invented Zero chain
 // or alternative-chain transaction configuration is installed here.
 const privyConfig: PrivyClientConfig = {
-  appearance: { theme: 'dark', accentColor: '#57E6C1', walletChainType: 'ethereum-only', showWalletLoginFirst: true },
+  appearance: { theme: 'dark', accentColor: '#E6B85C', logo: <OneshotLogo />, walletChainType: 'ethereum-only', showWalletLoginFirst: true },
   loginMethods: ['wallet', 'email', 'twitter'],
   embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
 };

@@ -1,0 +1,75 @@
+/* Static content is visible before JavaScript. Only opted-in headings and art
+   enter; statuses, transaction details and the entire page never fade away. */
+.main-content { animation: none; }
+
+.button {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.button:not(:disabled):active { transform: translateY(1px); }
+.button:disabled { transform: none; }
+:is(.button, .text-link, .back-link, .external-row, .genesis-text-link) :is(.lucide-arrow-up-right, .lucide-arrow-right, .lucide-arrow-down) {
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+}
+.tabs button { transition: color 180ms ease, background-color 180ms ease; }
+.watch-button { transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.watch-button:active { transform: scale(.94); }
+
+:is(.collection-card, .item-card) {
+  transition: transform 240ms cubic-bezier(.2,.8,.2,1), border-color 200ms ease, box-shadow 240ms ease;
+}
+:is(.collection-image, .item-card-image, .indexed-artwork) { overflow: hidden; }
+:is(.collection-image, .item-card-image) > img {
+  transition: transform 650ms cubic-bezier(.2,.8,.2,1);
+}
+.data-table tbody tr { transition: background-color 150ms ease; }
+
+.form-section { transition: border-color 200ms ease; }
+.form-section:focus-within { border-color: var(--accent-line, var(--line)); }
+.field-label { transition: color 180ms ease; }
+.field:focus-within > .field-label { color: var(--accent-text, var(--accent, var(--ink))); }
+.mode-option {
+  transition: border-color 200ms ease, background-color 200ms ease;
+}
+.mode-check { transition: background-color 180ms ease, border-color 180ms ease; }
+.steps > div, .steps > div > span {
+  transition: border-color 220ms ease, background-color 220ms ease, color 220ms ease;
+}
+.nft-creator-steps li, .nft-creator-steps li > span {
+  transition: border-color 220ms ease, background-color 220ms ease, color 220ms ease;
+}
+
+/* Elevate the container without moving or fading dialog/notification content. */
+.modal { animation: motion-dialog-in 180ms cubic-bezier(.2,.8,.2,1) both; }
+.toast { animation: motion-toast-in 180ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes motion-dialog-in {
+  from { box-shadow: 0 8px 28px var(--theme-shadow, var(--shadow)); }
+  to { box-shadow: 0 20px 90px var(--theme-shadow, var(--shadow)); }
+}
+@keyframes motion-toast-in {
+  from { box-shadow: 0 2px 8px var(--theme-shadow, var(--shadow)); }
+  to { box-shadow: 0 7px 25px var(--theme-shadow, var(--shadow)); }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .button:not(:disabled):hover { transform: translateY(-1px); }
+  .button:not(:disabled):active { transform: translateY(1px); }
+  :is(.button:not(:disabled), .text-link, .back-link, .external-row, .genesis-text-link):hover .lucide-arrow-up-right { transform: translate(2px,-2px); }
+  :is(.button:not(:disabled), .text-link, .back-link, .external-row, .genesis-text-link):hover .lucide-arrow-right { transform: translateX(3px); }
+  :is(.button:not(:disabled), .text-link, .genesis-text-link):hover .lucide-arrow-down { transform: translateY(2px); }
+  :is(.collection-card, .item-card):hover { transform: translateY(-3px); }
+  :is(.collection-card, .item-card):hover :is(.collection-image, .item-card-image) > img { transform: scale(1.035); }
+  .watch-button:not(:disabled):hover { transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.button, .text-link, .back-link, .external-row, .genesis-text-link, .tabs button, .watch-button, .collection-card, .item-card, .form-section, .field-label, .mode-option, .mode-check, .steps > div, .steps > div > span, .nft-creator-steps li, .nft-creator-steps li > span),
+  :is(.button, .text-link, .back-link, .external-row, .genesis-text-link) svg,
+  :is(.collection-image, .item-card-image) > img { transition: none !important; }
+  .button:not(:disabled), .watch-button, .collection-card, .item-card,
+  :is(.button, .text-link, .back-link, .external-row, .genesis-text-link) svg,
+  :is(.collection-image, .item-card-image) > img { transform: none !important; }
+  .modal, .toast, .skeleton { animation: none !important; }
+  .skeleton { background-position: 50% 0; }
+  /* Keep the loading glyph and adjacent action text, without rotation. */
+  .spin { animation: none !important; }
+}

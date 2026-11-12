@@ -58,6 +58,10 @@ Zero network configuration and contract deployment remain unverified. Live minti
 
 Browser drafts remain local to the device. Account drafts require authentication and durable database storage; uploaded media requires configured object storage.
 
+Token creators can keep up to 20 named browser drafts alongside an autosaved working copy. Existing single-draft storage is recovered without changing its original bytes. Both creation pages support versioned JSON backups that restore editable terms as a new draft. Backups do not include image bytes, account credentials, prepared metadata snapshots or transaction authority. Collection imports require the original images again before uploading. Unreadable storage and stale-tab writes are blocked; saving a new draft at capacity does not evict existing work.
+
+Media uploads reserve quota through per-attempt 60-second leases and publish their metadata only after storage succeeds. Failed attempts release their own reservation; interrupted leases expire. Existing published content is retained. Physical orphan objects from ambiguous provider timeouts and legacy failed-upload records require separate conservative reconciliation.
+
 ## Genesis whitelist
 
 `/whitelist` uses official X OAuth with PKCE for applications, public-post/follow verification, referrals,

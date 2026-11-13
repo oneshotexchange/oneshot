@@ -7,7 +7,8 @@ import { Button, ErrorState } from './ui';
 import { useGenesisAuth } from './genesis-auth';
 import { apiUrl } from '../lib/api-url';
 import { clearGenesisReferral, genesisAccountRequest, loadGenesisCampaign, readGenesisReferral } from '../lib/client-genesis-api';
-import { GENESIS_CONSENT_VERSION, genesisAllVerified, genesisDisplayStatus, type GenesisMe, type GenesisPublicCampaign, type GenesisTask } from '../lib/genesis-schema';
+import { createGenesisEnrollment } from '../lib/genesis-enrollment';
+import { genesisAllVerified, genesisDisplayStatus, type GenesisMe, type GenesisPublicCampaign, type GenesisTask } from '../lib/genesis-schema';
 import '../app/genesis.css';
 import { OneshotLogo } from './brand';
 import { MotionReveal } from './motion';
@@ -32,16 +33,23 @@ export function GenesisWhitelist() {
   const [campaignError, setCampaignError] = useState<string | null>(null); const [campaignLoading, setCampaignLoading] = useState(true);
   const [account, setAccount] = useState<{ scope: string; data: GenesisMe } | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null); const [accountLoading, setAccountLoading] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null); const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [enrollmentError, setEnrollmentError] = useState<{ scope: string; message: string } | null>(null);
   const [postUrl, setPostUrl] = useState(''); const [sharePostUrl, setSharePostUrl] = useState('');
   const [referral, setReferral] = useState(() => readGenesisReferral(window.location.search, sessionStorageIfAvailable()));
   const [notice, setNotice] = useState('');
   const [nominee, setNominee] = useState(''); const [nominationConfirmed,setNominationConfirmed] = useState(false);
   const me = account?.scope === identity ? account.data : null; const app = me?.application || null;
-  const requests = useRef(0);
+  const requests = useRef(0); const campaignRequests = useRef(0); const mounted = useRef(true);
+  const enrollment = useRef(createGenesisEnrollment()); const enrollmentRetrying = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; requests.current++; campaignRequests.current++; }; }, []);
   const loadCampaign = useCallback(async () => {
+    const request = ++campaignRequests.current;
     setCampaignLoading(true); setCampaignError(null);
-    try { setCampaign(await loadGenesisCampaign()); } catch (error) { setCampaignError((error as Error).message); } finally { setCampaignLoading(false); }
+    try { const data = await loadGenesisCampaign(); if (mounted.current && campaignRequests.current === request) { setCampaign(data); return data; } }
+    catch (error) { if (mounted.current && campaignRequests.current === request) setCampaignError((error as Error).message); }
+    finally { if (mounted.current && campaignRequests.current === request) setCampaignLoading(false); }
+    return null;
   }, []);
   useEffect(() => { void loadCampaign(); }, [loadCampaign]);
   const refreshAccount = useCallback(async (signal?: AbortSignal) => {
@@ -49,11 +57,44 @@ export function GenesisWhitelist() {
     const request = ++requests.current; setAccountLoading(true); setAccountError(null);
     try {
       const data = await genesisAccountRequest('me', { getToken: () => walletRef.current.getAccessToken(), sessionId: walletRef.current.sessionId, scope: () => currentScope.current, signal });
-      if (currentScope.current === scope && requests.current === request) setAccount({ scope, data });
-    } catch (error) { if (!signal?.aborted && currentScope.current === scope && requests.current === request) setAccountError((error as Error).message); }
-    finally { if (currentScope.current === scope && requests.current === request) setAccountLoading(false); }
+      if (mounted.current && currentScope.current === scope && requests.current === request) { setAccount({ scope, data }); return data; }
+    } catch (error) { if (mounted.current && !signal?.aborted && currentScope.current === scope && requests.current === request) setAccountError((error as Error).message); }
+    finally { if (mounted.current && currentScope.current === scope && requests.current === request) setAccountLoading(false); }
+    return null;
   }, []);
-  useEffect(() => { setAccount(null); setAccountError(null); setPostUrl(''); setSharePostUrl(''); setBusy(null); setNotice(''); setConsent(false); requests.current++; const controller = new AbortController(); if (identity) void refreshAccount(controller.signal); else setAccountLoading(false); return () => controller.abort(); }, [identity, refreshAccount]);
+  useEffect(() => { setAccount(null); setAccountError(null); setEnrollmentError(null); setPostUrl(''); setSharePostUrl(''); setBusy(null); setNotice(''); requests.current++; const controller = new AbortController(); if (identity) void refreshAccount(controller.signal); else setAccountLoading(false); return () => controller.abort(); }, [identity, refreshAccount]);
+  const enrollAccount = useCallback(async (fresh?: { scope: string; campaign: GenesisPublicCampaign; data: GenesisMe }) => {
+    const scope = fresh?.scope || identity;
+    const result = await enrollment.current.start({
+      scope, currentScope: () => mounted.current ? currentScope.current : null,
+      authReady: wallet.authenticated && !wallet.isLoading, verifiedProfileId: wallet.xAccount?.id || null,
+      campaign: fresh?.campaign || campaign, campaignLoading: fresh ? false : campaignLoading, campaignError: fresh ? false : Boolean(campaignError),
+      account: fresh ? { scope: fresh.scope, data: fresh.data } : account,
+      accountLoading: fresh ? false : accountLoading, accountError: fresh ? false : Boolean(accountError), busy: fresh ? false : Boolean(busy),
+      referral, sessionId: wallet.sessionId, getToken: () => walletRef.current.getAccessToken(),
+      onStart: () => { requests.current++; setBusy('enroll'); setEnrollmentError(null); },
+    }, Boolean(fresh));
+    if (result.state === 'skipped' || !mounted.current || currentScope.current !== scope) return;
+    if (result.state === 'saved') {
+      // A GET started before this mutation must not replace its newly saved draft.
+      requests.current++; setAccount({ scope: result.scope, data: result.data }); setAccountLoading(false);
+      setEnrollmentError(null); clearGenesisReferral(sessionStorageIfAvailable()); setReferral(null);
+    } else if (result.state === 'failed') setEnrollmentError({ scope: result.scope, message: 'Your X account is connected. Your application could not be loaded. Please try again.' });
+    setBusy(previous => previous === 'enroll' ? null : previous);
+  }, [identity, wallet.authenticated, wallet.isLoading, wallet.xAccount?.id, wallet.sessionId, campaign, campaignLoading, campaignError, account, accountLoading, accountError, busy, referral]);
+  useEffect(() => { void enrollAccount(); }, [enrollAccount]);
+  async function retryEnrollment() {
+    const scope = currentScope.current; if (!scope || busy || enrollmentRetrying.current) return;
+    // Keep the enrollment recovery action through a failed refresh as well.
+    enrollmentRetrying.current = true; setBusy('retry-enroll');
+    try {
+      const [freshCampaign, freshAccount] = await Promise.all([loadCampaign(), refreshAccount()]);
+      if (mounted.current && currentScope.current === scope && freshCampaign && freshAccount) await enrollAccount({ scope, campaign: freshCampaign, data: freshAccount });
+    } finally {
+      enrollmentRetrying.current = false;
+      if (mounted.current && currentScope.current === scope) setBusy(previous => previous === 'retry-enroll' ? null : previous);
+    }
+  }
   const pending = app && Object.values(app.checks).some(check => check?.state === 'pending');
   useEffect(() => { if (!pending) return; const timer = window.setInterval(() => void refreshAccount(), 8000); return () => window.clearInterval(timer); }, [pending, refreshAccount]);
   function removeInvitation() {
@@ -65,7 +106,7 @@ export function GenesisWhitelist() {
     setBusy(name); setAccountError(null); setNotice('');
     try {
       const data = await genesisAccountRequest(path, { body, getToken: () => walletRef.current.getAccessToken(), sessionId: walletRef.current.sessionId, scope: () => currentScope.current });
-      if (scope === currentScope.current) { setAccount({ scope, data }); if (path === 'enroll') clearGenesisReferral(sessionStorageIfAvailable()); if (path === 'submit') setNotice('Your application has been received. You can return here to check its status.'); }
+      if (scope === currentScope.current) { setAccount({ scope, data }); if (path === 'submit') setNotice('Your application has been received. You can return here to check its status.'); }
     } catch (error) { if (scope === currentScope.current) setAccountError((error as Error).message); }
     finally { if (scope === currentScope.current) setBusy(null); }
   }
@@ -87,21 +128,25 @@ export function GenesisWhitelist() {
       <section id="genesis-details" className="genesis-details" aria-label="How the whitelist works"><div><span>01 / Apply</span><h2>Bring your perspective.</h2><p>Connect X, share what interests you about oneshot, and send your application.</p></div><div><span>02 / Selection</span><h2>750 people. A place each.</h2><p>Applications are reviewed. Additional eligible applicants join the reserve list.</p></div><div><span>03 / Mint</span><h2>Your wallet comes later.</h2><p>Selected accounts choose their mint wallet before the claim window. Network fees may apply.</p></div></section>
       <section className="genesis-application-layout" id="genesis-application"><aside className="genesis-application-intro"><span className="genesis-edition-label">Your place starts here</span><h2>{app?.submittedAt ? 'You’re on the journey.' : 'Make your introduction.'}</h2><p>One X account. One application. Your progress stays with your X account.</p><dl><div><dt>Allocation</dt><dd>750 guaranteed recipients</dd></div><div><dt>Selection</dt><dd>Reviewed applications</dd></div><div><dt>Mint price</dt><dd>Free for selected recipients</dd></div>{campaign?.closesAt && <div><dt>Applications close</dt><dd>{new Date(campaign.closesAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>}</dl><a href="#genesis-questions" className="genesis-text-link">A few things to know <ArrowRight size={16}/></a></aside>
         <div className="genesis-application-panel">
-          <div className="genesis-panel-heading"><div><h2>{app?.submittedAt ? 'Your application' : 'Apply for Genesis'}</h2><p>{app ? `Connected as @${app.profile.username}` : 'Start with your X account.'}</p></div><span className="genesis-progress">{taskCount}<span>/ 4 complete</span></span></div>
+          <div className="genesis-panel-heading"><div><h2>{app?.submittedAt ? 'Your application' : 'Apply for Genesis'}</h2><p>{me?.profile ? `Connected as @${me.profile.username}` : 'Start with your X account.'}</p></div><span className="genesis-progress">{taskCount}<span>/ 4 complete</span></span></div>
           <div className="genesis-progress-track" aria-label={`${taskCount} of 4 steps complete`}><span style={{ width: `${taskCount * 25}%` }}/></div>
           {campaignError && <ErrorState message="Application availability could not be checked." retry={() => void loadCampaign()}/>}
           {wallet.error && <ErrorState message={wallet.error} retry={() => void wallet.refresh()}/>}
           {new URLSearchParams(window.location.search).get('x_login') === 'failed' && <ErrorState message="X sign-in could not finish. Please connect X again."/>}
           {accountError && <ErrorState message={accountError} retry={wallet.authenticated ? () => void wallet.refresh().then(() => refreshAccount()) : undefined}/>}
+          {!app && open && !campaignLoading && !campaignError && !accountLoading && !accountError && enrollmentError?.scope === identity && <ErrorState message={enrollmentError.message} retry={busy ? undefined : () => void retryEnrollment()}/>}
           {notice && <p className="genesis-notice" role="status">{notice}</p>}
           {me?.nomination && !me.nomination.accepted && <div className="genesis-availability"><h3>@{me.nomination.from} nominated you.</h3><p>Complete and submit your application, then accept the nomination while applications and nominations are open.</p>{app?.status === 'under_review' && <Button disabled={!me.nominationsOpen || Boolean(busy)} onClick={() => void action('accept','nominations/accept',{id:me.nomination!.id})}>Accept nomination <Check size={15}/></Button>}</div>}
           {!campaignLoading && campaign && !open && <p className="genesis-window" role="status">{campaign.state === 'closed' ? 'Applications are closed.' : 'Applications are not open yet.'}</p>}
           {accountLoading && !me && <p className="genesis-loading" role="status"><Loader2 size={16} className="spin"/>Loading your application…</p>}
-          <TaskRow number="01" title="Connect your X" done={Boolean(me?.profile)} description={me?.profile ? `@${me.profile.username} is connected to your Genesis application.` : 'Use the account you want to apply with. No posting permission needed.'}>
+          <TaskRow number="01" title="Connect your X" done={Boolean(me?.profile)} description={me?.profile ? `@${me.profile.username} is connected.` : 'Use the account you want to apply with. No posting permission needed.'}>
+            {!app && <p className="genesis-helper">Your public X profile and submitted posts are used to review your application.</p>}
+            {!app && referral && <div className="genesis-referral-applied">An invitation is attached. <button disabled={Boolean(busy)} onClick={removeInvitation}>Remove invitation</button></div>}
             {!me?.profile && <Button onClick={() => void connectX()} disabled={!wallet.configured || wallet.isLoading || Boolean(busy)} loading={busy === 'connect'}>Connect X <ArrowUpRight size={15}/></Button>}
             {!wallet.configured && <p className="genesis-helper">X sign-in is temporarily unavailable. Please return a little later.</p>}
           </TaskRow>
-          {me?.profile && !app && !accountLoading && <div className="genesis-enroll"><label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)}/><span>I agree to link my public X identity and submitted post evidence to my oneshot application for verification and review.</span></label>{referral && <div className="genesis-referral-applied">An invitation is attached. <button onClick={removeInvitation}>Remove invitation</button></div>}<Button onClick={() => void action('enroll','enroll',{ consentVersion: GENESIS_CONSENT_VERSION, ...(referral ? { referral } : {}) })} disabled={!consent || !open || Boolean(busy)} loading={busy === 'enroll'}>Start my application <ArrowRight size={15}/></Button></div>}
+          {busy === 'enroll' && <p className="genesis-loading" role="status"><Loader2 size={16} className="spin"/>Starting your application…</p>}
+          {busy === 'retry-enroll' && <p className="genesis-loading" role="status"><Loader2 size={16} className="spin"/>Checking your application…</p>}
           <TaskRow number="02" title="Follow oneshot" done={app?.checks.follow?.state === 'verified'} description="Keep up with selection rounds and mint announcements." check={app?.checks.follow}>
             {app && !app.submittedAt && <div className="genesis-task-actions">{campaign?.projectHandle && <a className="button button-secondary" href={`https://x.com/${campaign.projectHandle}`} target="_blank" rel="noreferrer">Open X <ArrowUpRight size={14}/></a>}<Button variant="ghost" loading={busy === 'follow'} disabled={!open || Boolean(busy)} onClick={() => void action('follow','verify',{task:'follow'})}>Check follow</Button></div>}
           </TaskRow>

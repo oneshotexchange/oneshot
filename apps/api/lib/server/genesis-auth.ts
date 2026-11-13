@@ -9,6 +9,11 @@ import { requireOneshotSession, type OneshotSession } from './oneshot-auth';
 import type { GenesisProfile } from '../../../web/lib/genesis-schema';
 
 export type GenesisSession = Omit<OneshotSession, 'provider'> & { provider: 'privy' | 'x' };
+export type GenesisAuthDiagnostic = Readonly<{
+  stage: 'callback' | 'configuration' | 'state' | 'token' | 'identity' | 'persistence';
+  reason: 'cancelled' | 'invalid_callback' | 'unavailable' | 'expired' | 'rejected' | 'timeout' | 'invalid_response' | 'storage_failure' | 'request_failed';
+  httpStatus?: number;
+}>;
 const sessionCookie = 'oneshot_genesis_session';
 const browserCookie = 'oneshot_genesis_oauth';
 const opaque = /^[A-Za-z0-9_-]{43}$/;
@@ -37,9 +42,15 @@ async function readJson(response: Response) {
   const data = await boundedBody(response, 65_536);
   try { return JSON.parse(new TextDecoder().decode(data)) as unknown; } catch { throw new ApiError(503, 'GENESIS_AUTH_UNAVAILABLE', message); }
 }
-export function createGenesisAuth(options: { store?: GenesisAuthStore; applications?: GenesisStore; environment?: () => Environment; fetcher?: typeof fetch; now?: () => number } = {}) {
+export function createGenesisAuth(options: { store?: GenesisAuthStore; applications?: GenesisStore; environment?: () => Environment; fetcher?: typeof fetch; now?: () => number; diagnostic?: (failure: GenesisAuthDiagnostic) => void } = {}) {
   const store = options.store || genesisAuthStore; const applications = options.applications || genesisStore;
   const environment = options.environment || (() => process.env); const fetcher = options.fetcher || fetch; const now = options.now || Date.now;
+  function reportFailure(failure: GenesisAuthDiagnostic) {
+    // Only fixed stage/reason values and a bounded HTTP status reach diagnostics.
+    // Provider errors, response bodies and OAuth/browser/account data stay private.
+    try { (options.diagnostic || (value => console.warn('[oneshot Genesis X]', value)))(Object.freeze({ ...failure })); }
+    catch { /* Diagnostics must never change authentication or recovery. */ }
+  }
   function config() { const value = configuration(environment()); if (!value) throw new ApiError(503, 'GENESIS_AUTH_UNAVAILABLE', 'X sign-in is temporarily unavailable. Please try again later.'); return value; }
   async function authenticate(request: NextRequest): Promise<GenesisSession> {
     const token = request.cookies.get(sessionCookie)?.value;
@@ -77,20 +88,38 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
       return { url: url.href, browser };
     },
     async callback(code: string, state: string, browser: string) {
-      const conf = config();
-      if (!opaque.test(state) || !opaque.test(browser) || !code || code.length > 2048) throw new ApiError(400, 'GENESIS_AUTH_INVALID', message);
-      const saved = await store.transaction(tx => tx.consume(hash(state), hash(browser), now()));
-      if (!saved) throw new ApiError(400, 'GENESIS_AUTH_EXPIRED', message);
-      const token = z.object({ access_token: z.string().min(1).max(8192) }).parse(await readJson(await fetcher('https://api.x.com/2/oauth2/token', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(conf.clientSecret ? { Authorization: `Basic ${Buffer.from(`${conf.clientId}:${conf.clientSecret}`).toString('base64')}` } : {}) },
-        body: new URLSearchParams({ code, grant_type: 'authorization_code', client_id: conf.clientId, redirect_uri: conf.redirectUri, code_verifier: saved.verifier }).toString(), redirect: 'error', signal: AbortSignal.timeout(8000),
-      })));
-      const identity = profile(await readJson(await fetcher('https://api.x.com/2/users/me?user.fields=profile_image_url', { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'error', signal: AbortSignal.timeout(8000) })));
-      const cookie = randomBytes(32).toString('base64url'); const expiresAt = now() + sessionLifetime;
-      await store.transaction(async tx => { await tx.saveIdentity(identity); await tx.saveSession(hash(cookie), { xId: identity.id, expiresAt }); });
-      // X access tokens are discarded. Only a hash of the opaque oneshot session is
-      // persisted; the session secret is delivered in a host-only HttpOnly cookie.
-      return { cookie, expiresAt, referral: saved.referral };
+      let failure: GenesisAuthDiagnostic = { stage: 'configuration', reason: 'unavailable' };
+      async function providerJson(url: string, init: RequestInit, stage: 'token' | 'identity') {
+        failure = { stage, reason: 'request_failed' };
+        let response: Response;
+        try { response = await fetcher(url, init); }
+        catch (error) {
+          if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) failure = { stage, reason: 'timeout' };
+          throw error;
+        }
+        failure = { stage, reason: response.ok ? 'invalid_response' : 'rejected', ...(Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? { httpStatus: response.status } : {}) };
+        return readJson(response);
+      }
+      try {
+        const conf = config();
+        failure = { stage: 'callback', reason: 'invalid_callback' };
+        if (!opaque.test(state) || !opaque.test(browser) || !code || code.length > 2048) throw new ApiError(400, 'GENESIS_AUTH_INVALID', message);
+        failure = { stage: 'state', reason: 'storage_failure' };
+        const saved = await store.transaction(tx => tx.consume(hash(state), hash(browser), now()));
+        failure = { stage: 'state', reason: 'expired' };
+        if (!saved) throw new ApiError(400, 'GENESIS_AUTH_EXPIRED', message);
+        const token = z.object({ access_token: z.string().min(1).max(8192) }).parse(await providerJson('https://api.x.com/2/oauth2/token', {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(conf.clientSecret ? { Authorization: `Basic ${Buffer.from(`${conf.clientId}:${conf.clientSecret}`).toString('base64')}` } : {}) },
+          body: new URLSearchParams({ code, grant_type: 'authorization_code', ...(!conf.clientSecret ? { client_id: conf.clientId } : {}), redirect_uri: conf.redirectUri, code_verifier: saved.verifier }).toString(), redirect: 'error', signal: AbortSignal.timeout(8000),
+        }, 'token'));
+        const identity = profile(await providerJson('https://api.x.com/2/users/me?user.fields=profile_image_url', { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'error', signal: AbortSignal.timeout(8000) }, 'identity'));
+        const cookie = randomBytes(32).toString('base64url'); const expiresAt = now() + sessionLifetime;
+        failure = { stage: 'persistence', reason: 'storage_failure' };
+        await store.transaction(async tx => { await tx.saveIdentity(identity); await tx.saveSession(hash(cookie), { xId: identity.id, expiresAt }); });
+        // X access tokens are discarded. Only a hash of the opaque oneshot session is
+        // persisted; the session secret is delivered in a host-only HttpOnly cookie.
+        return { cookie, expiresAt, referral: saved.referral };
+      } catch (error) { reportFailure(failure); throw error; }
     },
     async route(request: NextRequest): Promise<Response | null> {
       const path = request.nextUrl.pathname.replace(/\/$/,'').split('/auth/')[1]; if (!path) return null;
@@ -113,12 +142,15 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
         rateLimit('genesis:auth:callback',120);
         const destination = new URL('/whitelist', webOrigin('http://127.0.0.1:3000',environment()));
         let result: Awaited<ReturnType<typeof this.callback>> | null = null;
+        let callbackFailure: GenesisAuthDiagnostic | null = { stage: 'callback', reason: 'invalid_callback' };
         try {
           const query = request.nextUrl.searchParams;
-          if (query.has('error') || query.getAll('code').length !== 1 || query.getAll('state').length !== 1) throw new Error('Cancelled');
+          if (query.has('error')) { callbackFailure = { stage: 'callback', reason: 'cancelled' }; throw new Error('Cancelled'); }
+          if (query.getAll('code').length !== 1 || query.getAll('state').length !== 1) throw new Error('Invalid callback');
+          callbackFailure = null;
           result = await this.callback(query.get('code') || '', query.get('state') || '', request.cookies.get(browserCookie)?.value || '');
           if(result.referral)destination.searchParams.set('ref',result.referral);
-        } catch { destination.searchParams.set('x_login','failed'); }
+        } catch { if (callbackFailure) reportFailure(callbackFailure); destination.searchParams.set('x_login','failed'); }
         const response = NextResponse.redirect(destination,303); response.headers.set('Cache-Control','no-store'); response.headers.set('Referrer-Policy','no-referrer');
         response.cookies.set(browserCookie,'',{...cookieOptions,path:'/api/oneshot/genesis/auth',maxAge:0});
         if (result) response.cookies.set(sessionCookie,result.cookie,{...cookieOptions,maxAge:sessionLifetime/1000}); return response;

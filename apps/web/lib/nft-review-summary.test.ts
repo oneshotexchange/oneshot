@@ -6,7 +6,7 @@ import type { IndexedNftContext } from '@oneshot/evm';
 import { NftReviewSummary, NftTransactionData, nftTransactionPhase } from '../components/nft-review-summary';
 import { IndexedActivityHighlights, IndexedActivityPage, IndexedCollectionHighlights, IndexedPortfolioPage } from '../components/indexed-nfts';
 import { Overview } from '../components/overview';
-import { useIndexedPage } from './client-indexed-api';
+import { indexedCollectionsPath, useIndexedPage } from './client-indexed-api';
 import { useApi } from './client-api';
 import { NftCheckout, NftTransactionRecovery, ReviewResult } from '../components/nft-checkout';
 import type { NftLaunchState } from './client-nft-launch';
@@ -113,17 +113,17 @@ describe('home page NFT records', () => {
   });
 
   it('uses the routed collections source and binds collection links to the network instance', () => {
-    pages.set('/api/oneshot/indexed/collections', page([{ address, creator: recipient, name: 'Collector originals', symbol: 'SHOT',
+    pages.set(indexedCollectionsPath(), page([{ address, creator: recipient, name: 'Collector originals', symbol: 'SHOT',
       configured: true, opened: true, termsHash: null, contentHash: null, totalMinted: '12', primaryTotalPriceRaw: '0',
       primaryPlatformFeeRaw: '0', primaryCreatorProceedsRaw: '0', totalClaimedRaw: '0' }]));
     const html = render(createElement(IndexedCollectionHighlights));
-    expect(useIndexedPage).toHaveBeenCalledWith('/api/oneshot/indexed/collections', expect.any(Function));
+    expect(useIndexedPage).toHaveBeenCalledWith(indexedCollectionsPath(), expect.any(Function));
     expect(html).toContain('Collector originals'); expect(html).toContain(`href="/nfts/${address}?deployment=${deployment}"`);
     expect(html).toContain('Test network'); expect(html).not.toContain('No collections yet'); expect(html).not.toContain('Load more');
   });
 
   it('distinguishes unavailable browsing from an empty market and offers a retry', () => {
-    pages.set('/api/oneshot/indexed/collections', page([], false));
+    pages.set(indexedCollectionsPath(), page([], false));
     const html = render(createElement(IndexedCollectionHighlights));
     expect(html).toContain('NFT browsing is unavailable'); expect(html).toContain('Try again');
     expect(html).not.toContain('No collections yet');

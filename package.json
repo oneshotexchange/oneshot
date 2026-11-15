@@ -47,6 +47,7 @@
     "contracts:test": "forge test --root contracts-evm",
     "contracts:smoke": "tsx scripts/local-evm-smoke.ts",
     "verify:network": "tsx scripts/verify-zero-network.ts",
+    "verify:rpc-capabilities": "tsx scripts/verify-rpc-capabilities.ts",
     "verify:nft": "tsx scripts/verify-local-nft.ts"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createNftLaunchApi, createNftLaunchController, NftLaunchError, sendReviewedEvmTransaction, type EvmWalletTransaction, type NftLaunchContext, type NftLaunchReview, type NftLaunchRequest } from './client-nft-launch';
+import { createNftLaunchApi, createNftLaunchController, NftLaunchError, sendReviewedEvmTransaction, validateNftLaunchStatus, type EvmWalletTransaction, type NftLaunchContext, type NftLaunchReview, type NftLaunchRequest } from './client-nft-launch';
 import { createNftPendingStore } from './client-nft-recovery';
 
 const from = `0x${'ab'.repeat(20)}`; const to = `0x${'cd'.repeat(20)}`; const hash = `0x${'ef'.repeat(32)}`;
@@ -317,7 +317,8 @@ describe('local launch API', () => {
   afterEach(() => vi.unstubAllEnvs());
   it('keeps status public, obtains fresh bearer tokens per review and disables cookies and redirects', async () => {
     vi.stubEnv('NEXT_PUBLIC_API_URL', 'https://api.oneshot.app');
-    const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(review))); const token = vi.fn().mockResolvedValueOnce('one').mockResolvedValueOnce('two');
+    const fetcher = vi.fn<typeof fetch>(async url => Response.json(String(url).endsWith('/status')
+      ? { enabled: true, reason: null, network: review.network, deploymentId: 'd'.repeat(64) } : review)); const token = vi.fn().mockResolvedValueOnce('one').mockResolvedValueOnce('two');
     const api = createNftLaunchApi({ identityScope: () => 'current-user', getAccessToken: token, fetcher });
     await api.status(); await api.review(request); await api.validate({ reviewId: review.id, reviewHash: review.reviewHash });
     expect(token).toHaveBeenCalledTimes(2); expect(new Headers(fetcher.mock.calls[0][1]?.headers).has('Authorization')).toBe(false);
@@ -376,10 +377,31 @@ describe('local launch API', () => {
     await expect(pending).rejects.toThrow('account or wallet changed');
   });
   it('keeps status public while forwarding read cancellation without requesting an access token', async () => {
-    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ enabled: false })), token = vi.fn();
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ enabled: false, reason: null, network: null, deploymentId: null })), token = vi.fn();
     const api = createNftLaunchApi({ identityScope: () => null, getAccessToken: token, fetcher }), abort = new AbortController();
     await api.status(abort.signal); expect(fetcher.mock.calls[0][1]?.signal).toBe(abort.signal);
     expect(token).not.toHaveBeenCalled(); abort.abort(); await expect(api.status(abort.signal)).rejects.toThrow();
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+});
+
+describe('verified public NFT availability', () => {
+  const enabled = { enabled: true, reason: null, network: { chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, name: 'Local Anvil', mode: 'local' }, deploymentId: 'D'.repeat(64) };
+  it('retains only supported network/deployment facts and normalizes the deployment fingerprint', () => {
+    expect(validateNftLaunchStatus({ ...enabled, privateEndpoint: 'not public', network: { ...enabled.network, internalProvider: 'not public' } }))
+      .toEqual({ enabled: true, reason: null, network: { chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, name: 'Local Anvil' }, deploymentId: 'd'.repeat(64) });
+  });
+  it('returns a customer availability message without retaining operator diagnostics', () => {
+    const result = validateNftLaunchStatus({ enabled: false, reason: 'Set ONESHOT_PRIVATE_PROVIDER=secret', network: null, deploymentId: null });
+    expect(result.reason).toContain('currently unavailable');
+    expect(JSON.stringify(result)).not.toContain('secret');
+  });
+  it.each([null, [], {}, { enabled: 'true' }, { ...enabled, deploymentId: 'unverified' }, { ...enabled, reason: 'ambiguous' },
+    { ...enabled, network: { ...enabled.network, chainId: 8453 } }, { ...enabled, network: { ...enabled.network, nativeSymbol: 'ZRO' } },
+    { ...enabled, network: { ...enabled.network, nativeDecimals: 8 } }, { ...enabled, network: { ...enabled.network, mode: 'zero' } },
+    { ...enabled, network: { ...enabled.network, name: {} } }, { ...enabled, enabled: false },
+    { enabled: false, reason: null },
+  ])('rejects incomplete or inconsistent availability instead of enabling wallet actions: %j', input => {
+    expect(() => validateNftLaunchStatus(input)).toThrow('availability could not be verified');
   });
 });

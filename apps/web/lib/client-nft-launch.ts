@@ -37,6 +37,27 @@ export type NftLaunchState = {
 export class NftLaunchError extends Error {
   constructor(message: string, readonly code = 'LAUNCH_ERROR', readonly status?: number) { super(message); this.name = 'NftLaunchError'; }
 }
+
+/** Availability is public, but an enabled response must identify a supported deployment. */
+export function validateNftLaunchStatus(input: unknown): NftLaunchStatus {
+  const invalid = (): never => { throw new NftLaunchError('NFT availability could not be verified. Please try again.', 'INVALID_RESPONSE'); };
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid();
+  const value = input as Record<string, unknown>;
+  if (typeof value.enabled !== 'boolean' || !(value.reason === null || typeof value.reason === 'string')) return invalid();
+  if (!value.enabled) {
+    if (value.network !== null || value.deploymentId !== null) return invalid();
+    return { enabled: false, reason: 'NFT transactions are currently unavailable. You can save a draft and return later.', network: null, deploymentId: null };
+  }
+  if (!value.network || typeof value.network !== 'object' || Array.isArray(value.network)
+    || typeof value.deploymentId !== 'string' || !/^[a-f\d]{64}$/i.test(value.deploymentId) || value.reason !== null) return invalid();
+  const network = value.network as Record<string, unknown>;
+  if (network.chainId !== 31337 || network.nativeSymbol !== 'ETH' || network.nativeDecimals !== 18
+    || network.mode !== undefined && network.mode !== 'local'
+    || network.name !== undefined && (typeof network.name !== 'string' || network.name.length > 200)) return invalid();
+  return { enabled: true, reason: null, deploymentId: value.deploymentId.toLowerCase(), network: {
+    chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, ...(typeof network.name === 'string' ? { name: network.name } : {}),
+  } };
+}
 export function createNftLaunchApi(options: { identityScope(): string | null; getAccessToken(): Promise<string | null>; fetcher?: typeof fetch }) {
   const fetcher = options.fetcher || fetch;
   async function request<T>(endpoint: string, body?: unknown, isPublic = false, signal?:AbortSignal): Promise<T> {
@@ -59,7 +80,7 @@ export function createNftLaunchApi(options: { identityScope(): string | null; ge
     return result as T;
   }
   return {
-    status: (signal?: AbortSignal) => request<NftLaunchStatus>('status',undefined,true,signal),
+    status: (signal?: AbortSignal) => request<unknown>('status',undefined,true,signal).then(validateNftLaunchStatus),
     collection: (address: string) => {
       if (!/^0x[\da-f]{40}$/i.test(address)) throw new NftLaunchError('Choose a valid collection address.','INVALID_REQUEST');
       return request<PublicNftCollection>(`collections/${address.toLowerCase()}`,undefined,true).then(value => validatePublicNftCollection(value,address));

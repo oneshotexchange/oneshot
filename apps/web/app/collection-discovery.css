@@ -1,0 +1,6 @@
+.indexed-discovery-controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:20px;border-bottom:1px solid var(--line)}
+.indexed-discovery-controls>.field{flex:1 1 250px;min-width:0;margin:0}
+.indexed-discovery-controls>.field:last-of-type{flex:0 1 180px}
+.indexed-discovery-controls>.button{min-height:42px}
+.indexed-discovery-controls input,.indexed-discovery-controls select{width:100%;min-width:0}
+@media(max-width:650px){.indexed-discovery-controls{padding:15px}.indexed-discovery-controls>.field:first-of-type{flex-basis:100%}.indexed-discovery-controls>.field:last-of-type{flex:1 1 160px}.indexed-discovery-controls>.button{min-height:40px}}

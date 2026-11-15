@@ -52,6 +52,18 @@ export function accountCollectionInput(record: OneshotDraft): OneshotDraftInput 
   return oneshotDraftSchema.parse(fields);
 }
 
+/** Validate and derive all editable terms before replacing an open working copy. */
+export function prepareAccountCollectionEditor(record: OneshotDraft) {
+  try {
+    if (!record || typeof record.id !== 'string' || !record.id || typeof record.ownerUserId !== 'string' || !record.ownerUserId
+      || !Number.isSafeInteger(record.revision) || record.revision < 1 || !['draft', 'prepared'].includes(record.status)
+      || !Number.isFinite(Date.parse(record.createdAt)) || !Number.isFinite(Date.parse(record.updatedAt))) throw new Error();
+    const input = accountCollectionInput(record);
+    const local = accountCollectionLocalDraft({ ...record, ...input });
+    return { input, local };
+  } catch { throw new Error('This account draft could not be opened. Refresh your saved drafts and try again. Your current working copy has not changed.'); }
+}
+
 /** A decimal text policy is deliberately separate from any native base-unit precision. */
 export function collectionAccountInput(draft: LocalCollectionDraft, creatorWallet?: string, uploads: readonly UploadedArt[] = []): OneshotDraftInput {
   const publicStart = scheduleIso(draft.publicStart, 'public mint start');

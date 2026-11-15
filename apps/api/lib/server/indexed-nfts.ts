@@ -21,11 +21,11 @@ export type IndexedReaderDependencies = {
   contentResolver: (client: SqlClient) => ContentResolver;
 };
 type Resource = 'status' | 'collections' | 'collection' | 'items' | 'item' | 'listings' | 'activity' | 'wallet-items' | 'claims';
-type Selection = { resource: Resource; collection?: string; wallet?: string; tokenId?: string; seller?: string; status?: string; limit: number; cursor?: string; scope: string };
+type Selection = { resource: Resource; collection?: string; wallet?: string; tokenId?: string; seller?: string; status?: string; query?: string; sort?: 'newest' | 'oldest'; limit: number; cursor?: string; scope: string };
 type Cursor = { v: 1; manifest: string; block: string; hash: string; scope: string; limit: number; after: string[] };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const json = (body: unknown) => Response.json(body, { headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-const badInput = (): never => { throw new ApiError(400, 'INDEXED_INPUT_INVALID', 'Use a valid indexed NFT address, page size and cursor.'); };
+const badInput = (): never => { throw new ApiError(400, 'INDEXED_INPUT_INVALID', 'Check the NFT address, collection search and sort order, or refresh the list to start again.'); };
 const invalidData = (): never => { throw new ApiError(503, 'INDEXER_DATA_INVALID', 'Indexed NFT data is unavailable. Refresh after the indexer has synchronized.'); };
 const numberText = (value: unknown, maximum = 256): string => {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)$/.test(value) || value.length > maximum) return invalidData();
@@ -65,6 +65,7 @@ function selection(request: NextRequest): Selection {
   const query = request.nextUrl.searchParams;
   const paged = !['status', 'collection', 'item'].includes(resource);
   const allowed = new Set(paged ? ['cursor', 'limit'] : []);
+  if (resource === 'collections') for (const key of ['q', 'sort']) allowed.add(key);
   if (resource === 'listings') for (const key of ['collection', 'seller', 'status']) allowed.add(key);
   if (resource === 'activity') for (const key of ['collection', 'wallet']) allowed.add(key);
   for (const key of query.keys()) if (!allowed.has(key) || query.getAll(key).length !== 1) return badInput();
@@ -77,8 +78,13 @@ function selection(request: NextRequest): Selection {
   if (status !== undefined && !['active', 'sold', 'cancelled'].includes(status)) return badInput();
   const cursor = query.get('cursor') ?? undefined;
   if (cursor !== undefined && (!cursor || cursor.length > 2048)) return badInput();
-  const scope = JSON.stringify([resource, collection ?? '', wallet ?? '', tokenId ?? '', seller ?? '', status ?? '']);
-  return { resource, collection, wallet, tokenId, seller, status, limit: Number(limitText), cursor, scope };
+  const search = resource === 'collections' ? query.get('q') ?? '' : undefined;
+  if (search !== undefined && (search.length > 100 || /[\u0000-\u001f\u007f]/.test(search))) return badInput();
+  const collectionQuery = search?.trim();
+  const sort = resource === 'collections' ? query.get('sort') ?? 'newest' : undefined;
+  if (sort !== undefined && sort !== 'newest' && sort !== 'oldest') return badInput();
+  const scope = JSON.stringify([resource, collection ?? '', wallet ?? '', tokenId ?? '', seller ?? '', status ?? '', ...(resource === 'collections' ? [collectionQuery, sort] : [])]);
+  return { resource, collection, wallet, tokenId, seller, status, query: collectionQuery, sort, limit: Number(limitText), cursor, scope };
 }
 
 function parseCursor(input: string | undefined, select: Selection): Cursor | null {
@@ -94,10 +100,10 @@ function parseCursor(input: string | undefined, select: Selection): Cursor | nul
       || value.scope !== select.scope || value.limit !== select.limit || !Array.isArray(value.after)
       || value.after.length < 1 || value.after.length > 2 || !value.after.every(item => typeof item === 'string' && item.length > 0 && item.length < 256)) return badInput();
     const after = value.after as string[];
-    if (select.resource === 'activity' && (after.length !== 2 || !/^(0|[1-9]\d{0,77})$/.test(after[0]) || !/^(0|[1-9]\d{0,9})$/.test(after[1]) || Number(after[1]) > 2_147_483_647)) return badInput();
+    if (['activity', 'collections'].includes(select.resource) && (after.length !== 2 || !/^(0|[1-9]\d{0,77})$/.test(after[0]) || !/^(0|[1-9]\d{0,9})$/.test(after[1]) || Number(after[1]) > 2_147_483_647)) return badInput();
     if (select.resource === 'listings' && (after.length !== 1 || !/^[1-9]\d{0,77}$/.test(after[0]))) return badInput();
     if (['items', 'wallet-items'].includes(select.resource) && (after.length !== 2 || !isAddress(after[0]) || !/^[1-9]\d{0,77}$/.test(after[1]))) return badInput();
-    if (['collections', 'claims'].includes(select.resource) && after.length !== 1) return badInput();
+    if (select.resource === 'claims' && after.length !== 1) return badInput();
     return value as Cursor;
   } catch (error) { if (error instanceof ApiError) throw error; return badInput(); }
 }
@@ -181,7 +187,19 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
   if (['collections', 'collection'].includes(select.resource)) {
     where.push("p.kind='collections'");
     if (select.collection) where.push(`p.entity_id=${bind(select.collection)}`);
-    if (cursor) where.push(`p.entity_id COLLATE "C" > ${bind(cursor.after[0])} COLLATE "C"`);
+    if (select.resource === 'collections') {
+      // Creation events survive later mint/claim updates and already share the canonical projection snapshot.
+      joins = "JOIN oneshot_evm_projections created ON created.manifest_id=p.manifest_id AND created.kind='activity' AND created.value->>'eventName'='CollectionCreated' AND created.value->>'source'=p.value->>'factory' AND created.value->'args'->>'collection'=p.entity_id JOIN oneshot_evm_journal created_journal ON created_journal.manifest_id=p.manifest_id AND created_journal.block_number=(created.value->>'blockNumber')::numeric AND created_journal.block_hash=created.value->>'blockHash'";
+      columns += ",created.value->>'blockNumber' AS created_block_number,created.value->>'logIndex' AS created_log_index";
+      if (select.query) {
+        const search = bind(select.query);
+        // strpos treats %, _ and backslash as ordinary text; all user input remains a bound value.
+        where.push(`(strpos(lower(p.value->>'name'),lower(${search}))>0 OR strpos(lower(p.value->>'symbol'),lower(${search}))>0 OR strpos(lower(p.entity_id),lower(${search}))>0)`);
+      }
+      const direction = select.sort === 'oldest' ? 'ASC' : 'DESC';
+      order = `(created.value->>'blockNumber')::numeric ${direction},(created.value->>'logIndex')::integer ${direction}`;
+      if (cursor) where.push(`((created.value->>'blockNumber')::numeric,(created.value->>'logIndex')::integer) ${select.sort === 'oldest' ? '>' : '<'} (${bind(cursor.after[0])}::numeric,${bind(cursor.after[1])}::integer)`);
+    }
   } else if (['items', 'item', 'wallet-items'].includes(select.resource)) {
     where.push("p.kind='items'", "p.value->>'minted'='true'");
     if (select.collection) where.push(`p.value->>'collection'=${bind(select.collection)}`);
@@ -217,6 +235,11 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
 
 function rowKey(select: Selection, row: Record<string, unknown>): string[] {
   const value = valueRecord(row.value);
+  if (select.resource === 'collections') {
+    const block = numberText(row.created_block_number, 78), log = numberText(row.created_log_index, 10);
+    if (Number(log) > 2_147_483_647) return invalidData();
+    return [block, log];
+  }
   if (select.resource === 'activity') return [numberText(value.blockNumber), String(value.logIndex)];
   if (select.resource === 'listings') return [numberText(value.listingId)];
   if (['items', 'wallet-items'].includes(select.resource)) return [address(value.collection), numberText(value.tokenId)];
@@ -294,6 +317,7 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
       const resolveContent = deps.contentResolver(client);
       const convert = async (row: Record<string, unknown>) => {
         if (['collections', 'collection'].includes(select.resource)) {
+          if (select.resource === 'collections') rowKey(select, row);
           const collection = collectionDto(row.value);
           return { ...collection, presentation: await presentation(row.value, '1', resolveContent) };
         }

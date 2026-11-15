@@ -1,6 +1,7 @@
 export * from './config';
 export * from './economics';
 export * from './rpc';
+export * from './rpc-capabilities';
 export * from './indexed-nfts';
 export * from './nft-launch';
 export * from './nft-launch-progress';

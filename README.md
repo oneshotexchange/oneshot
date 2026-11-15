@@ -56,9 +56,19 @@ For a Git-connected Pages project, use Node.js 22, build command `npm run build:
 
 Zero network configuration and contract deployment remain unverified. Live minting, trading and chain indexing stay disabled until the network and deployments are verified. NFT transaction and marketplace flows currently support a verified local Anvil deployment only. Hosting the application does not enable production blockchain transactions.
 
+For separately scoped, read-only RPC evidence, use an independently prepared deployment plan:
+
+```sh
+npm run verify:rpc-capabilities -- --plan PATH_TO_PLAN.json --env-file PATH_TO_NETWORK.env
+```
+
+See [the capability plan and report reference](packages/evm/RPC-CAPABILITIES.md). This command never enables execution, signs or submits transactions. It supplements `verify:network`; it does not replace deployment verification or establish that Zero, an NFT deployment or an AMM is ready.
+
 Browser drafts remain local to the device. Account drafts require authentication and durable database storage; uploaded media requires configured object storage.
 
 Token creators can keep up to 20 named browser drafts alongside an autosaved working copy. Existing single-draft storage is recovered without changing its original bytes. Both creation pages support versioned JSON backups that restore editable terms as a new draft. Backups do not include image bytes, account credentials, prepared metadata snapshots or transaction authority. Collection imports require the original images again before uploading. Unreadable storage and stale-tab writes are blocked; saving a new draft at capacity does not evict existing work.
+
+NFT creation also preserves incomplete browser working terms separately from named drafts. Account edits remain in memory until explicitly saved to the account; only Copy to new draft creates a browser copy. Navigation warns before losing selected artwork bytes, unsaved account edits or browser terms that could not be saved. Selected image bytes are never stored in the browser working copy.
 
 Media uploads reserve quota through per-attempt 60-second leases and publish their metadata only after storage succeeds. Failed attempts release their own reservation; interrupted leases expire. Existing published content is retained. Physical orphan objects from ambiguous provider timeouts and legacy failed-upload records require separate conservative reconciliation.
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NftEarningsPage } from '@oneshot/evm';
-import { createNftEarningsController, nftEarningsScopeKey, validateNftEarningsPage, type NftEarningsFetcher, type NftEarningsScope } from './client-nft-earnings';
+import { createNftEarningsController, nftEarningsAccess, nftEarningsScopeKey, validateNftEarningsPage, type NftEarningsFetcher, type NftEarningsScope } from './client-nft-earnings';
+import type { NftLaunchStatus } from './client-nft-launch';
 
 const wallet = `0x${'a'.repeat(40)}`, market = `0x${'b'.repeat(40)}`, deploymentId = 'c'.repeat(64), blockHash = `0x${'d'.repeat(64)}`;
 const scope: NftEarningsScope = { identityScope: 'owner:wallet:session', wallet, deploymentId };
@@ -13,6 +14,27 @@ const page = (changes: Partial<NftEarningsPage> = {}): NftEarningsPage => ({
   scannedCount: 2, totalCollectionsRaw: '4', nextCursor: 'page-two', ...changes,
 });
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+
+describe('proceeds availability before wallet prompts', () => {
+  const status: NftLaunchStatus = { enabled: true, reason: null, deploymentId, network: { chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18 } };
+  const input = { status, failed: false, authenticated: true, connected: true, identity: 'account:wallet', wallet, chainId: 8453 };
+  it('waits for service availability before requesting login or a wallet network change', () => {
+    expect(nftEarningsAccess({ ...input, status: null })).toBe('checking');
+    expect(nftEarningsAccess({ ...input, status: null, authenticated: false })).toBe('checking');
+    expect(nftEarningsAccess({ ...input, status: null, failed: true })).toBe('unavailable');
+  });
+  it('never requests a local network switch when transactions are disabled', () => {
+    expect(nftEarningsAccess({ ...input, status: { enabled: false, reason: null, network: null, deploymentId: null } })).toBe('unavailable');
+    expect(nftEarningsAccess({ ...input, status: { ...status, deploymentId: null } })).toBe('unavailable');
+  });
+  it('requests the specific missing account/wallet step only for a supported deployment', () => {
+    expect(nftEarningsAccess({ ...input, authenticated: false })).toBe('sign-in');
+    expect(nftEarningsAccess({ ...input, connected: false, wallet: null, identity: null })).toBe('wallet');
+    expect(nftEarningsAccess({ ...input, identity: null })).toBe('wallet');
+    expect(nftEarningsAccess(input)).toBe('network');
+    expect(nftEarningsAccess({ ...input, chainId: 31337 })).toBe('ready');
+  });
+});
 
 describe('scoped current NFT earnings', () => {
   it('loads exact base units, zero and unopened credits without signing or floating-point conversion', async () => {

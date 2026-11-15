@@ -42,7 +42,12 @@ CREATE TABLE IF NOT EXISTS oneshot_evm_projections (
   entity_id text NOT NULL,
   value jsonb NOT NULL,
   PRIMARY KEY (manifest_id, kind, entity_id)
-);`;
+);
+-- Keep collection discovery independent of mint/transfer activity volume. The same
+-- ordered index supports newest/oldest keyset pages by scanning in either direction.
+CREATE INDEX IF NOT EXISTS oneshot_evm_collection_creation_order
+  ON oneshot_evm_projections(manifest_id,((value->>'blockNumber')::numeric) DESC,((value->>'logIndex')::integer) DESC)
+  WHERE kind='activity' AND value->>'eventName'='CollectionCreated';`;
 
 const kinds: readonly ProjectionKind[] = ['collections', 'items', 'listings', 'claims', 'activity'];
 

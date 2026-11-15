@@ -98,8 +98,13 @@ async function seed(fixture: Fixture) {
     await tx.put('listings', '2', { listingId: '2', collection, tokenId: '1', seller: bob, totalPrice: '10000', status: 'sold', buyer: alice,
       recipient: alice, platformFee: '200', royalty: '500', sellerProceeds: '9300', ...fixture.meta() });
     await tx.put('claims', `${market}:${alice}`, { contract: market, beneficiary: alice, totalClaimed: exactPrice, recipient, lastAmount: '50', ...fixture.meta() });
-    await tx.put('activity', `${hash(500)}:0`, { eventName: 'Listed', source: market, args: { listingId: '1', collection, tokenId: '2', seller: alice, totalPrice: exactPrice },
-      blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(500), transactionIndex: 0, logIndex: 0,
+    for (const [logIndex, at] of [collection, otherCollection].entries()) await tx.put('activity', `${hash(499)}:${logIndex}`, {
+      eventName: 'CollectionCreated', source: factory, args: { collection: at, creator: alice, name: 'Indexed originals', symbol: 'SHOT' },
+      blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(499), transactionIndex: 0, logIndex,
+      schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
+    });
+    await tx.put('activity', `${hash(500)}:2`, { eventName: 'Listed', source: market, args: { listingId: '1', collection, tokenId: '2', seller: alice, totalPrice: exactPrice },
+      blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(500), transactionIndex: 1, logIndex: 2,
       schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337 });
     await tx.append(fixture.canonical.get(1n)!, []);
   });
@@ -107,6 +112,77 @@ async function seed(fixture: Fixture) {
 const payload = async (response: Response) => { expect(response.status).toBe(200); return response.json(); };
 
 describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => {
+  it('searches the full result set with stable creation ordering and literal special characters', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      await fixture.store.transaction(async tx => {
+        for (let index = 0; index < 25; index++) {
+          const at = address(100 + index);
+          const name = index % 12 === 0 ? `Nebula ${index}` : index === 3 ? "100%_\\ signed" : `Other ${index}`;
+          await tx.put('collections', at, { ...collectionRow(fixture, name, at), symbol: index === 7 ? 'MATCH' : 'OTHER' });
+          await tx.put('activity', `${hash(501)}:${index}`, { eventName: 'CollectionCreated', source: factory,
+            args: { collection: at, creator: alice, name, symbol: 'OTHER' }, blockNumber: '2', blockHash: fixture.canonical.get(2n)!.hash,
+            transactionHash: hash(501), transactionIndex: 0, logIndex: index, schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337 });
+        }
+        // Subsequent activity must not make an older collection appear newly created.
+        await tx.put('collections', collection, { ...collectionRow(fixture), totalMinted: '999', ...fixture.meta(2n) });
+        await tx.append(fixture.canonical.get(2n)!, []);
+      });
+      const found: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const result = await payload(await fixture.read(`/collections?q=nEbUlA&sort=newest&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`));
+        found.push(...result.items.map((item: { address: string }) => item.address)); cursor = result.nextCursor;
+        expect(found.length).toBeLessThanOrEqual(3);
+      } while (cursor);
+      expect(found).toEqual([address(124), address(112), address(100)]);
+      const oldest = await payload(await fixture.read('/collections?sort=oldest&limit=2'));
+      expect(oldest.items.map((item: { address: string }) => item.address)).toEqual([collection, otherCollection]);
+      const oldestMatch = await payload(await fixture.read('/collections?q=Nebula&sort=oldest'));
+      expect(oldestMatch.items.map((item: { address: string }) => item.address)).toEqual([...found].reverse());
+      const symbol = await payload(await fixture.read('/collections?q=match'));
+      expect(symbol.items.map((item: { address: string }) => item.address)).toEqual([address(107)]);
+      const byAddress = await payload(await fixture.read(`/collections?q=${address(118).toUpperCase()}`));
+      expect(byAddress.items.map((item: { address: string }) => item.address)).toEqual([address(118)]);
+      const literal = await payload(await fixture.read(`/collections?q=${encodeURIComponent('%_\\')}`));
+      expect(literal.items.map((item: { address: string }) => item.address)).toEqual([address(103)]);
+      const injection = await payload(await fixture.read(`/collections?q=${encodeURIComponent("' OR true --")}`));
+      expect(injection).toMatchObject({ context: { available: true }, items: [], nextCursor: null });
+      const first = await payload(await fixture.read('/collections?q=Nebula&limit=1'));
+      for (const path of ['/collections?q=Other&limit=1', '/collections?q=Nebula&sort=oldest&limit=1']) {
+        expect((await fixture.read(`${path}&cursor=${encodeURIComponent(first.nextCursor)}`)).status).toBe(400);
+      }
+      expect(JSON.stringify(oldest)).not.toMatch(/serverOnlyPath|privateEndpoint|created_block_number|created_log_index/);
+
+      const index = await fixture.pool.query("SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND tablename='oneshot_evm_projections' AND indexname='oneshot_evm_collection_creation_order'");
+      expect(index.rows).toHaveLength(1);
+      expect(index.rows[0].indexdef).toContain('CollectionCreated');
+      // Exercise index eligibility on the actual discovery SQL, rather than a different demonstration query.
+      let discoverySql: string | undefined, discoveryValues: unknown[] | undefined;
+      const observedPool: SqlPool = { async connect() {
+        const client = await fixture.pool.connect();
+        return { release: () => client.release(), async query(sql, values) {
+          if (sql.startsWith('SELECT p.entity_id')) { discoverySql = sql; discoveryValues = values; }
+          return client.query(sql, values);
+        } };
+      } };
+      await payload(await api(request => fixture.reader(observedPool)(request))(new NextRequest('http://localhost/api/oneshot/indexed/collections?limit=1'), {}));
+      expect(discoverySql).toBeTruthy();
+      const planner = await fixture.pool.connect();
+      try {
+        await planner.query('BEGIN');
+        // Tiny fixtures normally favor sequential scans. These transaction-local settings
+        // demonstrate that both ordered directions can use the migration's index.
+        await planner.query('SET LOCAL enable_seqscan=off');
+        await planner.query('SET LOCAL enable_sort=off');
+        const newestPlan = await planner.query(`EXPLAIN (FORMAT JSON) ${discoverySql}`, discoveryValues);
+        expect(JSON.stringify(newestPlan.rows)).toContain('oneshot_evm_collection_creation_order');
+        const oldestSql = discoverySql!.replaceAll('numeric DESC', 'numeric ASC').replaceAll('integer DESC', 'integer ASC');
+        const oldestPlan = await planner.query(`EXPLAIN (FORMAT JSON) ${oldestSql}`, discoveryValues);
+        expect(JSON.stringify(oldestPlan.rows)).toContain('oneshot_evm_collection_creation_order');
+      } finally { await planner.query('ROLLBACK'); planner.release(); }
+    });
+  });
   it('joins each item to its canonical collection content and reverses the association on rollback', async () => {
     await withDatabase(async fixture => {
       await seed(fixture);
@@ -155,7 +231,8 @@ describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => 
       expect(claims.items).toEqual([expect.objectContaining({ contract: market, beneficiary: alice, totalClaimedRaw: exactPrice, lastAmountRaw: '50' })]);
       expect(claims.items[0]).not.toHaveProperty('claimable');
       const activity = await payload(await fixture.read('/activity'));
-      expect(activity.items).toEqual([expect.objectContaining({ eventName: 'Listed', collection, blockNumber: '1', args: expect.objectContaining({ totalPrice: exactPrice }) })]);
+      expect(activity.items).toHaveLength(3);
+      expect(activity.items[0]).toMatchObject({ eventName: 'Listed', collection, blockNumber: '1', args: expect.objectContaining({ totalPrice: exactPrice }) });
       expect(activity.items[0].timestamp).toBeTruthy();
     });
   });

@@ -19,6 +19,16 @@ const actions: { value: NftLaunchAction; label: string }[] = [
 ];
 const busyPhases = ['reviewing', 'validating', 'signing', 'confirming'];
 
+/** Preserve the exact draft decimals when explaining their local test denomination. */
+export function LocalNftPriceSummary({ publicPrice, allowlistPrice }: { publicPrice: string; allowlistPrice: string | null }) {
+  return <div className="section-gap">
+    <SafetyNote>For this test launch, your draft prices use test ETH. There is no conversion from ZRO. Live Zero pricing remains unavailable.</SafetyNote>
+    <div className="review-rows"><InfoRow label="Public test mint price">{publicPrice} test ETH</InfoRow>
+      {allowlistPrice !== null && <InfoRow label="Allowlist test mint price">{allowlistPrice} test ETH</InfoRow>}
+    </div>
+  </div>;
+}
+
 /** Execution is limited to an explicit local ETH deployment and a prepared account snapshot. */
 export function NftLaunchReview({ draft, onRefresh, initialLaunchId }: { draft: OneshotDraft; onRefresh?: () => void | Promise<void>; initialLaunchId?: string }) {
   const wallet = useWallet(); const currentWallet = useRef(wallet); currentWallet.current = wallet;
@@ -126,7 +136,7 @@ export function NftLaunchReview({ draft, onRefresh, initialLaunchId }: { draft: 
       {progressError && <ErrorState message={progressError} />}
       {recovering && <p className="data-notice" role="status">Checking the saved creation receipt. No wallet approval is requested.</p>}
       {action && <div className="review-rows section-gap"><InfoRow label="Next step">{actions.find(item => item.value === action)?.label}</InfoRow>{collection && <InfoRow label="Collection"><span className="indexed-hash">{collection}</span></InfoRow>}</div>}
-      {action && <><label className="checkbox-field"><input type="checkbox" checked={acknowledged} disabled={busy || submitted || recovering || !actionAllowed} onChange={event => { if (!event.target.checked) controller.invalidate('Local ETH acknowledgement was removed.'); setAcknowledged(event.target.checked); }} /><span>I understand this uses test ETH on chain 31337 and requires gas.</span></label>
+      {action && <><LocalNftPriceSummary publicPrice={draft.publicPrice} allowlistPrice={draft.allowlistAddresses.length ? draft.allowlistPrice : null} /><label className="checkbox-field"><input type="checkbox" checked={acknowledged} disabled={busy || submitted || recovering || !actionAllowed} onChange={event => { if (!event.target.checked) controller.invalidate('Local ETH acknowledgement was removed.'); setAcknowledged(event.target.checked); }} /><span>I have reviewed these test ETH prices and understand this uses chain 31337 and requires gas.</span></label>
       <div className="button-row section-gap"><Button type="button" variant="secondary" disabled={!acknowledged || busy || submitted || recovering || !actionAllowed} loading={state.phase === 'reviewing'} onClick={prepare}>Review transaction</Button></div></>}
     </>}
     {state.review && <div className="nft-launch-review section-gap">

@@ -40,7 +40,7 @@ function fixture(overrides: Record<string, string | undefined> = {}) {
 
 function indexedFixture() {
   const state = fixture();
-  const collections = [3, 4].map(id => ({ entity_id: address(id), value: {
+  const collections = [3, 4].map(id => ({ entity_id: address(id), created_block_number: String(7 - id), created_log_index: '0', value: {
     address: address(id), creator: address(8), name: `Collection ${id}`, symbol: 'SHOT', configured: true, opened: true,
     termsHash: hash(30), contentHash: hash(31), totalMinted: '1', primaryTotalPrice: '100', primaryPlatformFee: '2', primaryCreatorProceeds: '98', totalClaimed: '0',
     floorRaw: '12345', floorEnabled: true, allowlisted: true, privateEndpoint: 'https://private-rpc/secret-key',
@@ -49,7 +49,7 @@ function indexedFixture() {
     if (/^SELECT manifest_id/.test(sql)) return { rows: [{ manifest_id: 'fixture' }], rowCount: 1 };
     if (/^SELECT j.block_number/.test(sql)) return { rows: [{ block_number: '5', block_hash: hash(5), parent_hash: hash(4), block_timestamp: '1700000005', workerAlive: true, privateFloor: '12345' }], rowCount: 1 };
     if (/^SELECT to_regclass/.test(sql)) return { rows: [{ available: true }], rowCount: 1 };
-    if (/^SELECT p.entity_id/.test(sql)) return { rows: projectedRows ?? (values?.[1] === address(3) ? collections.slice(1) : collections), rowCount: 2 };
+    if (/^SELECT p.entity_id/.test(sql)) return { rows: projectedRows ?? (values?.[1] === '4' && values?.[2] === '0' ? collections.slice(1) : collections), rowCount: 2 };
     return { rows: [], rowCount: 0 };
   });
   const release = vi.fn();
@@ -329,6 +329,9 @@ describe('public indexed NFT request boundary', () => {
     '/collections?limit=0', '/collections?limit=10000', '/collections?limit=1.5', '/collections?limit=1&limit=2',
     '/collections?unexpected=1', '/listings?status=expired', '/listings?collection=bad', '/listings?seller=bad',
     '/activity?wallet=bad', '/activity?collection=bad', '/wallets/invalid/items',
+    '/collections?sort=popular', '/collections?sort=newest&sort=oldest', '/collections?q=a&q=b',
+    `/collections?q=${'a'.repeat(101)}`, '/collections?q=line%0Abreak', '/collections?q=%00',
+    '/listings?q=art', '/activity?sort=newest', `/collections/${address(3)}?q=art`,
   ])('validates malformed paths or filters before configuration: %s', async path => {
     const state = fixture({ ONESHOT_INDEXER_READS_ENABLED: 'false' });
     expect((await state.read(path)).status).toBe(400);
@@ -421,6 +424,83 @@ describe('public indexed NFT request boundary', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const forbidden = await oneshotApi(new NextRequest('http://localhost/api/oneshot/indexed/collections', { headers: { Origin: 'https://foreign.example' } }), {});
     expect(forbidden.status).toBe(403); expect(session).not.toHaveBeenCalled();
+  });
+});
+
+describe('collection discovery query and pagination', () => {
+  it.each(['newest', 'oldest'])('orders by canonical creation position for %s, independently of later collection updates', async sort => {
+    const state = indexedFixture();
+    const response = await state.read(`/collections?sort=${sort}&limit=1`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const [sql, values] = state.query.mock.calls.find(([sql]) => /^SELECT p.entity_id/.test(sql))!;
+    expect(sql).toContain("created.value->>'eventName'='CollectionCreated'");
+    expect(sql).toContain("created.value->>'source'=p.value->>'factory'");
+    expect(sql).toContain("created_journal.block_hash=created.value->>'blockHash'");
+    expect(sql).toContain(`ORDER BY (created.value->>'blockNumber')::numeric ${sort === 'oldest' ? 'ASC' : 'DESC'},(created.value->>'logIndex')::integer ${sort === 'oldest' ? 'ASC' : 'DESC'}`);
+    expect(sql).not.toContain('lastBlockNumber');
+    expect(values?.at(-1)).toBe(2);
+    const cursor = JSON.parse(Buffer.from(body.nextCursor, 'base64url').toString('utf8'));
+    expect(cursor.after).toEqual(['4', '0']);
+    expect(body.items[0]).not.toHaveProperty('created_block_number');
+  });
+
+  it('binds literal name, symbol and address searches without inserting SQL syntax or wildcard semantics', async () => {
+    const state = indexedFixture();
+    const query = "100%_\\' OR true --";
+    const response = await state.read(`/collections?q=${encodeURIComponent(`  ${query}  `)}`);
+    expect(response.status).toBe(200);
+    const [sql, values] = state.query.mock.calls.find(([sql]) => /^SELECT p.entity_id/.test(sql))!;
+    expect(values).toEqual([expect.any(String), query, 21]);
+    expect(sql).not.toContain(query);
+    expect(sql).toContain("strpos(lower(p.value->>'name'),lower($2))>0");
+    expect(sql).toContain("strpos(lower(p.value->>'symbol'),lower($2))>0");
+    expect(sql).toContain('strpos(lower(p.entity_id),lower($2))>0');
+    expect(sql).not.toMatch(/ILIKE|LIKE/);
+  });
+
+  it('binds cursors to normalized query, sort and page size before touching providers', async () => {
+    const state = indexedFixture();
+    const first = await (await state.read('/collections?q=art&sort=oldest&limit=1')).json();
+    const cursor = encodeURIComponent(first.nextCursor);
+    for (const path of [`/collections?q=other&sort=oldest&limit=1&cursor=${cursor}`, `/collections?q=art&sort=newest&limit=1&cursor=${cursor}`, `/collections?q=art&sort=oldest&limit=2&cursor=${cursor}`, `/collections?sort=oldest&limit=1&cursor=${cursor}`]) {
+      state.source.mockClear(); state.pool.mockClear();
+      expect((await state.read(path)).status).toBe(400);
+      expect(state.source).not.toHaveBeenCalled(); expect(state.pool).not.toHaveBeenCalled();
+    }
+    const normalized = await state.read(`/collections?q=%20art%20&sort=oldest&limit=1&cursor=${cursor}`);
+    expect(normalized.status).toBe(200);
+    const [sql, values] = state.query.mock.calls.filter(([sql]) => /^SELECT p.entity_id/.test(sql)).at(-1)!;
+    expect(sql).toContain(") > ($3::numeric,$4::integer)");
+    expect(values).toEqual([expect.any(String), 'art', '4', '0', 2]);
+  });
+
+  it('uses the same default newest scope as an explicit empty search', async () => {
+    const state = indexedFixture();
+    const first = await (await state.read('/collections?limit=1')).json();
+    expect((await state.read(`/collections?q=%20%20&sort=newest&limit=1&cursor=${first.nextCursor}`)).status).toBe(200);
+  });
+
+  it.each([['bad', '0'], ['1', '-1'], ['1', '2147483648'], ['1'], ['1', '0', 'extra']].map(after => ({ after })))('rejects invalid creation-position cursor $after', async ({ after }) => {
+    const state = indexedFixture();
+    const first = await (await state.read('/collections?limit=1')).json();
+    const cursor = JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString('utf8'));
+    cursor.after = after;
+    state.source.mockClear(); state.pool.mockClear();
+    expect((await state.read(`/collections?limit=1&cursor=${Buffer.from(JSON.stringify(cursor)).toString('base64url')}`)).status).toBe(400);
+    expect(state.source).not.toHaveBeenCalled(); expect(state.pool).not.toHaveBeenCalled();
+  });
+
+  it('keeps an available no-match result distinct from a failed read', async () => {
+    const state = indexedFixture();
+    state.setRows([]);
+    const empty = await state.read('/collections?q=missing');
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toMatchObject({ context: { available: true }, items: [], nextCursor: null });
+    state.query.mockRejectedValueOnce(new Error('private database failure'));
+    const failed = await state.read('/collections?q=missing');
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toMatchObject({ error: { code: 'INDEXER_READ_UNAVAILABLE' } });
   });
 });
 

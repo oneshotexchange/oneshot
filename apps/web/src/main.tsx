@@ -1,6 +1,6 @@
 import { Component, useEffect, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { createBrowserRouter, Route, RouterProvider, Routes, useLocation, useParams } from 'react-router-dom';
 import { Providers } from '../components/providers';
 import { ThemeProvider } from '../components/theme-provider';
 import { Shell } from '../components/shell';
@@ -60,4 +60,9 @@ function Workspace() {
   return location.pathname === '/whitelist' ? <GenesisAuthProvider>{content}</GenesisAuthProvider> : <Providers><Shell>{content}</Shell></Providers>;
 }
 
-createRoot(document.getElementById('root')!).render(<ThemeProvider><BrowserRouter><Workspace /></BrowserRouter></ThemeProvider>);
+// A data router lets creator forms protect unsaved artwork and account edits
+// before SPA navigation. Keep the existing route tree and provider boundaries.
+const router = createBrowserRouter([{ path: '*', element: <Workspace />,
+  errorElement: <WorkspaceError error={null} retry={() => window.location.reload()} />,
+}]);
+createRoot(document.getElementById('root')!).render(<ThemeProvider><RouterProvider router={router} /></ThemeProvider>);

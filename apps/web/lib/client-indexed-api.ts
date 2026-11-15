@@ -8,6 +8,25 @@ export class IndexedReadError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
 
+export type CollectionDiscoveryFilters = { query: string; sort: 'newest' | 'oldest' };
+const collectionFilterError = () => new IndexedReadError(400, 'INDEXED_INPUT_INVALID', 'Check your collection search and sort order, or clear the filters to browse all collections.');
+
+/** The discovery URL and its API request describe the same complete result set, including later pages. */
+export function collectionDiscoveryFilters(search: string): CollectionDiscoveryFilters {
+  const params = new URLSearchParams(search);
+  if (params.getAll('q').length > 1 || params.getAll('sort').length > 1) throw collectionFilterError();
+  const query = params.get('q') ?? '', sort = params.get('sort') ?? 'newest';
+  if (query.length > 100 || /[\u0000-\u001f\u007f]/.test(query) || (sort !== 'newest' && sort !== 'oldest')) throw collectionFilterError();
+  return { query: query.trim(), sort };
+}
+
+export function indexedCollectionsPath(filters: CollectionDiscoveryFilters = { query: '', sort: 'newest' }) {
+  const params = new URLSearchParams({ q: filters.query, sort: filters.sort });
+  const normalized = collectionDiscoveryFilters(params.toString());
+  if (normalized.query) params.set('q', normalized.query); else params.delete('q');
+  return `/api/oneshot/indexed/collections?${params.toString()}`;
+}
+
 export async function indexedApi<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await customerFetch(apiUrl(path), { signal, credentials: 'omit', redirect: 'error' });
   const body = await customerResponseJson<{ context?: { readonly?: unknown; finalized?: unknown } }>(response, {

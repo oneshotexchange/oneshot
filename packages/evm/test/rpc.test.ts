@@ -37,6 +37,7 @@ async function safeError(promise: Promise<unknown>, code: string) {
   expect(`${error.message}\n${error.stack}\n${JSON.stringify(error)}`).not.toContain(SECRET);
   expect(`${error.message}\n${error.stack}\n${JSON.stringify(error)}`).not.toContain('rpc.fixture.invalid');
   expect(error.cause).toBeUndefined();
+  return error as RpcError;
 }
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -110,6 +111,45 @@ describe('RPC network identity', () => {
     await safeError(verifyRpcNetwork(config(), { fetch: unavailable.fetch }), 'RPC_UNAVAILABLE');
     const broken = transport(() => new Response(`not JSON ${SECRET}`));
     await safeError(verifyRpcNetwork(config(), { fetch: broken.fetch }), 'RPC_RESPONSE_INVALID');
+  });
+
+  it.each([
+    null, [], SECRET, { code: '-32000', message: SECRET }, { code: -32000.5, message: SECRET },
+    { code: Number.MAX_SAFE_INTEGER + 1, message: SECRET }, { message: SECRET }, { code: -32000 },
+    { code: -32000, message: null }, { code: -32000, message: 123 },
+  ].map(error => ({ error })))('rejects a malformed JSON-RPC error without retaining its contents: $error', async ({ error }) => {
+    const mock = transport(request => new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, error })));
+    const result = await safeError(verifyRpcNetwork(config(), { fetch: mock.fetch }), 'RPC_RESPONSE_INVALID');
+    expect(result.remoteRejection).toBeUndefined();
+  });
+
+  it('retains only a semantic missing-block classification for a matching hash-selected request', async () => {
+    const mock = transport(request => request.method === 'eth_call'
+      ? new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32001, message: `unknown block: ${OTHER_GENESIS}`, data: { private: SECRET } } }))
+      : defaults(request));
+    const error = await safeError(readRpc(config(), 'eth_call', [{ to: ADDRESS, data: '0x12345678' }, { blockHash: OTHER_GENESIS, requireCanonical: true }], { fetch: mock.fetch }), 'RPC_REMOTE_ERROR');
+    expect(error.remoteRejection).toBe('block-not-found');
+    expect(Object.keys(error).sort()).toEqual(['code', 'name', 'remoteRejection']);
+  });
+
+  it.each([
+    { code: -32000, message: `unknown block: ${GENESIS}` },
+    { code: -32005, message: 'block not found' },
+    { code: -32603, message: 'block not found' },
+    { code: -32001, message: 'resource not found' },
+    { code: -32000, message: `header not found ${SECRET}` },
+  ])('keeps ambiguous or unrelated rejection unclassified', async remote => {
+    const mock = transport(request => request.method === 'eth_call'
+      ? new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { ...remote, data: SECRET } }))
+      : defaults(request));
+    const error = await safeError(readRpc(config(), 'eth_call', [{ to: ADDRESS, data: '0x12345678' }, { blockHash: OTHER_GENESIS, requireCanonical: true }], { fetch: mock.fetch }), 'RPC_REMOTE_ERROR');
+    expect(error.remoteRejection).toBeUndefined();
+  });
+
+  it('does not classify a missing-block message returned by an identity request', async () => {
+    const mock = transport(request => new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32001, message: 'block not found' } })));
+    const error = await safeError(verifyRpcNetwork(config(), { fetch: mock.fetch }), 'RPC_REMOTE_ERROR');
+    expect(error.remoteRejection).toBeUndefined();
   });
 
   it.each(['fetch', 'body'])('bounds the entire request including a stalled %s', async stage => {

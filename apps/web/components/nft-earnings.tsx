@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { formatIndexedAmount, type NftEarningsPage } from '@oneshot/evm';
 import { useWallet } from '../lib/client-wallet';
-import { createNftLaunchApi, createNftLaunchController, type NftLaunchApi, type NftLaunchContext } from '../lib/client-nft-launch';
-import { createNftEarningsController, nftEarningsScopeKey, type NftEarningsState } from '../lib/client-nft-earnings';
+import { createNftLaunchApi, createNftLaunchController, type NftLaunchApi, type NftLaunchContext, type NftLaunchStatus } from '../lib/client-nft-launch';
+import { createNftEarningsController, nftEarningsAccess, nftEarningsScopeKey, type NftEarningsState } from '../lib/client-nft-earnings';
 import { useNftIndexedSync } from '../lib/client-indexed-sync';
 import { Address, Badge, Button, EmptyState, ErrorState, Field, InfoRow, Loading, SafetyNote, Stat } from './ui';
 import { WalletButton } from './wallet-button';
@@ -88,7 +88,7 @@ export function NftEarnings({ onRefresh }: { onRefresh?: () => void }) {
   const api = useMemo(() => createNftLaunchApi({ identityScope: () => latest.current.identityScope(), getAccessToken: () => latest.current.getAccessToken() }), []);
   const loader = useMemo(() => createNftEarningsController((input, signal) => api.earnings(input, signal)), [api]);
   const state = useSyncExternalStore(loader.subscribe, loader.snapshot, loader.snapshot);
-  const [availability, setAvailability] = useState<{ key: string; deploymentId: string | null; reason: string | null } | null>(null);
+  const [availability, setAvailability] = useState<{ key: string; status: NftLaunchStatus | null; failed: boolean } | null>(null);
   const [selected, setSelected] = useState<ClaimSource | null>(null), [attempt, setAttempt] = useState(0);
   const identity = wallet.identityScope(), from = wallet.account?.address?.toLowerCase();
   const key = JSON.stringify([identity, wallet.userId, from, wallet.network?.chainId]);
@@ -97,41 +97,41 @@ export function NftEarnings({ onRefresh }: { onRefresh?: () => void }) {
   const ready = Boolean(wallet.authenticated && wallet.connected && identity && from && wallet.network?.chainId === 31337);
   useEffect(() => {
     let active = true; reads.current++; const abort = new AbortController(); setSelected(null); setAvailability(null); void loader.open(null);
-    if (ready) void api.status(abort.signal).then(status => {
+    void api.status(abort.signal).then(status => {
       if (!active) return;
       const deploymentId = status.enabled ? status.deploymentId : null;
-      setAvailability({ key, deploymentId, reason: status.reason });
-      if (deploymentId) void loader.open({ identityScope: key, wallet: from!, deploymentId });
-    }).catch(reason => { if (active) setAvailability({ key, deploymentId: null, reason: reason instanceof Error ? reason.message : 'The test network is unavailable. Try again later.' }); });
+      setAvailability({ key, status, failed: false });
+      if (ready && deploymentId) void loader.open({ identityScope: key, wallet: from!, deploymentId });
+    }).catch(() => { if (active) setAvailability({ key, status: null, failed: true }); });
     return () => { active = false; reads.current++; abort.abort(); loader.cancel(); };
   }, [api, loader, key, ready, attempt]);
   const matching = availability?.key === key ? availability : null;
+  const deploymentId = matching?.status?.enabled ? matching.status.deploymentId : null;
+  const access = nftEarningsAccess({ status: matching?.status || null, failed: matching?.failed || false,
+    authenticated: wallet.authenticated, connected: wallet.connected, identity, wallet: from || null, chainId: wallet.network?.chainId || null });
   const snapshot = state.data;
-  const data = matching?.deploymentId && snapshot && snapshot.wallet.toLowerCase() === from && snapshot.deploymentId === matching.deploymentId ? snapshot : null;
-  const expectedKey = matching?.deploymentId && identity && from ? nftEarningsScopeKey({ identityScope: key, wallet: from, deploymentId: matching.deploymentId }) : null;
+  const data = access === 'ready' && deploymentId && snapshot && snapshot.wallet.toLowerCase() === from && snapshot.deploymentId === deploymentId ? snapshot : null;
+  const expectedKey = access === 'ready' && deploymentId && identity && from ? nftEarningsScopeKey({ identityScope: key, wallet: from, deploymentId }) : null;
   const display: NftEarningsState = state.key === expectedKey ? { ...state, data } : { key: expectedKey, data: null, loading: Boolean(expectedKey), loadingMore: false, error: null };
   const refresh = () => {
     const ticket = ++reads.current;
     void loader.open(null);
     void api.status().then(status => {
       if (latestKey.current !== key || reads.current !== ticket) return;
-      const deploymentId = status.enabled ? status.deploymentId : null;
-      if (deploymentId && deploymentId === matching?.deploymentId && from) void loader.open({ identityScope: key, wallet: from, deploymentId });
-      else {
-        setSelected(null); setAvailability({ key, deploymentId, reason: status.reason });
-        void loader.open(deploymentId && from ? { identityScope: key, wallet: from, deploymentId } : null);
-      }
-    }).catch(reason => {
+      const nextDeployment = status.enabled ? status.deploymentId : null;
+      setSelected(null); setAvailability({ key, status, failed: false });
+      void loader.open(ready && nextDeployment && from ? { identityScope: key, wallet: from, deploymentId: nextDeployment } : null);
+    }).catch(() => {
       if (latestKey.current !== key || reads.current !== ticket) return;
-      void loader.open(null); setAvailability({ key, deploymentId: null, reason: reason instanceof Error ? reason.message : 'The test network is unavailable. Try again later.' });
+      void loader.open(null); setSelected(null); setAvailability({ key, status: null, failed: true });
     });
     onRefresh?.();
   };
   return <section className="panel nft-launch-panel" aria-label="Current NFT proceeds">
-    {!ready ? <><h2>Available NFT proceeds</h2><EmptyState title={!wallet.authenticated ? 'Sign in to check proceeds' : !wallet.connected ? 'Connect a wallet to check proceeds' : 'Switch to the test network'} description={wallet.authenticated && wallet.connected ? 'Switch your wallet to the test network (31337) to check and claim proceeds.' : 'Connect your wallet to the test network (31337) to check and claim proceeds. You can view public wallet records below.'} compact action={<WalletButton />} /></> : !matching?.deploymentId ? <><h2>Available NFT proceeds</h2>{matching?.reason ? <ErrorState message={matching.reason} retry={() => setAttempt(value => value + 1)} /> : <Loading rows={2} />}</> : <>
+    {access === 'checking' ? <><h2>Available NFT proceeds</h2><Loading rows={2} /></> : access === 'unavailable' ? <><h2>Available NFT proceeds</h2><EmptyState compact title="NFT proceeds are unavailable" description={matching?.failed ? 'We could not check availability. Try again in a moment.' : 'Claims are not available right now. Return later to check your proceeds.'} action={<Button variant="secondary" onClick={() => setAttempt(value => value + 1)}>Check availability</Button>} /></> : access !== 'ready' ? <><h2>Available NFT proceeds</h2><EmptyState title={access === 'sign-in' ? 'Sign in to check proceeds' : access === 'wallet' ? 'Connect a wallet to check proceeds' : 'Switch to the test network'} description={access === 'network' ? 'This deployment uses test ETH on network 31337. Select that network in your wallet to check and claim proceeds.' : 'Sign in and select a linked wallet to check its proceeds. You can view public wallet records below.'} compact action={<WalletButton />} /></> : <>
       <NftEarningsBalances state={display} onRefresh={refresh} onMore={() => void loader.loadMore()} onSelect={setSelected} />
-      {selected && <NftEarningsClaim key={`${key}:${matching.deploymentId}:${selected.contract}`} source={selected} deploymentId={matching.deploymentId} api={api} current={data} onRefresh={refresh} />}
+      {selected && deploymentId && <NftEarningsClaim key={`${key}:${deploymentId}:${selected.contract}`} source={selected} deploymentId={deploymentId} api={api} current={data} onRefresh={refresh} />}
     </>}
-    <SafetyNote>These proceeds use test ETH. Review each claim before approving it in your wallet.</SafetyNote>
+    {deploymentId && <SafetyNote>These proceeds use test ETH. Review each claim before approving it in your wallet.</SafetyNote>}
   </section>;
 }

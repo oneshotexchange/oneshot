@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accountCollectionInput, accountCollectionLocalDraft, collectionAccountInput, createOneshotAccountApi, normalizeLocalCollectionDraft, type LocalCollectionDraft } from './client-oneshot-api';
+import { accountCollectionInput, accountCollectionLocalDraft, collectionAccountInput, createOneshotAccountApi, normalizeLocalCollectionDraft, prepareAccountCollectionEditor, type LocalCollectionDraft } from './client-oneshot-api';
 import { oneshotDraftSchema, type OneshotDraft } from './oneshot-draft-schema';
 
 const address = `0x${'ab'.repeat(20)}`;
@@ -37,6 +37,21 @@ describe('oneshot authenticated account client', () => {
     expect(new Date(local.publicEnd!).toISOString()).toBe(record.publicEnd);
     expect(accountCollectionInput(record)).toEqual(collectionAccountInput(draft));
     expect(accountCollectionInput(record)).not.toHaveProperty('ownerUserId');
+  });
+  it('prepares valid account terms without mutating the response or carrying account authority into editable fields', () => {
+    const record: OneshotDraft = { ...collectionAccountInput(draft), id: 'remote-one', ownerUserId: 'owner', revision: 1, status: 'draft', createdAt: draft.savedAt, updatedAt: draft.savedAt };
+    const original = structuredClone(record), editor = prepareAccountCollectionEditor(record);
+    expect(editor.input).toEqual(collectionAccountInput(draft));
+    expect(editor.local.price).toBe(draft.price);
+    expect(editor.local).not.toHaveProperty('ownerUserId');
+    expect(editor.local).not.toHaveProperty('snapshot');
+    expect(record).toEqual(original);
+  });
+  it.each([{ publicStart: 'not-a-date' }, { metadataUrl: 'https://private.invalid/manifest' }, { revision: 0 }, { status: 'deleted' }, { updatedAt: 'unreadable' }])('rejects unreadable account records before the editor is replaced: %j', changes => {
+    const record = { ...collectionAccountInput(draft), id: 'remote-one', ownerUserId: 'owner', revision: 1, status: 'draft', createdAt: draft.savedAt, updatedAt: draft.savedAt, ...changes } as OneshotDraft;
+    const original = structuredClone(record);
+    expect(() => prepareAccountCollectionEditor(record)).toThrow('current working copy has not changed');
+    expect(record).toEqual(original);
   });
   it('preserves decimal price text and maps schedules and royalty without native base-unit conversion', () => {
     const value = collectionAccountInput(draft, address);

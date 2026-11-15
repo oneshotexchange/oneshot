@@ -45,10 +45,13 @@ const messages: Record<RpcErrorCode, string> = {
 /** Safe to expose: provider URLs, underlying errors and remote messages are never attached. */
 export class RpcError extends Error {
   readonly code: RpcErrorCode;
-  constructor(code: RpcErrorCode) {
+  /** A conservative semantic classification only. No remote code/message/data is retained. */
+  readonly remoteRejection?: 'block-not-found';
+  constructor(code: RpcErrorCode, remoteRejection?: 'block-not-found') {
     super(messages[code]);
     this.name = 'RpcError';
     this.code = code;
+    if (code === 'RPC_REMOTE_ERROR' && remoteRejection === 'block-not-found') this.remoteRejection = remoteRejection;
   }
 }
 
@@ -72,6 +75,20 @@ const blockTag = (value: unknown) => typeof value === 'string'
 const callBlock = (value: unknown) => blockTag(value) || (object(value)
   && keysOnly(value, ['blockHash', 'requireCanonical']) && hexHash(value.blockHash) && value.requireCanonical === true);
 const keysOnly = (value: ObjectRecord, keys: string[]) => Object.keys(value).every(key => keys.includes(key));
+
+/** Only clear, hash-selected block lookup rejections can satisfy a capability negative control. */
+function remoteRejection(error: ObjectRecord, method: string, params: readonly unknown[]): 'block-not-found' | undefined {
+  const selected = method === 'eth_call' ? params[1] : method === 'eth_getLogs' ? params[0] : null;
+  if (!object(selected) || !hexHash(selected.blockHash) || ![-32000, -32001].includes(error.code as number)
+    || typeof error.message !== 'string' || error.message.length > 256) return;
+  const message = error.message.trim();
+  // Deliberately omit generic "not found", invalid-parameter, rate-limit and
+  // internal-error messages. Unrecognized provider wording remains unclassified.
+  if (/^(?:unknown (?:block|header)|(?:block|header) (?:not found|does not exist))\.?$/i.test(message)) return 'block-not-found';
+  const withHash = /^(?:unknown (?:block|header)(?: hash)?|(?:block|header) not found):? (0x[\da-f]{64})\.?$/i.exec(message)
+    ?? /^(?:block|header)(?: with)? hash (0x[\da-f]{64}) (?:not found|does not exist)\.?$/i.exec(message);
+  if (withHash && withHash[1].toLowerCase() === selected.blockHash.toLowerCase()) return 'block-not-found';
+}
 
 function serverOnly() {
   if (typeof window !== 'undefined') throw new RpcError('SERVER_ONLY');
@@ -164,7 +181,12 @@ async function request(connection: Connection, method: string, params: readonly 
     if (!object(body) || body.jsonrpc !== '2.0' || body.id !== id || ('error' in body && 'result' in body)) {
       throw new RpcError('RPC_RESPONSE_INVALID');
     }
-    if ('error' in body) throw new RpcError('RPC_REMOTE_ERROR');
+    if ('error' in body) {
+      const error = body.error;
+      if (!object(error) || !Object.hasOwn(error, 'code') || !Number.isSafeInteger(error.code)
+        || !Object.hasOwn(error, 'message') || typeof error.message !== 'string') throw new RpcError('RPC_RESPONSE_INVALID');
+      throw new RpcError('RPC_REMOTE_ERROR', remoteRejection(error, method, params));
+    }
     if (!('result' in body)) throw new RpcError('RPC_RESPONSE_INVALID');
     return body.result;
   })();

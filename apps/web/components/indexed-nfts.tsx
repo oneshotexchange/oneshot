@@ -1,17 +1,18 @@
-import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Gem, RefreshCw, Wallet } from 'lucide-react';
 import { formatIndexedAmount, type IndexedActivity, type IndexedClaim, type IndexedCollection, type IndexedCollectionResponse, type IndexedItemResponse, type IndexedListing, type IndexedNftContext, type IndexedNftItem } from '@oneshot/evm';
 import Link from './navigation';
 import { useWallet } from '../lib/client-wallet';
 import { NftCheckout, NftTransactionRecovery } from './nft-checkout';
 import { NftEarnings } from './nft-earnings';
-import { sameIndexedCheckpoint, useIndexedPage, useIndexedResource } from '../lib/client-indexed-api';
+import { collectionDiscoveryFilters, indexedCollectionsPath, sameIndexedCheckpoint, useIndexedPage, useIndexedResource, type CollectionDiscoveryFilters } from '../lib/client-indexed-api';
 import { indexedPresentation, type IndexedPresentation } from '../lib/client-indexed-presentation';
 import { nftDeploymentLinkIssue } from '../lib/client-nft-deployment-link';
 import { shortAddress } from '../lib/client-api';
 import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, InfoRow, Loading, PageHeading, SafetyNote, Stat, Tabs } from './ui';
 import type { StudioIllustrationKind } from './studio-illustration';
+import '../app/collection-discovery.css';
 
 const base = '/api/oneshot/indexed';
 const collectionKey = (value: IndexedCollection) => value.address;
@@ -63,7 +64,7 @@ function PageBody({ page, empty, description = 'New activity will appear here af
 
 /** The home page and NFT routes share the same records and availability states. */
 export function IndexedCollectionHighlights() {
-  const page = useIndexedPage<IndexedCollection>(`${base}/collections`, collectionKey);
+  const page = useIndexedPage<IndexedCollection>(indexedCollectionsPath(), collectionKey);
   return <><IndexedContextNote context={page.data?.context} /><PageBody page={page} footer={false} empty="No collections yet" description="Save a draft with your artwork and mint settings to start a collection of your own." action={<ButtonLink href="/nfts/new" variant="secondary">Create collection draft <ArrowRight size={14} /></ButtonLink>}><div className="indexed-collection-grid">{page.data?.items.slice(0, 3).map(collection => <IndexedCollectionCard key={collection.address} collection={collection} deploymentId={page.data?.context.deploymentId || undefined} />)}</div></PageBody></>;
 }
 
@@ -85,11 +86,36 @@ function Listings({ listings, deploymentId }: { listings: IndexedListing[]; depl
 }
 
 export function IndexedNftDiscovery() {
-  const page = useIndexedPage<IndexedCollection>(`${base}/collections`, collectionKey);
-  return <><PageHeading title="NFT collections" description="Find a collection, explore the artwork and check its mint terms." action={<><Button variant="ghost" loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button><ButtonLink href="/nfts/new">Create a collection <ArrowRight size={14} /></ButtonLink></>} />
+  const [params, setParams] = useSearchParams();
+  let filters: CollectionDiscoveryFilters = { query: '', sort: 'newest' }, filterError: string | null = null;
+  try { filters = collectionDiscoveryFilters(params.toString()); }
+  catch (error) { filterError = error instanceof Error ? error.message : 'Clear the filters to browse collections.'; }
+  const [query, setQuery] = useState(() => params.get('q') ?? '');
+  const [inputError, setInputError] = useState<string | null>(null);
+  const appliedQuery = params.get('q') ?? '';
+  useEffect(() => { setQuery(appliedQuery); setInputError(null); }, [appliedQuery]);
+  const page = useIndexedPage<IndexedCollection>(filterError ? null : indexedCollectionsPath(filters), collectionKey);
+  const apply = (next: CollectionDiscoveryFilters) => {
+    let normalized: CollectionDiscoveryFilters;
+    try { normalized = collectionDiscoveryFilters(new URLSearchParams({ q: next.query, sort: next.sort }).toString()); }
+    catch (error) { setInputError(error instanceof Error ? error.message : 'Check your collection search.'); return; }
+    const nextParams = new URLSearchParams();
+    if (normalized.query) nextParams.set('q', normalized.query);
+    if (normalized.sort !== 'newest') nextParams.set('sort', normalized.sort);
+    setInputError(null); setQuery(normalized.query); setParams(nextParams);
+  };
+  const clear = () => apply({ query: '', sort: 'newest' });
+  return <><PageHeading title="NFT collections" description="Find a collection, explore the artwork and check its mint terms." action={<><Button variant="ghost" disabled={Boolean(filterError)} loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button><ButtonLink href="/nfts/new">Create a collection <ArrowRight size={14} /></ButtonLink></>} />
     <IndexedContextNote context={page.data?.context} />
     <section className="panel" aria-label="Collections">
-      <PageBody page={page} empty="No collections yet" description="Save a draft with your artwork and mint settings to start a collection of your own."><div className="indexed-collection-grid">{page.data?.items.map(collection => <IndexedCollectionCard key={collection.address} collection={collection} deploymentId={page.data?.context.deploymentId || undefined} />)}</div></PageBody>
+      <form className="indexed-discovery-controls" role="search" onSubmit={event => { event.preventDefault(); apply({ ...filters, query }); }}>
+        <Field label="Search collections"><input type="search" value={query} maxLength={100} onChange={event => setQuery(event.target.value)} placeholder="Name, symbol or collection address" /></Field>
+        <Button type="submit" variant="secondary">Search</Button>
+        <Field label="Sort collections"><select value={filters.sort} onChange={event => apply({ query, sort: event.target.value as CollectionDiscoveryFilters['sort'] })}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></Field>
+        {(filters.query || filters.sort !== 'newest' || filterError) && <Button type="button" variant="ghost" onClick={clear}>Clear filters</Button>}
+      </form>
+      {inputError && <ErrorState message={inputError} />}
+      {filterError ? <ErrorState message={filterError} /> : <PageBody page={page} empty={filters.query ? 'No matching collections' : 'No collections yet'} description={filters.query ? 'Try another name, symbol or collection address, or clear your search.' : 'Save a draft with your artwork and mint settings to start a collection of your own.'} action={filters.query ? <Button variant="secondary" onClick={clear}>Clear search</Button> : undefined}><div className="indexed-collection-grid">{page.data?.items.map(collection => <IndexedCollectionCard key={collection.address} collection={collection} deploymentId={page.data?.context.deploymentId || undefined} />)}</div></PageBody>}
     </section></>;
 }
 

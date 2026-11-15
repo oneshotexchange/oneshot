@@ -3,8 +3,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { formatIndexedAmount, type IndexedCollection, type IndexedNftContext, type IndexedNftItem, type IndexedNftPresentation, type IndexedPage } from '@oneshot/evm';
-import { IndexedCollectionCard, IndexedCollectionPreview, IndexedContextNote, IndexedItemCards, IndexedItemRecord } from '../components/indexed-nfts';
-import { appendIndexedPage, indexedApi, IndexedPageLoader, IndexedReadError, sameIndexedCheckpoint } from './client-indexed-api';
+import { IndexedCollectionCard, IndexedCollectionPreview, IndexedContextNote, IndexedItemCards, IndexedItemRecord, IndexedNftDiscovery } from '../components/indexed-nfts';
+import { appendIndexedPage, collectionDiscoveryFilters, indexedApi, indexedCollectionsPath, IndexedPageLoader, IndexedReadError, sameIndexedCheckpoint } from './client-indexed-api';
 import { indexedPresentation } from './client-indexed-presentation';
 
 const context = (hash = 'a'): IndexedNftContext => ({
@@ -22,6 +22,35 @@ function deferred<T>() {
 }
 const fetcher = (run: (path: string, signal?: AbortSignal) => Promise<unknown>) => run as typeof indexedApi;
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+describe('collection discovery filters', () => {
+  it('keeps home previews and unfiltered discovery on the same newest collection request', () => {
+    expect(indexedCollectionsPath()).toBe('/api/oneshot/indexed/collections?sort=newest');
+    expect(indexedCollectionsPath(collectionDiscoveryFilters(''))).toBe(indexedCollectionsPath());
+  });
+  it('preserves literal search text in one encoded query and normalizes surrounding spaces', () => {
+    const filters = collectionDiscoveryFilters('?q=%20Nebula%20%25_%5C%26%20&sort=oldest');
+    expect(filters).toEqual({ query: 'Nebula %_\\&', sort: 'oldest' });
+    const path = indexedCollectionsPath(filters), params = new URL(path, 'http://localhost').searchParams;
+    expect(params.get('q')).toBe('Nebula %_\\&'); expect(params.getAll('q')).toHaveLength(1);
+    expect(params.get('sort')).toBe('oldest'); expect(params.has('cursor')).toBe(false);
+  });
+  it.each(['?q=a&q=b', '?sort=newest&sort=oldest', '?sort=volume', `?q=${'a'.repeat(101)}`, '?q=bad%00text', '?q=line%0Abreak'])('rejects invalid filters instead of silently searching another result set: %s', search => {
+    expect(() => collectionDiscoveryFilters(search)).toThrow(IndexedReadError);
+  });
+  it('restores shared search and ordering controls from the browser URL', () => {
+    const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/nfts?q=Night+birds&sort=oldest'] }, createElement(IndexedNftDiscovery)));
+    expect(html).toContain('role="search"'); expect(html).toContain('Search collections');
+    expect(html).toContain('value="Night birds"'); expect(html).toContain('<option value="oldest" selected="">Oldest first</option>');
+    expect(html).toContain('Clear filters'); expect(html).not.toContain('No matching collections');
+    expect(html).not.toMatch(/floor price|trading volume|highest sales/i);
+  });
+  it('offers filter recovery for a malformed shared discovery URL', () => {
+    const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/nfts?sort=volume'] }, createElement(IndexedNftDiscovery)));
+    expect(html).toContain('Check your collection search and sort order'); expect(html).toContain('Clear filters');
+    expect(html).not.toContain('No collections yet');
+  });
+});
 
 describe('indexed response and checkpoint identity', () => {
   it('retains API status and stale-cursor code while using the configured API destination', async () => {
@@ -51,6 +80,30 @@ describe('indexed response and checkpoint identity', () => {
 });
 
 describe('indexed pagination request ownership', () => {
+  it('discards old search pages when the query or sort changes, even at the same checkpoint', async () => {
+    const pending = deferred<unknown>();
+    const oldPath = indexedCollectionsPath({ query: 'old', sort: 'newest' });
+    const newPath = indexedCollectionsPath({ query: 'new', sort: 'oldest' });
+    const loader = new IndexedPageLoader(key, fetcher(async path => path.includes('cursor=') ? pending.promise : page([path === oldPath ? 'old-result' : 'new-result'], 'next')));
+    await loader.open(oldPath); const loadingMore = loader.loadMore();
+    await loader.open(newPath); pending.resolve(page(['obsolete-result'])); await loadingMore;
+    expect(loader.snapshot()).toMatchObject({ path: newPath, data: { items: [{ id: 'new-result' }] } });
+  });
+  it('retains the applied query, sort and failed page for retry and stale-checkpoint recovery', async () => {
+    const path = indexedCollectionsPath({ query: 'Nebula & birds', sort: 'oldest' });
+    const requested: string[] = []; let nextCount = 0, firstCount = 0;
+    const loader = new IndexedPageLoader(key, fetcher(async current => {
+      requested.push(current);
+      if (!current.includes('cursor=')) return page([++firstCount === 1 ? 'first' : 'refreshed'], 'same-cursor');
+      if (++nextCount === 1) throw new Error('Please retry.');
+      throw new IndexedReadError(409, 'CURSOR_STALE', 'Changed');
+    }));
+    await loader.open(path); await loader.loadMore();
+    expect(loader.snapshot()).toMatchObject({ path, data: { items: [{ id: 'first' }], nextCursor: 'same-cursor' }, error: 'Please retry.' });
+    await loader.loadMore();
+    expect(requested).toEqual([path, `${path}&cursor=same-cursor`, `${path}&cursor=same-cursor`, path]);
+    expect(loader.snapshot()).toMatchObject({ path, data: { items: [{ id: 'refreshed' }] } });
+  });
   it('does not publish a late response from another wallet or collection', async () => {
     const first = deferred<unknown>(), second = deferred<unknown>();
     const signals: AbortSignal[] = [];

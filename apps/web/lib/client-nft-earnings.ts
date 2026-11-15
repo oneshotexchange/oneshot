@@ -1,4 +1,22 @@
 import type { NftEarningsPage } from '@oneshot/evm';
+import type { NftLaunchStatus } from './client-nft-launch';
+
+export type NftEarningsAccess = 'checking' | 'unavailable' | 'sign-in' | 'wallet' | 'network' | 'ready';
+
+/** Service availability precedes wallet prompts; disabled markets must not ask for a network switch. */
+export function nftEarningsAccess(input: {
+  status: NftLaunchStatus | null; failed: boolean; authenticated: boolean; connected: boolean;
+  identity: string | null; wallet: string | null; chainId: number | null;
+}): NftEarningsAccess {
+  if (input.failed) return 'unavailable';
+  if (!input.status) return 'checking';
+  const status = input.status;
+  if (!status.enabled || status.network?.chainId !== 31337 || status.network.nativeSymbol !== 'ETH'
+    || status.network.nativeDecimals !== 18 || !status.deploymentId || !/^[a-f\d]{64}$/i.test(status.deploymentId)) return 'unavailable';
+  if (!input.authenticated) return 'sign-in';
+  if (!input.connected || !input.identity || !input.wallet || !/^0x[a-f\d]{40}$/i.test(input.wallet)) return 'wallet';
+  return input.chainId === status.network.chainId ? 'ready' : 'network';
+}
 
 export type NftEarningsScope = { identityScope: string; wallet: string; deploymentId: string };
 export type NftEarningsFetcher = (input: { wallet: string; cursor?: string }, signal?: AbortSignal) => Promise<NftEarningsPage>;

@@ -11,6 +11,7 @@ import { NftIndexedSyncNotice } from './nft-indexed-sync';
 import Link from './navigation';
 import { nftDeployedCollectionHref, nftDraftResumeHref } from '../lib/client-nft-handoff';
 import { NftReviewSummary, NftTransactionData, nftTransactionPhase } from './nft-review-summary';
+import { nftCheckoutAccess, type NftCheckoutAccess } from '../lib/client-nft-checkout-access';
 
 const money = (value: string) => `${formatIndexedAmount(value,18)} ETH`;
 const busyPhases = ['reviewing','validating','signing','confirming'];
@@ -36,6 +37,13 @@ function Stage({name,stage}:{name:string;stage:PublicNftStage}) {
   return <div className="nft-checkout-stage"><h3>{name}</h3><InfoRow label="Price per NFT">{money(stage.priceRaw)}</InfoRow><InfoRow label="Starts">{date(stage.start)}</InfoRow><InfoRow label="Ends">{date(stage.end)}</InfoRow><InfoRow label="Per-wallet limit">{stage.walletLimitRaw}</InfoRow></div>;
 }
 
+export function NftCheckoutWalletGuidance({ access }: { access: NftCheckoutAccess }) {
+  return <>
+    {access.needsWallet && <div className="button-row section-gap"><WalletButton/><span className="field-hint">Connect a wallet to continue.</span></div>}
+    {access.needsNetwork && <p className="data-notice">Switch your wallet to the test network (31337) to continue.</p>}
+  </>;
+}
+
 /** Public collection terms and checkout. Every spender signs through their own linked Privy wallet. */
 export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{collection:string;item?:IndexedNftItem;indexedDeploymentId?:string|null;onRefresh?:()=>void}) {
   const wallet=useWallet(), latestWallet=useRef(wallet); latestWallet.current=wallet;
@@ -47,15 +55,15 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
   const scope=wallet.identityScope();
   const selectionKey=item?JSON.stringify([collection.toLowerCase(),item.tokenId,item.owner,item.listing?.id,item.listing?.status]):collection.toLowerCase();
   const context=useRef<NftLaunchContext>({identityScope:scope,address:wallet.account?.address||null,chainId:wallet.network?.chainId||null,draftId:collection.toLowerCase(),revision:0,prepared:false,scope:'public',userId:wallet.userId});
-  const matchingDeployment=Boolean(details && details.collection.toLowerCase()===collection.toLowerCase() && (!indexedDeploymentId || indexedDeploymentId===details.deploymentId));
+  const access=nftCheckoutAccess({details,collection,indexedDeploymentId,loading,error,authenticated:wallet.authenticated,connected:wallet.connected,identityScope:scope,chainId:wallet.network?.chainId??null});
+  const {matchingDeployment,ready}=access;
   context.current={identityScope:scope,address:wallet.account?.address||null,chainId:wallet.network?.chainId||null,draftId:collection.toLowerCase(),revision:0,prepared:Boolean(matchingDeployment&&details?.opened),deploymentId:details?.deploymentId,scope:'public',userId:wallet.userId,selectionKey,termsHash:details?.termsHash};
   const controller=useMemo(()=>createNftLaunchController({api,context:()=>context.current,sendEvmTransaction:tx=>latestWallet.current.sendEvmTransaction(tx)}),[api]);
   const state=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
   const busy=busyPhases.includes(state.phase),submitted=Boolean(state.hash&&!['confirmed','reverted'].includes(state.receipt?.status||''));
-  const ready=Boolean(details?.opened&&matchingDeployment&&wallet.authenticated&&wallet.connected&&scope&&wallet.network?.chainId===31337);
   const localSender=wallet.account?.address.toLowerCase();
   const actions: NftLaunchAction[]=item?(item.listing?.status==='active'?(item.listing.seller.toLowerCase()===localSender?['cancel']:['buy']):item.owner?.toLowerCase()===localSender?['approve','list']:[]):['mint','claim'];
-  async function refresh(){ const ticket=++generation.current,target=collection;setLoading(true);setError(null);try{const value=await api.collection(target);if(ticket!==generation.current||currentCollection.current!==target)return;setDetails(value);}catch(reason){if(ticket===generation.current){setDetails(null);setError(reason instanceof Error?reason.message:'Current collection terms are unavailable.');}}finally{if(ticket===generation.current)setLoading(false);}}
+  async function refresh(){ const ticket=++generation.current,target=collection;setLoading(true);setError(null);try{const value=await api.collection(target);if(ticket!==generation.current||currentCollection.current!==target)return;setDetails(value);}catch(reason){if(ticket===generation.current){setError(reason instanceof Error?reason.message:'Current collection terms are unavailable.');}}finally{if(ticket===generation.current)setLoading(false);}}
   useEffect(()=>{setDetails(null);void refresh();return()=>{generation.current+=1;};},[collection]);
   useEffect(()=>{controller.syncContext();setAck(false);},[controller,scope,collection,details?.deploymentId,details?.termsHash,details?.opened,matchingDeployment,selectionKey]);
   useEffect(()=>{if(actions.length&&!actions.includes(action)){controller.invalidate('Choose an action for the current wallet and NFT.');setAction(actions[0]);}},[localSender,item?.listing?.id,item?.listing?.status,item?.owner]);
@@ -82,8 +90,7 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
     {details&&details.collection.toLowerCase()===collection.toLowerCase()&&<><div className="review-rows"><InfoRow label="Collection"><Address value={details.collection} full/></InfoRow><InfoRow label="Minted / maximum supply">{details.totalMintedRaw} / {details.terms.maxSupplyRaw}</InfoRow><InfoRow label="Creator royalty">{details.terms.royaltyBps/100}% on resale</InfoRow><InfoRow label="Terms">{details.opened?'Permanently frozen':'Mint has not opened'}</InfoRow><InfoRow label="Current mint phase">{allowlistActive?'Allowlist':publicActive?'Public mint':'No active mint phase'}</InfoRow><InfoRow label="Last checked">{details.blockNumber}, {date(details.blockTimestamp)}</InfoRow></div><div className="field-grid section-gap">{details.terms.allowlistRoot!==`0x${'0'.repeat(64)}`&&<Stage name="Allowlist mint" stage={details.terms.allowlist}/>}<Stage name="Public mint" stage={details.terms.publicMint}/></div></>}
     {details&&!matchingDeployment&&<ErrorState message="This collection’s network changed. Refresh the page before continuing."/>}
     {details&&!details.opened&&<p className="data-notice">Minting opens after the creator locks the collection terms.</p>}
-    {(!wallet.authenticated||!wallet.connected)&&<div className="button-row section-gap"><WalletButton/><span className="field-hint">Connect a wallet to continue.</span></div>}
-    {wallet.authenticated&&wallet.connected&&wallet.network?.chainId!==31337&&<p className="data-notice">Switch your wallet to the test network (31337) to continue.</p>}
+    <NftCheckoutWalletGuidance access={access}/>
     {ready&&actions.length>0&&<><div className="field-grid section-gap"><Field label="Action"><select value={action} disabled={busy||submitted} onChange={event=>change(()=>setAction(event.target.value as NftLaunchAction))}>{actions.map(value=><option key={value} value={value}>{actionName[value]}</option>)}</select></Field>
       {action==='mint'&&<Field label="Quantity" required><input inputMode="numeric" value={quantity} disabled={busy||submitted} onChange={event=>change(()=>setQuantity(event.target.value))}/></Field>}
       {action==='list'&&<Field label="Listing amount (test ETH)" required hint="Review the final buyer total before wallet approval. Platform fee and royalty are included."><input inputMode="decimal" value={price} disabled={busy||submitted} onChange={event=>change(()=>setPrice(event.target.value))}/></Field>}
@@ -91,7 +98,7 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
       {['mint','buy','cancel','claim'].includes(action)&&<Field label="Recipient" hint="Leave blank for your selected wallet."><input value={recipient} placeholder={wallet.account?.address} disabled={busy||submitted} onChange={event=>change(()=>setRecipient(event.target.value))}/></Field>}
     </div><label className="checkbox-field"><input type="checkbox" checked={ack} disabled={busy||submitted} onChange={event=>{if(!event.target.checked)controller.invalidate('Local ETH acknowledgement was removed.');setAck(event.target.checked);}}/><span>I understand this uses test ETH on chain 31337 and requires gas.</span></label><Button type="button" variant="secondary" disabled={!ack||busy||submitted||(action==='mint'&&!allowlistActive&&!publicActive)} onClick={prepare}>Review transaction</Button></>}
     {ready&&item&&actions.length===0&&<p className="data-notice">Only its owner wallet can create a listing.</p>}
-    <ReviewResult state={state} confirmationChanged={indexedSync.phase==='reorg'} canApprove={ready&&ack&&Boolean(state.review&&Date.parse(state.review.expiresAt)>clock)} onApprove={()=>void controller.approve()} onCheck={()=>void controller.refreshReceipt()}/>
+    <ReviewResult state={state} confirmationChanged={indexedSync.phase==='reorg'} canApprove={ready&&ack&&Boolean(state.review&&Date.parse(state.review.expiresAt)>clock)} onApprove={ready?()=>void controller.approve():undefined} onCheck={()=>void controller.refreshReceipt()}/>
     <NftIndexedSyncNotice state={indexedSync} onRetry={indexedSync.retry}/>
     <NftFloorSettings collection={collection}/>
   </section>;

@@ -49,13 +49,16 @@ function indexedFixture() {
     if (/^SELECT manifest_id/.test(sql)) return { rows: [{ manifest_id: 'fixture' }], rowCount: 1 };
     if (/^SELECT j.block_number/.test(sql)) return { rows: [{ block_number: '5', block_hash: hash(5), parent_hash: hash(4), block_timestamp: '1700000005', workerAlive: true, privateFloor: '12345' }], rowCount: 1 };
     if (/^SELECT to_regclass/.test(sql)) return { rows: [{ available: true }], rowCount: 1 };
+    if (/^WITH canonical_listings/.test(sql)) return { rows: aggregateRows, rowCount: aggregateRows.length };
     if (/^SELECT p.entity_id/.test(sql)) return { rows: projectedRows ?? (values?.[1] === '4' && values?.[2] === '0' ? collections.slice(1) : collections), rowCount: 2 };
     return { rows: [], rowCount: 0 };
   });
   const release = vi.fn();
   let projectedRows: Record<string, unknown>[] | undefined;
+  let aggregateRows: Record<string, unknown>[] = [{ active_listings: '0', lowest_listing_price: null, completed_sales: '0', secondary_volume: '0', invalid: false }];
   state.pool.mockReturnValue({ connect: async () => ({ query, release }) } as unknown as Pool);
-  return { ...state, query, release, collections, setRows: (rows: Record<string, unknown>[]) => { projectedRows = rows; } };
+  return { ...state, query, release, collections, setRows: (rows: Record<string, unknown>[]) => { projectedRows = rows; },
+    setAggregateRows: (rows: Record<string, unknown>[]) => { aggregateRows = rows; } };
 }
 
 beforeEach(() => { vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost'); });
@@ -68,6 +71,93 @@ const publicPresentation = (contentHash: string, tokenId: string): IndexedNftPre
 });
 const projectedItem = (tokenId = '2') => ({
   entity_id: `${address(3)}:${tokenId}`, value: { collection: address(3), tokenId, owner: address(8), burned: false }, listing_value: null,
+});
+
+describe('collection marketplace statistics', () => {
+  it('reads one exact aggregate on the held snapshot, bound to collection, deployment, marketplace and checkpoint', async () => {
+    const state = indexedFixture();
+    const price = (2n ** 256n - 1n).toString(), volume = (2n ** 257n - 2n).toString();
+    state.setAggregateRows([{ active_listings: '1', lowest_listing_price: price, completed_sales: '2', secondary_volume: volume, invalid: false }]);
+    const response = await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const body = await response.json();
+    expect(body.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: price, completedSales: '2', secondaryVolumeRaw: volume });
+    expect(JSON.stringify(body)).not.toMatch(/floorRaw|floorEnabled|allowlisted|privateEndpoint|secret-key/);
+    const calls = state.query.mock.calls.filter(([sql]) => sql.startsWith('WITH canonical_listings'));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual([expect.stringMatching(/^[a-f0-9]{64}$/), address(3), address(2), '5', '1']);
+    expect(state.pool).toHaveBeenCalledOnce();
+    expect(state.query).toHaveBeenCalledWith('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    expect(state.query).toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('reports exact zero only after a successful empty aggregate and does not aggregate collection cards', async () => {
+    const state = indexedFixture();
+    const detail = await state.read(`/collections/${address(3)}`);
+    expect((await detail.json()).marketStats).toEqual({ activeListings: '0', lowestListingPriceRaw: null, completedSales: '0', secondaryVolumeRaw: '0' });
+    state.query.mockClear();
+    const discovery = await state.read('/collections');
+    expect(discovery.status).toBe(200);
+    expect(await discovery.json()).not.toHaveProperty('marketStats');
+    expect(state.query.mock.calls.some(([sql]) => sql.startsWith('WITH canonical_listings'))).toBe(false);
+  });
+
+  it.each([
+    [], [{ active_listings: '0', lowest_listing_price: null, completed_sales: '0', secondary_volume: '0', invalid: true }],
+    [{ active_listings: '0', completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: 0, lowest_listing_price: null, completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '0', lowest_listing_price: '1', completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '1', lowest_listing_price: null, completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '1', lowest_listing_price: '0', completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '1', lowest_listing_price: (2n ** 256n).toString(), completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '2', lowest_listing_price: '1', completed_sales: '0', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '0', lowest_listing_price: null, completed_sales: '1', secondary_volume: '0', invalid: false }],
+    [{ active_listings: '0', lowest_listing_price: null, completed_sales: '0', secondary_volume: '1', invalid: false }],
+    [{ active_listings: '0', lowest_listing_price: null, completed_sales: '1', secondary_volume: '01', invalid: false }],
+  ])('rejects missing or inconsistent aggregate rows instead of returning zero: %j', async (...rows) => {
+    const state = indexedFixture();
+    state.setAggregateRows(rows as Record<string, unknown>[]);
+    const response = await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ error: { code: 'INDEXER_DATA_INVALID' } });
+    expect(body).not.toHaveProperty('marketStats');
+    expect(state.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(state.query).not.toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('redacts aggregate database failures and rolls back without a zero fallback', async () => {
+    const state = indexedFixture();
+    const baseQuery = state.query.getMockImplementation()!;
+    state.query.mockImplementation(async (sql, values) => {
+      if (sql.startsWith('WITH canonical_listings')) throw new Error('private-db.internal secret-password');
+      return baseQuery(sql, values);
+    });
+    const response = await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ error: { code: 'INDEXER_READ_UNAVAILABLE' } });
+    expect(JSON.stringify(body)).not.toMatch(/private-db|secret-password|marketStats/);
+    expect(state.query).toHaveBeenCalledWith('ROLLBACK');
+  });
+
+  it('returns a missing collection as not found without inventing an empty market', async () => {
+    const state = indexedFixture();
+    state.setRows([]);
+    const response = await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: 'INDEXED_RECORD_NOT_FOUND' } });
+    expect(state.query.mock.calls.some(([sql]) => sql.startsWith('WITH canonical_listings'))).toBe(false);
+  });
+
+  it('keeps disabled collection statistics unavailable without touching providers', async () => {
+    const state = fixture({ ONESHOT_INDEXER_READS_ENABLED: 'false' });
+    const response = await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ context: { available: false }, collection: null, marketStats: null });
+    expect(state.pool).not.toHaveBeenCalled();
+  });
 });
 
 describe('canonical indexed NFT presentation', () => {

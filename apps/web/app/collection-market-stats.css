@@ -1,0 +1,14 @@
+.collection-market-stats{padding:22px;margin-bottom:24px}
+.collection-market-stats-heading h2{font-size:18px;letter-spacing:-.4px}
+.collection-market-stats-heading p{font-size:12px;line-height:1.7;color:var(--muted);margin-top:7px}
+.collection-market-stats-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin:22px 0}
+.collection-market-stats-grid>div{min-width:0}
+.collection-market-stats-grid dt{font-size:11px;color:var(--muted);line-height:1.6}
+.collection-market-stats-grid dd{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.5;margin:7px 0 0;overflow-wrap:anywhere}
+.collection-market-stats-grid dd>span{font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap}
+.collection-market-stats-grid .collection-market-no-listing{font-size:15px;font-weight:500}
+.collection-market-stats-scope,.collection-market-stats-checkpoint{font-size:11px;line-height:1.8;color:var(--muted);overflow-wrap:anywhere}
+.collection-market-stats-checkpoint{margin-top:8px}
+.collection-market-stats-unavailable{padding-top:18px}
+.collection-market-stats-unavailable p{font-size:12px;line-height:1.8;color:var(--muted);margin-bottom:12px}
+@media(max-width:520px){.collection-market-stats{padding:17px;margin-bottom:18px}.collection-market-stats-grid{grid-template-columns:minmax(0,1fr);gap:17px;margin:20px 0}.collection-market-stats-grid dd{font-size:20px;margin-top:4px}}

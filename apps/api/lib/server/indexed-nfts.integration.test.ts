@@ -6,7 +6,7 @@ import { createIndexedNftReader, type IndexedReaderDependencies } from './indexe
 import { api } from './http';
 import { manifestId, parseManifest } from '../../../indexer/src/manifest';
 import { PostgresIndexerStore, type SqlPool } from '../../../indexer/src/store';
-import type { Block, ChainSource, Manifest, ProjectionValue } from '../../../indexer/src/types';
+import type { Block, ChainSource, IndexerTransaction, Manifest, ProjectionValue } from '../../../indexer/src/types';
 
 // This suite can never fall back to an ambient application/production database.
 const databaseUrl = process.env.ONESHOT_API_TEST_DATABASE_URL;
@@ -86,6 +86,21 @@ function itemRow(fixture: Fixture, tokenId: string, owner: string | null, active
   return { id: `${at}:${tokenId}`, collection: at, tokenId, owner, burned: owner === null, minted: true,
     activeListingId, escrowRelease: null, approved: null, transferCount: '1', ...fixture.meta() };
 }
+async function putListing(fixture: Fixture, tx: IndexerTransaction, id: string, status: 'active' | 'sold' | 'cancelled',
+  overrides: ProjectionValue = {}, number = 1n, source = market) {
+  const logIndex = Number(id) + 1, transactionHash = hash(600 + Number(id));
+  const listing = { listingId: id, collection, tokenId: id === '1' ? '2' : '1', seller: alice, totalPrice: exactPrice, status,
+    ...fixture.meta(number), lastTransactionHash: transactionHash, lastLogIndex: logIndex, ...overrides };
+  await tx.put('listings', id, listing);
+  await tx.put('activity', `${transactionHash}:${logIndex}`, {
+    eventName: status === 'active' ? 'Listed' : status === 'sold' ? 'Sold' : 'ListingCancelled', source,
+    args: { listingId: id, totalPrice: listing.totalPrice, ...(status === 'active'
+      ? { collection: listing.collection, tokenId: listing.tokenId, seller: listing.seller }
+      : { buyer: alice, recipient: alice, platformFee: '200', royalty: '500', sellerProceeds: '9300' }) },
+    blockNumber: number.toString(), blockHash: fixture.canonical.get(number)!.hash, transactionHash, transactionIndex: 1, logIndex,
+    schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
+  });
+}
 async function seed(fixture: Fixture) {
   await fixture.store.transaction(async tx => {
     await tx.put('collections', collection, collectionRow(fixture));
@@ -94,24 +109,138 @@ async function seed(fixture: Fixture) {
     await tx.put('items', `${collection}:2`, itemRow(fixture, '2', market, '1'));
     await tx.put('items', `${collection}:3`, itemRow(fixture, '3', null));
     await tx.put('items', `${otherCollection}:10`, itemRow(fixture, '10', alice, null, otherCollection));
-    await tx.put('listings', '1', { listingId: '1', collection, tokenId: '2', seller: alice, totalPrice: exactPrice, status: 'active', ...fixture.meta() });
-    await tx.put('listings', '2', { listingId: '2', collection, tokenId: '1', seller: bob, totalPrice: '10000', status: 'sold', buyer: alice,
-      recipient: alice, platformFee: '200', royalty: '500', sellerProceeds: '9300', ...fixture.meta() });
+    await putListing(fixture, tx, '1', 'active');
+    await putListing(fixture, tx, '2', 'sold', { seller: bob, totalPrice: '10000', buyer: alice,
+      recipient: alice, platformFee: '200', royalty: '500', sellerProceeds: '9300' });
     await tx.put('claims', `${market}:${alice}`, { contract: market, beneficiary: alice, totalClaimed: exactPrice, recipient, lastAmount: '50', ...fixture.meta() });
     for (const [logIndex, at] of [collection, otherCollection].entries()) await tx.put('activity', `${hash(499)}:${logIndex}`, {
       eventName: 'CollectionCreated', source: factory, args: { collection: at, creator: alice, name: 'Indexed originals', symbol: 'SHOT' },
       blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(499), transactionIndex: 0, logIndex,
       schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
     });
-    await tx.put('activity', `${hash(500)}:2`, { eventName: 'Listed', source: market, args: { listingId: '1', collection, tokenId: '2', seller: alice, totalPrice: exactPrice },
-      blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(500), transactionIndex: 1, logIndex: 2,
-      schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337 });
     await tx.append(fixture.canonical.get(1n)!, []);
   });
 }
 const payload = async (response: Response) => { expect(response.status).toBe(200); return response.json(); };
 
 describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => {
+  it('aggregates canonical escrow listings and every completed resale, with exact gross volume above uint256', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      await fixture.store.transaction(async tx => {
+        const maximum = (2n ** 256n - 1n).toString();
+        await putListing(fixture, tx, '3', 'sold', { totalPrice: maximum, tokenId: '1' }, 2n);
+        await putListing(fixture, tx, '4', 'sold', { totalPrice: maximum, tokenId: '1' }, 2n);
+        await putListing(fixture, tx, '5', 'active', { totalPrice: '17', tokenId: '3' }, 2n);
+        await tx.put('items', `${collection}:3`, { ...itemRow(fixture, '3', market, '5'), ...fixture.meta(2n) });
+        // Historical sales survive later transfers and burns of the same item.
+        await tx.put('items', `${collection}:1`, { ...itemRow(fixture, '1', null), ...fixture.meta(2n) });
+        await tx.append(fixture.canonical.get(2n)!, []);
+      });
+      const detail = await payload(await fixture.read(`/collections/${collection}`));
+      expect(detail.context.checkpoint.number).toBe('2');
+      expect(detail.marketStats).toEqual({ activeListings: '2', lowestListingPriceRaw: '17', completedSales: '3',
+        secondaryVolumeRaw: (2n * (2n ** 256n - 1n) + 10000n).toString() });
+      const discovery = await payload(await fixture.read('/collections'));
+      expect(discovery).not.toHaveProperty('marketStats');
+      expect(discovery.items.every((item: object) => !('marketStats' in item))).toBe(true);
+      await fixture.store.transaction(async tx => { await tx.rollbackHead(); });
+      const restored = await payload(await fixture.read(`/collections/${collection}`));
+      expect(restored.context.checkpoint.number).toBe('1');
+      expect(restored.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: exactPrice, completedSales: '1', secondaryVolumeRaw: '10000' });
+    });
+  });
+
+  it('excludes cancelled, stale, unminted, burned, unrelated, noncanonical and wrong-market listings', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      await fixture.store.transaction(async tx => {
+        const candidates: [string, string, string | null, string | null, ProjectionValue][] = [
+          ['3', '3', market, '3', { burned: true }], ['4', '1', alice, '4', {}],
+          ['5', '5', market, '5', { minted: false }], ['6', '6', market, '999', {}],
+        ];
+        for (const [id, tokenId, owner, activeId, changes] of candidates) {
+          await tx.put('items', `${collection}:${tokenId}`, { ...itemRow(fixture, tokenId, owner, activeId), ...changes });
+          await putListing(fixture, tx, id, 'active', { tokenId, totalPrice: '1' });
+        }
+        await putListing(fixture, tx, '7', 'cancelled', { totalPrice: '1' });
+        await tx.put('items', `${otherCollection}:8`, itemRow(fixture, '8', market, '8', otherCollection));
+        await putListing(fixture, tx, '8', 'active', { collection: otherCollection, tokenId: '8', totalPrice: '1' });
+        await tx.put('items', `${collection}:9`, itemRow(fixture, '9', market, '9'));
+        await putListing(fixture, tx, '9', 'active', { tokenId: '9', totalPrice: '1' }, 1n, address(99));
+        await putListing(fixture, tx, '10', 'sold', { totalPrice: '1', lastBlockHash: hash(999) });
+        await putListing(fixture, tx, '11', 'sold', { totalPrice: '1' }, 1n, address(99));
+        await putListing(fixture, tx, '12', 'sold', { collection: otherCollection, totalPrice: '1' });
+        await putListing(fixture, tx, '13', 'sold', { totalPrice: '1' }, 3n); // journal has no block 3
+        await tx.append(fixture.canonical.get(2n)!, []);
+      });
+      const detail = await payload(await fixture.read(`/collections/${collection}`));
+      expect(detail.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: exactPrice, completedSales: '1', secondaryVolumeRaw: '10000' });
+      const empty = await payload(await fixture.read(`/collections/${otherCollection}`));
+      expect(empty.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: '1', completedSales: '1', secondaryVolumeRaw: '1' });
+      const index = await fixture.pool.query("SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='oneshot_evm_listing_collection_status'");
+      expect(index.rows).toHaveLength(1);
+      expect(index.rows[0].indexdef).toContain('listings');
+      await fixture.store.initialize(fixture.deploymentId); // additive migration is idempotent
+    });
+  });
+
+  it('distinguishes a successful empty market from malformed zero-priced or inexact canonical listing data', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      const empty = await payload(await fixture.read(`/collections/${otherCollection}`));
+      expect(empty.marketStats).toEqual({ activeListings: '0', lowestListingPriceRaw: null, completedSales: '0', secondaryVolumeRaw: '0' });
+      for (const totalPrice of ['0', '01', '1e2', (2n ** 256n).toString(), '1'.repeat(79), 1]) {
+        await fixture.store.transaction(async tx => {
+          await putListing(fixture, tx, '1', 'active', { totalPrice }, 2n);
+          await tx.append(fixture.canonical.get(2n)!, []);
+        });
+        const response = await fixture.read(`/collections/${collection}`);
+        expect(response.status).toBe(503);
+        const body = await response.json();
+        expect(body).toMatchObject({ error: { code: 'INDEXER_DATA_INVALID' } });
+        expect(body).not.toHaveProperty('marketStats');
+        await fixture.store.transaction(async tx => { await tx.rollbackHead(); });
+      }
+      const recovered = await payload(await fixture.read(`/collections/${collection}`));
+      expect(recovered.marketStats.lowestListingPriceRaw).toBe(exactPrice);
+    });
+  });
+
+  it('reads collection and aggregates from one checkpoint during a concurrent sale and reverses both on rollback', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      let releaseRead!: () => void, reachedAggregate!: () => void;
+      const paused = new Promise<void>(resolve => { reachedAggregate = resolve; });
+      const resume = new Promise<void>(resolve => { releaseRead = resolve; });
+      const snapshotPool: SqlPool = { async connect() {
+        const client = await fixture.pool.connect();
+        return { release: () => client.release(), async query(sql, values) {
+          if (sql.startsWith('WITH canonical_listings')) { reachedAggregate(); await resume; }
+          return client.query(sql, values);
+        } };
+      } };
+      const response = api(request => fixture.reader(snapshotPool)(request))(new NextRequest(`http://localhost/api/oneshot/indexed/collections/${collection}`), {});
+      try {
+        await Promise.race([paused, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Aggregate did not reach snapshot barrier')), 5000).unref())]);
+        await fixture.store.transaction(async tx => {
+          await putListing(fixture, tx, '1', 'sold', {}, 2n);
+          await tx.put('items', `${collection}:2`, { ...itemRow(fixture, '2', bob), ...fixture.meta(2n) });
+          await tx.append(fixture.canonical.get(2n)!, []);
+        });
+      } finally { releaseRead(); }
+      const held = await payload(await response);
+      expect(held.context.checkpoint.number).toBe('1');
+      expect(held.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: exactPrice, completedSales: '1', secondaryVolumeRaw: '10000' });
+      const latest = await payload(await fixture.read(`/collections/${collection}`));
+      expect(latest.context.checkpoint.number).toBe('2');
+      expect(latest.marketStats).toEqual({ activeListings: '0', lowestListingPriceRaw: null, completedSales: '2', secondaryVolumeRaw: (BigInt(exactPrice) + 10000n).toString() });
+      await fixture.store.transaction(async tx => { await tx.rollbackHead(); });
+      const restored = await payload(await fixture.read(`/collections/${collection}`));
+      expect(restored.context.checkpoint.number).toBe('1');
+      expect(restored.marketStats).toEqual(held.marketStats);
+    });
+  });
   it('searches the full result set with stable creation ordering and literal special characters', async () => {
     await withDatabase(async fixture => {
       await seed(fixture);
@@ -231,8 +360,8 @@ describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => 
       expect(claims.items).toEqual([expect.objectContaining({ contract: market, beneficiary: alice, totalClaimedRaw: exactPrice, lastAmountRaw: '50' })]);
       expect(claims.items[0]).not.toHaveProperty('claimable');
       const activity = await payload(await fixture.read('/activity'));
-      expect(activity.items).toHaveLength(3);
-      expect(activity.items[0]).toMatchObject({ eventName: 'Listed', collection, blockNumber: '1', args: expect.objectContaining({ totalPrice: exactPrice }) });
+      expect(activity.items).toHaveLength(4);
+      expect(activity.items.find((item: { eventName: string }) => item.eventName === 'Listed')).toMatchObject({ eventName: 'Listed', collection, blockNumber: '1', args: expect.objectContaining({ totalPrice: exactPrice }) });
       expect(activity.items[0].timestamp).toBeTruthy();
     });
   });
@@ -246,12 +375,17 @@ describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => 
         await fixture.pool.query('INSERT INTO oneshot_evm_deployments(manifest_id) VALUES($1)', [otherManifest]);
         await fixture.pool.query('INSERT INTO oneshot_evm_projections(manifest_id,kind,entity_id,value) VALUES($1,$2,$3,$4::jsonb)',
           [otherManifest, 'collections', foreignAddress, JSON.stringify(collectionRow(fixture, 'Foreign deployment must remain hidden', foreignAddress))]);
+        await fixture.pool.query('INSERT INTO oneshot_evm_journal(manifest_id,block_number,block_hash,parent_hash,block_timestamp,undo) SELECT $1,block_number,block_hash,parent_hash,block_timestamp,undo FROM oneshot_evm_journal WHERE manifest_id=$2', [otherManifest, fixture.deploymentId]);
+        await fixture.pool.query('INSERT INTO oneshot_evm_projections(manifest_id,kind,entity_id,value) SELECT $1,kind,entity_id,value FROM oneshot_evm_projections WHERE manifest_id=$2', [otherManifest, fixture.deploymentId]);
         const result = await payload(await fixture.read('/collections'));
         expect(result.items).toHaveLength(2);
         expect(JSON.stringify(result)).not.toContain('Foreign deployment must remain hidden');
         expect((await fixture.read(`/collections/${foreignAddress}`)).status).toBe(404);
+        const detail = await payload(await fixture.read(`/collections/${collection}`));
+        expect(detail.marketStats).toEqual({ activeListings: '1', lowestListingPriceRaw: exactPrice, completedSales: '1', secondaryVolumeRaw: '10000' });
       } finally {
         await fixture.pool.query('DELETE FROM oneshot_evm_projections WHERE manifest_id=$1', [otherManifest]);
+        await fixture.pool.query('DELETE FROM oneshot_evm_journal WHERE manifest_id=$1', [otherManifest]);
         await fixture.pool.query('DELETE FROM oneshot_evm_deployments WHERE manifest_id=$1', [otherManifest]);
       }
     });
@@ -303,6 +437,9 @@ describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => 
       fixture.canonical.set(1n, block(1n, hash(901), hash(100)));
       const response = await fixture.read('/collections');
       expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ error: { code: 'INDEXER_CHAIN_MOVED' } });
+      const detail = await fixture.read(`/collections/${collection}`);
+      expect(detail.status).toBe(409);
+      expect(await detail.json()).not.toHaveProperty('marketStats');
       const rows = await fixture.pool.query('SELECT block_hash FROM oneshot_evm_journal WHERE manifest_id=$1', [fixture.deploymentId]);
       expect(rows.rows[0].block_hash).toBe(hash(101));
     });

@@ -42,7 +42,22 @@ export type IndexedActivity = {
   args: Record<string, string | boolean>;
 };
 export type IndexedPage<T> = { context: IndexedNftContext; items: T[]; nextCursor: string | null };
-export type IndexedCollectionResponse = { context: IndexedNftContext; collection: IndexedCollection | null };
+/** Public oneshot listing/sale totals at the response's canonical indexed checkpoint.
+ * Lowest listing is a public asking price, separate from private guarded-sale policy.
+ * Secondary volume includes settlement fees/royalties, excluding primary mints and gas.
+ */
+export type IndexedCollectionMarketStats = {
+  activeListings: string;
+  lowestListingPriceRaw: string | null;
+  completedSales: string;
+  secondaryVolumeRaw: string;
+};
+export type IndexedCollectionResponse = {
+  context: IndexedNftContext;
+  collection: IndexedCollection | null;
+  /** Optional while a client talks to an older API; absence is unavailable, never zero. */
+  marketStats?: IndexedCollectionMarketStats | null;
+};
 export type IndexedItemResponse = { context: IndexedNftContext; item: IndexedNftItem | null };
 
 /** Exact decimal rendering, with no Number conversion or silent precision loss. */

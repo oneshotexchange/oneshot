@@ -82,12 +82,12 @@ describe('customer transaction summaries', () => {
     expect(html).not.toContain('Load saved transactions');
   });
 
-  it('offers a wallet action before network guidance to a signed-in collector without a wallet', () => {
+  it('waits for verified collection terms before asking a signed-in collector to connect a wallet', () => {
     recoveryWallet.current = { authenticated: true, configured: true, connected: false, account: null, userId: 'owner',
       wallets: [], network: null, isLoading: false, identityScope: () => null, getAccessToken: async () => null };
     const html = render(createElement(NftCheckout, { collection: address }));
-    expect(html).toContain('Add a wallet');
-    expect(html).toContain('Connect a wallet to continue.');
+    expect(html).not.toContain('Add a wallet');
+    expect(html).not.toContain('Connect a wallet to continue.');
     expect(html).not.toContain('Switch your wallet to the test network');
     expect(html).not.toContain('Review transaction');
   });

@@ -9,10 +9,12 @@ import { NftEarnings } from './nft-earnings';
 import { collectionDiscoveryFilters, indexedCollectionsPath, sameIndexedCheckpoint, useIndexedPage, useIndexedResource, type CollectionDiscoveryFilters } from '../lib/client-indexed-api';
 import { indexedPresentation, type IndexedPresentation } from '../lib/client-indexed-presentation';
 import { nftDeploymentLinkIssue } from '../lib/client-nft-deployment-link';
+import { nftCollectionMarketStats } from '../lib/client-nft-collection-stats';
 import { shortAddress } from '../lib/client-api';
 import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, InfoRow, Loading, PageHeading, SafetyNote, Stat, Tabs } from './ui';
 import type { StudioIllustrationKind } from './studio-illustration';
 import '../app/collection-discovery.css';
+import '../app/collection-market-stats.css';
 
 const base = '/api/oneshot/indexed';
 const collectionKey = (value: IndexedCollection) => value.address;
@@ -130,6 +132,26 @@ export function IndexedCollectionPreview({ collection }: { collection: IndexedCo
   return <section className="panel indexed-collection-preview" aria-label="First NFT preview"><IndexedArtwork className="indexed-preview-art" presentation={presentation} alt={`First NFT from ${collection.name}: ${presentation.name}`} /><div><h2>{presentation.name || 'NFT #1'}</h2>{presentation.description && <p className="indexed-presentation-description">{presentation.description}</p>}<p className="indexed-preview-note">Artwork from the first NFT in this collection.</p><PresentationMetadata presentation={presentation} /></div></section>;
 }
 
+/** Public asking prices and completed resale totals, separate from creator listing-price policies. */
+export function IndexedCollectionMarketStats({ response, collection, deploymentId, onRefresh }: {
+  response: IndexedCollectionResponse | null; collection: string; deploymentId?: string; onRefresh(): void;
+}) {
+  const stats = nftCollectionMarketStats(response, collection, deploymentId);
+  return <section className="panel collection-market-stats" aria-label="Marketplace activity">
+    <div className="collection-market-stats-heading"><h2>Marketplace activity</h2><p>Listings and completed resales on oneshot only.</p></div>
+    {stats ? <>
+      <dl className="collection-market-stats-grid">
+        <div><dt>Lowest listing</dt><dd className={stats.lowestListing === null ? 'collection-market-no-listing' : undefined}>{stats.lowestListing === null ? 'No active listing' : <>{stats.lowestListing} <span>ETH</span></>}</dd></div>
+        <div><dt>Active listings</dt><dd>{stats.activeListings}</dd></div>
+        <div><dt>Completed resales</dt><dd>{stats.completedSales}</dd></div>
+        <div><dt>Resale volume</dt><dd>{stats.resaleVolume} <span>ETH</span></dd></div>
+      </dl>
+      <p className="collection-market-stats-scope">Resale volume includes the platform fee and creator royalty. It excludes primary mints and network gas.</p>
+      <p className="collection-market-stats-checkpoint">As of block {stats.blockNumber}. Recent activity may change while the network confirms it.</p>
+    </> : <div className="collection-market-stats-unavailable"><p>Marketplace activity is unavailable. Refresh this collection to try again.</p><Button variant="secondary" onClick={onRefresh}><RefreshCw size={13} />Refresh collection</Button></div>}
+  </section>;
+}
+
 export function IndexedNftCollection({ id }: { id: string }) {
   const location = useLocation();
   const response = useIndexedResource<IndexedCollectionResponse>(collectionPath(id));
@@ -151,6 +173,7 @@ export function IndexedNftCollection({ id }: { id: string }) {
     <IndexedContextNote context={response.data?.context} />
     <IndexedCollectionPreview collection={collection} />
     <div className="metric-grid" style={{gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))'}}><Stat label="Total minted" value={collection.totalMinted} /><Stat label="Mint sales" value={formatIndexedAmount(collection.primaryTotalPriceRaw)} suffix="ETH" note="Total paid by collectors" /><Stat label="Mint terms" value={collection.opened ? 'Locked' : 'Editable'} note="Locked when minting opens" /></div>
+    <IndexedCollectionMarketStats response={response.data} collection={id} deploymentId={expectedDeployment} onRefresh={refresh} />
     <NftCheckout collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh} />
     <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'items', label: 'Items' }, { value: 'listings', label: 'Active listings' }, { value: 'activity', label: 'Activity' }]} active={tab} onChange={setTab} /></div>
       {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <PageBody page={page} empty="No NFTs minted yet" description="Check the mint details above for the schedule and price."><IndexedItemCards items={page.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} /></PageBody>}

@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS oneshot_evm_projections (
 -- ordered index supports newest/oldest keyset pages by scanning in either direction.
 CREATE INDEX IF NOT EXISTS oneshot_evm_collection_creation_order
   ON oneshot_evm_projections(manifest_id,((value->>'blockNumber')::numeric) DESC,((value->>'logIndex')::integer) DESC)
-  WHERE kind='activity' AND value->>'eventName'='CollectionCreated';`;
+  WHERE kind='activity' AND value->>'eventName'='CollectionCreated';
+-- Collection detail aggregates only that deployment's current listing states.
+CREATE INDEX IF NOT EXISTS oneshot_evm_listing_collection_status
+  ON oneshot_evm_projections(manifest_id,(value->>'collection'),(value->>'status'))
+  WHERE kind='listings';`;
 
 const kinds: readonly ProjectionKind[] = ['collections', 'items', 'listings', 'claims', 'activity'];
 

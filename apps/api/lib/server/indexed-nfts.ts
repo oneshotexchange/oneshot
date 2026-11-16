@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { NextRequest } from 'next/server';
-import { createVerifiedRpc, networkConfig, type IndexedNftContext, type IndexedCollection, type IndexedListing, type IndexedNftItem, type IndexedActivity, type IndexedClaim, type IndexedNftPresentation } from '@oneshot/evm';
+import { createVerifiedRpc, networkConfig, type IndexedNftContext, type IndexedCollection, type IndexedCollectionMarketStats, type IndexedListing, type IndexedNftItem, type IndexedActivity, type IndexedClaim, type IndexedNftPresentation } from '@oneshot/evm';
 import { manifestId, parseManifest, isAddress, isHash } from '../../../indexer/src/manifest';
 import { VerifiedRpcSource } from '../../../indexer/src/rpc-source';
 import type { ChainSource, Manifest } from '../../../indexer/src/types';
@@ -114,7 +114,7 @@ const disabledContext = (enabled: boolean, reason: string, deploymentId: string 
 });
 function emptyResult(context: IndexedNftContext, select: Selection) {
   if (select.resource === 'status') return { context };
-  if (select.resource === 'collection') return { context, collection: null };
+  if (select.resource === 'collection') return { context, collection: null, marketStats: null };
   if (select.resource === 'item') return { context, item: null };
   return { context, items: [], nextCursor: null };
 }
@@ -233,6 +233,64 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
   return (await client.query(`SELECT ${columns} FROM oneshot_evm_projections p ${joins} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ${bind(count)}`, values)).rows;
 }
 
+/** One aggregate on the held repeatable-read snapshot, never a paginated approximation. */
+async function collectionMarketStats(client: SqlClient, identity: string, collection: string, manifest: Manifest, checkpoint: string): Promise<IndexedCollectionMarketStats> {
+  const result = await client.query(`WITH canonical_listings AS (
+    SELECT p.entity_id,p.value,a.value AS action,
+      CASE WHEN jsonb_typeof(p.value->'totalPrice')='string' AND p.value->>'totalPrice' ~ '^[1-9][0-9]{0,77}$'
+        THEN (p.value->>'totalPrice')::numeric BETWEEN 1 AND 115792089237316195423570985008687907853269984665640564039457584007913129639935
+        ELSE false END AS valid_price,
+      EXISTS (
+        SELECT 1 FROM oneshot_evm_projections i
+        JOIN oneshot_evm_journal ij ON ij.manifest_id=i.manifest_id
+          AND ij.block_number=(i.value->>'lastBlockNumber')::numeric AND ij.block_hash=i.value->>'lastBlockHash'
+        WHERE i.manifest_id=p.manifest_id AND i.kind='items'
+          AND i.entity_id=$2||':'||(p.value->>'tokenId') AND i.value->>'collection'=$2
+          AND i.value->>'tokenId'=p.value->>'tokenId' AND i.value->'minted'='true'::jsonb AND i.value->'burned'='false'::jsonb
+          AND i.value->>'owner'=$3 AND i.value->>'activeListingId'=p.entity_id
+          AND ij.block_number BETWEEN $5::numeric AND $4::numeric
+      ) AS escrowed
+    FROM oneshot_evm_projections p
+    JOIN oneshot_evm_journal j ON j.manifest_id=p.manifest_id
+      AND j.block_number=(p.value->>'lastBlockNumber')::numeric AND j.block_hash=p.value->>'lastBlockHash'
+    JOIN oneshot_evm_projections a ON a.manifest_id=p.manifest_id AND a.kind='activity'
+      AND a.entity_id=(p.value->>'lastTransactionHash')||':'||(p.value->>'lastLogIndex')
+      AND a.value->>'source'=$3 AND a.value->>'blockNumber'=p.value->>'lastBlockNumber'
+      AND a.value->>'blockHash'=j.block_hash AND a.value->>'transactionHash'=p.value->>'lastTransactionHash'
+      AND a.value->>'logIndex'=p.value->>'lastLogIndex' AND a.value->'args'->>'listingId'=p.entity_id
+      AND a.value->>'eventName'=CASE p.value->>'status' WHEN 'active' THEN 'Listed' WHEN 'sold' THEN 'Sold' END
+    WHERE p.manifest_id=$1 AND p.kind='listings' AND p.value->>'collection'=$2
+      AND p.value->>'status' IN ('active','sold') AND j.block_number BETWEEN $5::numeric AND $4::numeric
+  ), amounts AS (
+    SELECT *,CASE WHEN valid_price THEN (value->>'totalPrice')::numeric ELSE NULL END AS price,
+      (value->>'status'='active' AND escrowed) AS active
+    FROM canonical_listings
+  )
+  SELECT count(*) FILTER (WHERE active)::text AS active_listings,
+    min(price) FILTER (WHERE active)::text AS lowest_listing_price,
+    count(*) FILTER (WHERE value->>'status'='sold')::text AS completed_sales,
+    COALESCE(sum(price) FILTER (WHERE value->>'status'='sold'),0)::text AS secondary_volume,
+    COALESCE(bool_or(NOT valid_price OR value->>'listingId' IS DISTINCT FROM entity_id
+      OR entity_id !~ '^[1-9][0-9]{0,77}$'
+      OR CASE WHEN entity_id ~ '^[1-9][0-9]{0,77}$' THEN entity_id::numeric >= power(2::numeric,256) ELSE true END
+      OR CASE WHEN jsonb_typeof(value->'tokenId')='string' AND value->>'tokenId' ~ '^[1-9][0-9]{0,77}$'
+        THEN (value->>'tokenId')::numeric >= power(2::numeric,256) ELSE true END
+      OR (value->>'status'='active' AND (action->'args'->>'collection' IS DISTINCT FROM value->>'collection'
+        OR action->'args'->>'tokenId' IS DISTINCT FROM value->>'tokenId'))
+      OR action->'args'->>'totalPrice' IS DISTINCT FROM value->>'totalPrice'),false) AS invalid
+  FROM amounts`, [identity, collection, manifest.marketplace.address, checkpoint, manifest.startBlock.toString()]);
+  if (result.rows.length !== 1) return invalidData();
+  const row = result.rows[0];
+  if (row.invalid !== false) return invalidData();
+  const activeListings = numberText(row.active_listings, 78), completedSales = numberText(row.completed_sales, 78);
+  const lowestListingPriceRaw = row.lowest_listing_price === null ? null : numberText(row.lowest_listing_price, 78);
+  const secondaryVolumeRaw = numberText(row.secondary_volume);
+  if (activeListings === '0' ? lowestListingPriceRaw !== null : lowestListingPriceRaw === null || BigInt(lowestListingPriceRaw) === 0n
+    || BigInt(lowestListingPriceRaw) >= 2n ** 256n) return invalidData();
+  if (completedSales === '0' ? secondaryVolumeRaw !== '0' : BigInt(secondaryVolumeRaw) === 0n) return invalidData();
+  return { activeListings, lowestListingPriceRaw, completedSales, secondaryVolumeRaw };
+}
+
 function rowKey(select: Selection, row: Record<string, unknown>): string[] {
   const value = valueRecord(row.value);
   if (select.resource === 'collections') {
@@ -331,7 +389,13 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
       if (select.resource === 'status') result = { context };
       else if (select.resource === 'collection' || select.resource === 'item') {
         if (!resultRows.length) throw new ApiError(404, 'INDEXED_RECORD_NOT_FOUND', 'This NFT record is not present at the indexed checkpoint.');
-        result = select.resource === 'collection' ? { context, collection: await convert(resultRows[0]) } : { context, item: await convert(resultRows[0]) };
+        if (select.resource === 'collection') {
+          const collection = await convert(resultRows[0]);
+          if (!('address' in collection) || collection.address !== select.collection) return invalidData();
+          const marketStats = await collectionMarketStats(client, identity, select.collection!, manifest, block);
+          if (BigInt(marketStats.activeListings) > BigInt(collection.totalMinted)) return invalidData();
+          result = { context, collection, marketStats };
+        } else result = { context, item: await convert(resultRows[0]) };
       } else {
         const page = resultRows.slice(0, select.limit);
         const items = await mapPresentation(page, convert);

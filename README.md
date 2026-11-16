@@ -72,6 +72,14 @@ NFT creation also preserves incomplete browser working terms separately from nam
 
 Media uploads reserve quota through per-attempt 60-second leases and publish their metadata only after storage succeeds. Failed attempts release their own reservation; interrupted leases expire. Existing published content is retained. Physical orphan objects from ambiguous provider timeouts and legacy failed-upload records require separate conservative reconciliation.
 
+## NFT browsing
+
+Collection details include marketplace activity from the same canonical indexed checkpoint as the collection record. `marketStats` reports exact string counts (`activeListings`, `completedSales`) and native base-unit totals (`lowestListingPriceRaw`, `secondaryVolumeRaw`). The lowest listing is a public asking price; it does not expose a creator's private listing policy. No active listings returns a null lowest price. Missing or invalid statistics are unavailable, not a zero-activity market.
+
+Active listings must match the marketplace's current escrow item. Completed resales retain their history after later ownership changes. Resale volume is the gross buyer total on oneshot, including settlement fees and royalties, excluding primary mints and gas. These are all-time indexed totals, not 24-hour statistics or finality claims. Discovery cards do not request per-collection aggregates.
+
+The indexer initializer adds the listing collection/status index idempotently; public reads never migrate the database. Plan its additive index build before rollout on an existing large dataset. No projection reset or backfill is required. The client tolerates an older API without statistics and offers a refresh action. Checkout still verifies current terms independently before review and pauses wallet setup/approval guidance during failed or pending terms reads; saved receipts remain accessible.
+
 ## Genesis whitelist
 
 `/whitelist` uses official X OAuth with PKCE for applications, public-post/follow verification, referrals,

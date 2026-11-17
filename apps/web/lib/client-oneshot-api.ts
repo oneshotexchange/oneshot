@@ -2,6 +2,8 @@ import { serviceMessage } from './service-message';
 import { oneshotDraftSchema, type OneshotDraft, type OneshotDraftInput } from './oneshot-draft-schema';
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
+import { tokenAccountDraftId, tokenAccountDraftListSchema, tokenAccountDraftSchema, type TokenAccountDraft } from './token-account-draft';
+import { tokenDraftSchema, tokenDraftsEqual, type TokenDraft } from './token-drafts';
 
 export type LocalCollectionDraft = {
   pricingNetwork?: 'zero' | 'base-sepolia';
@@ -114,6 +116,31 @@ export function createOneshotAccountApi(options: {
     return body as T;
   }
   return {
+    async listTokenDrafts() {
+      const parsed = tokenAccountDraftListSchema.safeParse(await request<unknown>('/api/oneshot/token-drafts'));
+      if (!parsed.success) throw new Error('Account drafts could not be loaded. Refresh and try again.');
+      return parsed.data;
+    },
+    async getTokenDraft(id: string) {
+      const selected = tokenAccountDraftId.parse(id);
+      const parsed = tokenAccountDraftSchema.safeParse(await request<unknown>(`/api/oneshot/token-drafts/${selected}`));
+      if (!parsed.success || parsed.data.id !== selected) throw new Error('This account draft could not be opened. Refresh and try again.');
+      return parsed.data;
+    },
+    async saveTokenDraft(draft: TokenDraft, previous?: Pick<TokenAccountDraft, 'id' | 'revision'>) {
+      const terms = tokenDraftSchema.parse(draft), id = previous ? tokenAccountDraftId.parse(previous.id) : null;
+      const parsed = tokenAccountDraftSchema.safeParse(await request<unknown>(id ? `/api/oneshot/token-drafts/${id}` : '/api/oneshot/token-drafts', {
+        method: id ? 'PUT' : 'POST', body: JSON.stringify(previous ? { expectedRevision: previous.revision, draft: terms } : terms),
+      }));
+      if (!parsed.success || !tokenDraftsEqual(parsed.data.draft, terms) || (id ? parsed.data.id !== id || parsed.data.revision !== previous!.revision + 1 : parsed.data.revision !== 1)) throw new Error('The saved account copy could not be verified. Refresh account drafts before retrying.');
+      return parsed.data;
+    },
+    async archiveTokenDraft(previous: Pick<TokenAccountDraft, 'id' | 'revision'>) {
+      const id = tokenAccountDraftId.parse(previous.id);
+      const body = await request<unknown>(`/api/oneshot/token-drafts/${id}`, { method: 'DELETE', body: JSON.stringify({ expectedRevision: previous.revision }) });
+      if (!body || typeof body !== 'object' || !('id' in body) || body.id !== id || !('archived' in body) || body.archived !== true) throw new Error('The archive result could not be verified. Refresh account drafts before retrying.');
+      return { id, archived: true as const };
+    },
     session: () => request<PrivyAccountSession>('/api/oneshot/session'),
     listDrafts: () => request<{ items: OneshotDraft[] }>('/api/oneshot/drafts'),
     getDraft: (id: string) => {

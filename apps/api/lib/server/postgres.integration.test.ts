@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { archiveOneshotDraft, createOneshotDraft, getOneshotDraft, listOneshotDrafts, updateOneshotDraft } from './oneshot-drafts';
 import { beginMediaUpload, cancelMediaUpload, commitMediaUpload, compareAndSetRecord, database, MEDIA_UPLOAD_LEASE_MS, reserveMedia } from './store';
 import type { OneshotSession } from './oneshot-auth';
+import { createTokenAccountDraft, getTokenAccountDraft, listTokenAccountDrafts, updateTokenAccountDraft, archiveTokenAccountDraft } from './token-account-drafts';
+import { emptyTokenDraft } from '../../../web/lib/token-drafts';
 
 // Explicit opt-in only. An ambient DATABASE_URL must never select this suite's DB.
 const testDatabaseUrl = process.env.ONESHOT_API_TEST_DATABASE_URL;
@@ -63,7 +65,7 @@ async function withDatabase(run: (fixture: Fixture) => Promise<void>) {
       if (schemaReady) {
         // No global deletion: only random identities and content IDs allocated here.
         if (owners.size) await inspect.query(
-          "DELETE FROM b20_app_records WHERE namespace='oneshot_drafts' AND value->>'ownerUserId'=ANY($1::text[])", [[...owners]],
+          "DELETE FROM b20_app_records WHERE namespace IN ('oneshot_drafts','oneshot_token_drafts') AND value->>'ownerUserId'=ANY($1::text[])", [[...owners]],
         );
         if (mediaIds.size) await inspect.query(
           "DELETE FROM b20_app_records WHERE namespace='media' AND id=ANY($1::text[]) AND value->>'owner'=ANY($2::text[])",
@@ -89,6 +91,25 @@ const input = (session: OneshotSession, name = 'PostgreSQL integration collectio
 });
 
 describe.skipIf(!testDatabaseUrl)('real PostgreSQL API persistence', () => {
+  it('preserves token account copies after pool restart and serializes capacity and stale edit races', async () => {
+    await withDatabase(async ({ session, reopen }) => {
+      const owner = { ...session(), linkedAddresses: [] }, other = session();
+      const terms = { ...emptyTokenDraft(), name: 'Exact token draft', symbol: 'EXACT', openingValuation: '0.000000000000000001' };
+      const writes = await Promise.allSettled(Array.from({ length: 22 }, () => createTokenAccountDraft(terms, owner)));
+      expect(writes.filter(value => value.status === 'fulfilled')).toHaveLength(20);
+      await reopen();
+      const records = await listTokenAccountDrafts(owner); expect(records).toHaveLength(20);
+      const selected = records[0]; expect((await getTokenAccountDraft(selected.id, owner)).draft).toEqual(terms);
+      await expect(getTokenAccountDraft(selected.id, other)).rejects.toMatchObject({ status: 404 });
+      const edits = await Promise.allSettled(['First edit', 'Other edit'].map(name => updateTokenAccountDraft(selected.id, { ...terms, name }, 1, owner)));
+      expect(edits.filter(value => value.status === 'fulfilled')).toHaveLength(1);
+      await reopen(); expect((await getTokenAccountDraft(selected.id, owner)).revision).toBe(2);
+      await expect(updateTokenAccountDraft(selected.id, { ...terms, pricingNetwork: 'zero' }, 2, owner)).rejects.toMatchObject({ code: 'DRAFT_PRICING_NETWORK_MISMATCH' });
+      await expect(archiveTokenAccountDraft(selected.id, 1, owner)).rejects.toMatchObject({ code: 'DRAFT_CHANGED' });
+      await archiveTokenAccountDraft(selected.id, 2, owner);
+      await createTokenAccountDraft(terms, owner); expect(await listTokenAccountDrafts(owner)).toHaveLength(20);
+    });
+  });
   it('durably preserves exact decimal strings across a new pool and isolates owners', async () => {
     await withDatabase(async ({ inspect, session, reopen }) => {
       const alice = session(), bob = session();

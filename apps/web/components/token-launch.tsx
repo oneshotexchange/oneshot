@@ -9,6 +9,8 @@ import { parseDraftBackup, serializeDraftBackup } from '../lib/draft-backup';
 import { draftPriceUnit, draftPricingNetwork } from '../lib/nft-network';
 import { tokenCopyForBase } from '../lib/draft-pricing';
 import { TokenLaunchReview } from './token-execution-panel';
+import { TokenAccountDrafts } from './token-account-drafts';
+import { useWallet } from '../lib/client-wallet';
 import { draftStorageUnchanged } from '../lib/draft-storage-migration';
 import {
   TOKEN_DRAFTS_STORAGE_KEY, LEGACY_TOKEN_DRAFTS_STORAGE_KEY, LEGACY_TOKEN_DRAFT_STORAGE_KEY, TokenDraftStorageError, createTokenDraftAutosave, emptyTokenDraftWorkspace, newTokenDraft,
@@ -17,8 +19,10 @@ import {
   type TokenDraft, type TokenDraftWorkspace,
 } from '../lib/token-drafts';
 
-type DraftAction = { kind: 'new' | 'copy-base' } | { kind: 'resume'; id: string } | { kind: 'reload' };
+type DraftAction = { kind: 'new' | 'copy-base' } | { kind: 'resume'; id: string } | { kind: 'reload' } | { kind: 'account-copy'; draft: TokenDraft; scope: string };
 export function TokenLaunch() {
+  const wallet = useWallet(), currentWallet = useRef(wallet); currentWallet.current = wallet;
+  const accountScope = wallet.identityScope();
   const [workspace, setWorkspace] = useState<TokenDraftWorkspace>(emptyTokenDraftWorkspace);
   const [loaded, setLoaded] = useState(false), [writable, setWritable] = useState(false);
   const [review, setReview] = useState(false), [accepted, setAccepted] = useState(false);
@@ -30,6 +34,9 @@ export function TokenLaunch() {
   const draft = workspace.working.draft, selectedId = workspace.working.savedId;
   const selected = workspace.saved.find(record => record.id === selectedId);
   const label = (value: TokenDraft) => value.name.trim() || 'Untitled token';
+  useEffect(() => {
+    setPendingAction(previous => previous?.kind === 'account-copy' && previous.scope !== accountScope ? null : previous);
+  }, [accountScope]);
   function storageFailure(error: unknown) {
     setStorageError(error instanceof TokenDraftStorageError ? error.message : 'Your token drafts could not be saved. Keep this page open or export a backup.');
     setAutosave('memory');
@@ -107,10 +114,13 @@ export function TokenLaunch() {
     } catch (error) { storageFailure(error); return null; }
   }
   function applyAction(action: DraftAction, current = latestWorkspace.current) {
+    if (action.kind === 'account-copy' && action.scope !== currentWallet.current.identityScope()) {
+      setPendingAction(null); setFormError('Your account changed. Choose the saved account draft again.'); return;
+    }
     if (action.kind === 'reload') { loadWorkspace(); return; }
     try {
-      autosaveController.current?.cancel(); updateWorkspace(action.kind === 'resume' ? resumeTokenDraft(current, action.id) : newTokenDraft(current, action.kind === 'copy-base' ? tokenCopyForBase(current.working.draft) : undefined));
-      setReview(false); setAccepted(false); setPendingAction(null); setRemoveId(null); setFormError(null); setNotice('');
+      autosaveController.current?.cancel(); updateWorkspace(action.kind === 'resume' ? resumeTokenDraft(current, action.id) : newTokenDraft(current, action.kind === 'account-copy' ? action.draft : action.kind === 'copy-base' ? tokenCopyForBase(current.working.draft) : undefined));
+      setReview(false); setAccepted(false); setPendingAction(null); setRemoveId(null); setFormError(null); setNotice(action.kind === 'account-copy' ? 'Account terms copied to a new working draft on this device. The account copy is unchanged.' : '');
     } catch (error) { storageFailure(error); }
   }
   function requestAction(action: DraftAction) {
@@ -150,6 +160,7 @@ export function TokenLaunch() {
       {pendingAction && <div className="section-gap" role="group" aria-label="Keep your current token draft"><h3>Keep your current draft?</h3><p>Save this working copy before opening another draft, or export a backup below.</p><div className="button-row"><Button type="button" disabled={!writable} onClick={() => { const next = saveCurrent(); if (next) applyAction(pendingAction, next); }}>Save & continue</Button><Button type="button" variant="secondary" onClick={() => applyAction(pendingAction)}>Continue without saving</Button><Button type="button" variant="ghost" onClick={() => setPendingAction(null)}>Keep editing</Button></div></div>}
       {removeId && <div className="section-gap" role="group" aria-label="Confirm saved token draft removal"><h3>Remove this saved draft?</h3><p>This removes the saved copy from this device. Your open working copy will remain.</p><div className="button-row"><Button type="button" variant="secondary" disabled={!writable} onClick={confirmRemoval}>Remove saved copy</Button><Button type="button" variant="ghost" onClick={() => setRemoveId(null)}>Cancel</Button></div></div>}
     </section>
+    <TokenAccountDrafts draft={draft} ready={loaded} onCopy={value => { const scope = currentWallet.current.identityScope(); if (scope) requestAction({ kind: 'account-copy', draft: value, scope }); }} />
     <DraftBackup kind="token" name={draft.name} serialize={() => serializeDraftBackup('token', tokenDraftSchema.parse(draft))} parse={text => parseDraftBackup(text, 'token', value => tokenDraftSchema.parse(value))} onRestore={restoreBackup} />
     <SafetyNote>{pricingNetwork === 'base-sepolia' ? 'This draft is for Base Sepolia testnet. Amounts use test ETH, which has no monetary value.' : 'This draft keeps its planned ZRO valuation. A Base Sepolia copy clears the valuation so you can enter a test ETH amount.'}{pricingNetwork === 'zero' && <Button type="button" variant="secondary" onClick={() => requestAction({ kind: 'copy-base' })}>Create Base Sepolia copy</Button>}</SafetyNote>
     <div className="steps"><div className={!review ? "active" : ""}><span>{review ? <Check size={10} /> : "01"}</span>Details & fees</div><i /><div className={review ? "active" : ""}><span>02</span>Review</div><i /><div><span>03</span>Launch</div></div><div className="gate-panel"><div className="gate-panel-title"><LockKeyhole size={15} />Your token starts as a draft</div><p>Review your terms, then check test-network availability before launching.</p></div>{formError && <ErrorState message={formError} />}<div className="form-layout"><form className="form-main" onSubmit={reviewDraft}>

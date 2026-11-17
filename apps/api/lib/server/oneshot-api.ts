@@ -11,6 +11,7 @@ import { tokenAnalyticsRead } from './token-analytics';
 import { nftLaunch } from './nft-launch';
 import { genesisApi } from './genesis-api';
 import { tokenExecutionApi } from './token-execution-api';
+import { archiveTokenAccountDraft, createTokenAccountDraft, getTokenAccountDraft, listTokenAccountDrafts, updateTokenAccountDraft } from './token-account-drafts';
 
 const revision = z.number().int().positive();
 const change = z.object({ expectedRevision: revision, draft: z.unknown() }).strict();
@@ -104,6 +105,17 @@ export const oneshotApi = api(async request => {
     }
   }
   if (resource === 'session' && segments.length === 1 && request.method === 'GET') return json({ userId: session.userId, linkedAddresses: session.linkedAddresses, expiresAt: session.expiresAt });
+  if (resource === 'token-drafts') {
+    rateLimit(`oneshot:token-drafts:${session.userId}`, request.method === 'GET' ? 120 : 30);
+    if (segments.length === 1 && request.method === 'GET') return json({ items: await listTokenAccountDrafts(session) });
+    const body = async () => JSON.parse(new TextDecoder().decode(await boundedBody(request, 16384)));
+    if (segments.length === 1 && request.method === 'POST') return json(await createTokenAccountDraft(await body(), session), 201);
+    if (segments.length === 2) {
+      if (request.method === 'GET') return json(await getTokenAccountDraft(id, session));
+      if (request.method === 'PUT') { const input = change.parse(await body()); return json(await updateTokenAccountDraft(id, input.draft, input.expectedRevision, session)); }
+      if (request.method === 'DELETE') { const input = expected.parse(await body()); return json(await archiveTokenAccountDraft(id, input.expectedRevision, session)); }
+    }
+  }
   if (resource === 'media' && segments.length === 1 && request.method === 'POST') {
     rateLimit(`oneshot:upload:${session.userId}`, 10);
     const contentType = request.headers.get('content-type') || '';

@@ -14,10 +14,11 @@ import { NftReviewSummary, NftTransactionData, nftTransactionPhase } from './nft
 import { nftCheckoutAccess, type NftCheckoutAccess } from '../lib/client-nft-checkout-access';
 import { nftExplorerHref, nftNetworkLabel, nftTestAcknowledgement, readNftNetwork } from '../lib/nft-network';
 import { isSupportedNftChainId } from '@oneshot/evm';
+import { NftCartSelection } from './nft-cart';
 
 const money = (value: string) => `${formatIndexedAmount(value,18)} ETH`;
 const busyPhases = ['reviewing','validating','signing','confirming'];
-const actionName: Partial<Record<NftLaunchAction,string>> = {create:'Create collection',configure:'Set mint phases',open:'Open mint',mint:'Mint NFTs',approve:'Approve this NFT for resale',list:'List this NFT',buy:'Buy this NFT',cancel:'Cancel this listing',claim:'Claim proceeds',policy:'Update resale price floor'};
+const actionName: Partial<Record<NftLaunchAction,string>> = {create:'Create collection',configure:'Set mint phases',open:'Open mint',mint:'Mint NFTs',approve:'Approve this NFT for marketplace transfer',list:'List this NFT',buy:'Buy this NFT',cancel:'Cancel this listing',claim:'Claim proceeds',policy:'Update resale price floor','offer-create':'Make a funded offer','offer-accept':'Accept this offer','offer-cancel':'Cancel this offer','offer-expire':'Release expired offer funds','buy-batch':'Buy selected NFTs'};
 function date(seconds: string) { const value = BigInt(seconds); return value > 8_640_000_000_000n ? 'Outside the displayable date range' : new Date(Number(value)*1000).toLocaleString(); }
 export function ReviewResult({state,onApprove,onCheck,canApprove,confirmationChanged=false}:{state:NftLaunchState;onApprove?:()=>void;onCheck:()=>void;canApprove?:boolean;confirmationChanged?:boolean}) {
   return <>
@@ -96,12 +97,13 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
     {ready&&actions.length>0&&<><div className="field-grid section-gap"><Field label="Action"><select value={action} disabled={busy||submitted} onChange={event=>change(()=>setAction(event.target.value as NftLaunchAction))}>{actions.map(value=><option key={value} value={value}>{actionName[value]}</option>)}</select></Field>
       {action==='mint'&&<Field label="Quantity" required><input inputMode="numeric" value={quantity} disabled={busy||submitted} onChange={event=>change(()=>setQuantity(event.target.value))}/></Field>}
       {action==='list'&&<Field label="Listing amount (test ETH)" required hint="Review the final buyer total before wallet approval. Platform fee and royalty are included."><input inputMode="decimal" value={price} disabled={busy||submitted} onChange={event=>change(()=>setPrice(event.target.value))}/></Field>}
-      {action==='claim'&&<Field label="Proceeds"><select value={claimSource} disabled={busy||submitted} onChange={event=>change(()=>setClaimSource(event.target.value))}><option value="marketplace">Resale proceeds</option><option value="collection">Mint proceeds</option></select></Field>}
+      {action==='claim'&&<Field label="Proceeds"><select value={claimSource} disabled={busy||submitted} onChange={event=>change(()=>setClaimSource(event.target.value))}><option value="marketplace">Marketplace proceeds</option><option value="collection">Mint proceeds</option></select></Field>}
       {['mint','buy','cancel','claim'].includes(action)&&<Field label="Recipient" hint="Leave blank for your selected wallet."><input value={recipient} placeholder={wallet.account?.address} disabled={busy||submitted} onChange={event=>change(()=>setRecipient(event.target.value))}/></Field>}
     </div><label className="checkbox-field"><input type="checkbox" checked={ack} disabled={busy||submitted} onChange={event=>{if(!event.target.checked)controller.invalidate('Test ETH acknowledgement was removed.');setAck(event.target.checked);}}/><span>I understand this uses test ETH on {nftNetworkLabel(readNftNetwork(details?.network))} and requires gas.</span></label><Button type="button" variant="secondary" disabled={!ack||busy||submitted||(action==='mint'&&!allowlistActive&&!publicActive)} onClick={prepare}>Review transaction</Button></>}
     {ready&&item&&actions.length===0&&<p className="data-notice">Only its owner wallet can create a listing.</p>}
     <ReviewResult state={state} confirmationChanged={indexedSync.phase==='reorg'} canApprove={ready&&ack&&Boolean(state.review&&Date.parse(state.review.expiresAt)>clock)} onApprove={ready?()=>void controller.approve():undefined} onCheck={()=>void controller.refreshReceipt()}/>
     <NftIndexedSyncNotice state={indexedSync} onRetry={indexedSync.retry}/>
+    {details&&matchingDeployment&&item&&<NftCartSelection details={details} item={item}/>}
     <NftFloorSettings collection={collection}/>
   </section>;
 }

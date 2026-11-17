@@ -2,6 +2,8 @@
 
 Token and NFT creation, launch and marketplace tools. Base Sepolia is the current test-network target; Zero remains a future integration after its network and AMM references are available.
 
+The [NFT V3 milestone](NFT-MARKETPLACE-V3.md) adds funded item/collection offers, partial fills and refunds, atomic multi-item checkout, exact transaction reviews and canonical offer accounting. New offline deployment plans target V3; existing deployed v1/v2 marketplaces retain their existing features. Base deployment and real wallet evidence remain pending.
+
 ## Project structure
 
 | Path | Purpose |

@@ -2,6 +2,8 @@
 
 Started 17 November 2026. Review target: `codex/phase-one` at `bd848b8`, including the Base Sepolia milestone `a9f65cc`. The owner said home/navigation and token creation look good and authorized final agent judgment for those two screens. Both are accepted for this milestone's preview UI review. Other owner decisions and real-account/transaction acceptance remain pending; automated checks and agent inspection alone do not establish those approvals.
 
+The subsequent [NFT V3 build](NFT-MARKETPLACE-V3.md) adds item/collection offers, refund balances and atomic cart checkout. Agent inspection passed on desktop/mobile, including exact review amounts, wallet changes, error recovery and the related public pages. Owner acceptance of these new NFT screens remains pending. Its separate signing-disabled [sample NFT preview](http://127.0.0.1:19393/nfts/0x0000000000000000000000000000000000000004?deployment=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd) is available while its local process runs; it has no real accounts, funds or deployment evidence. Earlier home/token approval does not extend to live NFT settlement.
+
 ## Open the review preview
 
 [Local review preview](http://127.0.0.1:18390/)

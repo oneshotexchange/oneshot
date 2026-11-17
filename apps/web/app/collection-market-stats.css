@@ -12,3 +12,7 @@
 .collection-market-stats-unavailable{padding-top:18px}
 .collection-market-stats-unavailable p{font-size:12px;line-height:1.8;color:var(--muted);margin-bottom:12px}
 @media(max-width:520px){.collection-market-stats{padding:17px;margin-bottom:18px}.collection-market-stats-grid{grid-template-columns:minmax(0,1fr);gap:17px;margin:20px 0}.collection-market-stats-grid dd{font-size:20px;margin-top:4px}}
+
+.nft-offer-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--border); }
+.nft-offer-row > div:first-child { min-width: 0; flex: 1 1 240px; }
+.nft-offer-row .info-row { overflow-wrap: anywhere; }

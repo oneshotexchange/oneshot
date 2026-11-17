@@ -5,6 +5,7 @@ import { formatIndexedAmount, type IndexedActivity, type IndexedClaim, type Inde
 import Link from './navigation';
 import { useWallet } from '../lib/client-wallet';
 import { NftCheckout, NftTransactionRecovery } from './nft-checkout';
+import { NftOffers } from './nft-offers';
 import { NftEarnings } from './nft-earnings';
 import { TokenPortfolioPanel } from './token-portfolio';
 import { portfolioWalletSelection } from '../lib/portfolio-wallet-selection';
@@ -30,7 +31,7 @@ const deploymentQuery = (deploymentId?: string) => deploymentId && /^[a-f0-9]{64
 const collectionHref = (address: string, deploymentId?: string) => `/nfts/${encodeURIComponent(address)}${deploymentQuery(deploymentId)}`;
 const itemHref = (value: Pick<IndexedNftItem, 'collection' | 'tokenId'>, deploymentId?: string) => `/nfts/${encodeURIComponent(value.collection)}/${encodeURIComponent(value.tokenId)}${deploymentQuery(deploymentId)}`;
 const amount = (value: string) => `${formatIndexedAmount(value)} ETH`;
-const listingStatus = { active: 'For sale', sold: 'Sold', cancelled: 'Canceled' };
+const listingStatus = { active: 'For sale', sold: 'Sold', cancelled: 'Canceled', 'offer-filled':'Offer accepted' };
 
 function ArtworkFrame({ presentation, alt, className, caption }: { presentation: IndexedPresentation | null; alt: string; className: string; caption?: string }) {
   const [failed, setFailed] = useState(false);
@@ -179,6 +180,7 @@ export function IndexedNftCollection({ id }: { id: string }) {
     <div className="metric-grid" style={{gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))'}}><Stat label="Total minted" value={collection.totalMinted} /><Stat label="Mint sales" value={formatIndexedAmount(collection.primaryTotalPriceRaw)} suffix="ETH" note="Total paid by collectors" /><Stat label="Mint terms" value={collection.opened ? 'Locked' : 'Editable'} note="Locked when minting opens" /></div>
     <IndexedCollectionMarketStats response={response.data} collection={id} deploymentId={expectedDeployment} onRefresh={refresh} />
     <NftCheckout collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh} />
+    <NftOffers collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh}/>
     <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'items', label: 'Items' }, { value: 'listings', label: 'Active listings' }, { value: 'activity', label: 'Activity' }]} active={tab} onChange={setTab} /></div>
       {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <PageBody page={page} empty="No NFTs minted yet" description="Check the mint details above for the schedule and price."><IndexedItemCards items={page.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} chainId={activity.data?.context.network?.chainId} /></PageBody>}
     </section>
@@ -194,7 +196,7 @@ export function IndexedNftItemDetail({ collectionId, itemId }: { collectionId: s
   if (deploymentIssue) return <><ButtonLink href="/nfts" variant="ghost"><ArrowLeft size={13} />All collections</ButtonLink><EmptyState title="Collection network changed" description={deploymentIssue} /></>;
   const presentation = response.data?.item ? indexedPresentation(response.data.item.presentation, response.data.item.tokenId) : null;
   return <><Link className="back-link" href={collectionHref(collectionId, expectedDeployment)}><ArrowLeft size={13} />View collection</Link><PageHeading title={presentation?.name || `NFT #${itemId}`} description={presentation ? `NFT #${itemId}` : undefined} />
-    {response.loading ? <Loading rows={4} /> : response.error ? <ErrorState message={response.error} retry={response.refresh} /> : <><IndexedContextNote context={response.data?.context} />{response.data?.item ? <><IndexedItemRecord item={response.data.item} deploymentId={expectedDeployment} /><NftCheckout key={response.data.item.id} collection={collectionId} item={response.data.item} indexedDeploymentId={response.data.context.deploymentId} onRefresh={response.refresh} /></> : <EmptyState icon={Gem} title="NFT unavailable" description="This NFT could not be found. Check the item address or browse its collection." />}</>}
+    {response.loading ? <Loading rows={4} /> : response.error ? <ErrorState message={response.error} retry={response.refresh} /> : <><IndexedContextNote context={response.data?.context} />{response.data?.item ? <><IndexedItemRecord item={response.data.item} deploymentId={expectedDeployment} /><NftCheckout key={response.data.item.id} collection={collectionId} item={response.data.item} indexedDeploymentId={response.data.context.deploymentId} onRefresh={response.refresh} /><NftOffers collection={collectionId} item={response.data.item} indexedDeploymentId={response.data.context.deploymentId} onRefresh={response.refresh}/></> : <EmptyState icon={Gem} title="NFT unavailable" description="This NFT could not be found. Check the item address or browse its collection." />}</>}
   </>;
 }
 
@@ -204,12 +206,12 @@ export function IndexedItemRecord({ item, deploymentId }: { item: IndexedNftItem
 }
 
 function activityAmount(activity: IndexedActivity) {
-  const raw = activity.args.totalPrice ?? activity.args.amount;
+  const raw = activity.args.totalPrice ?? activity.args.refund ?? activity.args.amount;
   if (raw === undefined) return 'Not applicable';
   return typeof raw === 'string' && /^(0|[1-9]\d*)$/.test(raw) ? amount(raw) : 'Unavailable';
 }
 function eventTitle(value: string) {
-  const labels: Record<string, string> = { CollectionCreated: 'Collection created', TermsConfigured: 'Mint terms set', CollectionOpened: 'Mint opened', Transfer: 'NFT transferred', Minted: 'NFT minted', Listed: 'NFT listed', Sold: 'NFT sold', Cancelled: 'Listing canceled', Claimed: 'Proceeds claimed', Approval: 'NFT approved', ApprovalForAll: 'Marketplace approval changed', PolicyCommitted: 'Listing floor updated' };
+  const labels: Record<string, string> = { CollectionCreated: 'Collection created', TermsConfigured: 'Mint terms set', CollectionOpened: 'Mint opened', Transfer: 'NFT transferred', Minted: 'NFT minted', Listed: 'NFT listed', Sold: 'NFT sold', Cancelled: 'Listing canceled', Claimed: 'Proceeds claimed', OfferCreated: 'Offer funded', OfferAccepted:'Offer accepted', OfferCancelled:'Offer canceled', OfferExpired:'Offer funds released', Approval: 'NFT approved', ApprovalForAll: 'Marketplace approval changed', PolicyCommitted: 'Listing floor updated' };
   return labels[value] || value.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 function eventTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString(); }

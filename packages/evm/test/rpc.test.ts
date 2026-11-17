@@ -60,6 +60,35 @@ describe('hash-selected runtime code reads', () => {
   });
 });
 
+describe('hash-selected native balances', () => {
+  it('reads escrow solvency from an exact canonical hash and rechecks network identity', async () => {
+    const mock = transport();
+    const selector = { blockHash: OTHER_GENESIS, requireCanonical: true };
+    await expect(readRpc(config(), 'eth_getBalance', [ADDRESS, selector], { fetch: mock.fetch })).resolves.toBe('0x64');
+    expect(sent(mock.mock)).toMatchObject([
+      { method: 'eth_chainId' }, { method: 'eth_getBlockByNumber' },
+      { method: 'eth_getBalance', params: [ADDRESS, selector] },
+    ]);
+  });
+  it('rejects missing, conflicting or noncanonical selectors without broadening nonce reads', async () => {
+    const mock = transport();
+    for (const selector of [{ blockHash: OTHER_GENESIS }, { blockHash: OTHER_GENESIS, requireCanonical: false },
+      { blockHash: OTHER_GENESIS, requireCanonical: true, blockNumber: '0x1' }, { blockHash: '0xab', requireCanonical: true },
+      { blockNumber: '0x1' }, { blockHash: OTHER_GENESIS, requireCanonical: true, extra: 1 }]) {
+      await safeError(readRpc(config(), 'eth_getBalance', [ADDRESS, selector], { fetch: mock.fetch }), 'RPC_PARAMS_INVALID');
+    }
+    await safeError(readRpc(config(), 'eth_getTransactionCount', [ADDRESS, { blockHash: OTHER_GENESIS, requireCanonical: true }], { fetch: mock.fetch }), 'RPC_PARAMS_INVALID');
+    expect(mock.mock).not.toHaveBeenCalled();
+  });
+  it('classifies only an explicit unknown hash rejection and never exposes provider diagnostics', async () => {
+    const mock = transport(request => request.method === 'eth_getBalance'
+      ? new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32001, message: `header not found: ${OTHER_GENESIS}`, data: SECRET } }))
+      : defaults(request));
+    const error = await safeError(readRpc(config(), 'eth_getBalance', [ADDRESS, { blockHash: OTHER_GENESIS, requireCanonical: true }], { fetch: mock.fetch }), 'RPC_REMOTE_ERROR');
+    expect(error.remoteRejection).toBe('block-not-found');
+  });
+});
+
 describe('RPC network identity', () => {
   it('fails closed without Zero configuration and never contacts a provider', async () => {
     const mock = transport();

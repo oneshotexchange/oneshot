@@ -14,22 +14,29 @@ import { nftLaunchRepository, type StoredNftReview, type NftPublication } from '
 import { GUARDED_MARKETPLACE_ABI, applyProtectedFloor, nftExecutionNetwork, type NftExecutionNetwork } from '@oneshot/evm';
 import { createNftFloorPolicyService } from './nft-floor-policy';
 import { nftLaunchProgressRepository, type NftLaunchAssociation } from './nft-launch-progress-store';
+import { buildNftV3Call, nftMarketplaceCapabilities } from './nft-v3-execution';
+import { nftV3ReceiptMatches } from './nft-v3-receipt';
+import { readNftOfferPage, readOfferCursor, offerQuery } from './nft-offer-page';
 
 const address = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(value => value.toLowerCase() as Address).refine(value => !/^0x0{40}$/.test(value));
 const uint = z.string().regex(/^[1-9]\d{0,77}$/).refine(value => /^[1-9]\d{0,77}$/.test(value) && BigInt(value) < (1n << 256n));
-const actions = ['create','configure','open','mint','approve','list','buy','cancel','claim','policy'] as const;
+const actions = ['create','configure','open','mint','approve','list','buy','cancel','claim','policy','offer-create','offer-accept','offer-cancel','offer-expire','buy-batch'] as const;
 export const nftReviewInput = z.object({
   draftId: z.string().uuid().optional(), expectedRevision: z.number().int().positive().optional(), from: address,
   action: z.enum(actions), collection: address.optional(), tokenId: uint.optional(), listingId: uint.optional(),
   quantity: uint.optional(), recipient: address.optional(), price: z.string().max(118).optional(), contract: address.optional(),
   floorEnabled: z.boolean().optional(), floorPrice: z.string().max(118).optional(),
+  offerId: uint.optional(), expiresAt: uint.optional(), listingIds: z.array(uint).min(1).max(20).refine(value => new Set(value).size === value.length, 'Choose distinct listings.').optional(),
   localEthAcknowledged: z.literal(true).optional(), testEthAcknowledged: z.literal(true).optional(),
   expectedChainId: z.union([z.literal(31337), z.literal(84532)]).optional(),
 }).strict().superRefine((input,context) => {
   if (!input.localEthAcknowledged && !input.testEthAcknowledged) context.addIssue({code:'custom',path:['testEthAcknowledged'],message:'Acknowledge the test-network transaction.'});
   if (Boolean(input.draftId) !== Boolean(input.expectedRevision)) context.addIssue({code:'custom',path:['draftId'],message:'Provide the draft and its expected revision together.'});
   if (['create','configure','open'].includes(input.action) && !input.draftId) context.addIssue({code:'custom',path:['draftId'],message:'Creator actions require an owned prepared draft.'});
-  if (!input.draftId && !input.collection && !(input.action==='claim' && input.contract)) context.addIssue({code:'custom',path:['collection'],message:'Public checkout requires a collection, or an explicit marketplace claim contract.'});
+  if (!input.draftId && !input.collection && !(['claim','buy-batch'].includes(input.action) && input.contract)) context.addIssue({code:'custom',path:['collection'],message:'Public checkout requires a collection, or an explicit marketplace contract.'});
+  if ((input.action.startsWith('offer-') || input.action === 'buy-batch') && input.draftId) context.addIssue({code:'custom',path:['draftId'],message:'Marketplace actions use a verified collection or marketplace, without a draft.'});
+  if (input.action === 'buy-batch' && (!input.contract || input.collection || !input.listingIds)) context.addIssue({code:'custom',path:['listingIds'],message:'Choose one marketplace and 1–20 distinct listings.'});
+  if (input.action.startsWith('offer-') && (!input.collection || input.action !== 'offer-create' && !input.offerId)) context.addIssue({code:'custom',path:['offerId'],message:'Choose a collection and its offer.'});
   if (input.action==='policy' && (input.draftId || input.floorEnabled===undefined || input.floorPrice===undefined)) context.addIssue({code:'custom',path:['floorEnabled'],message:'Settings require a collection, enable choice and minimum, without a draft.'});
   if (input.action!=='policy' && (input.floorEnabled!==undefined || input.floorPrice!==undefined)) context.addIssue({code:'custom',path:['floorEnabled'],message:'Floor fields are limited to private creator settings.'});
 });
@@ -115,6 +122,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       const source = new VerifiedRpcSource(rpc);
       await source.verify(manifest);
       const block = await source.block(await source.height());
+      if(manifest.deploymentVersion==='oneshot-nft-v3')await source.offerAccounting(manifest,block);
       return { manifest, network, rpc, source, block, deploymentId: manifestId(manifest) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -122,7 +130,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     }
   }
   async function status() {
-    try { const chain = await connect(); return {enabled:true,reason:null,network:chain.network,deploymentId:chain.deploymentId}; }
+    try { const chain = await connect(); return {enabled:true,reason:null,network:chain.network,deploymentId:chain.deploymentId,marketplace:nftMarketplaceCapabilities(chain.manifest)}; }
     catch { return {enabled:false,reason:'NFT transactions are currently unavailable. You can save a draft and return later.',network:null,deploymentId:null}; }
   }
   type Chain = Awaited<ReturnType<typeof connect>>;
@@ -151,7 +159,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const selected = address.parse(raw), chain = await connect(), state = await collectionState(chain,selected);
     if ((await chain.source.block(chain.block.number)).hash !== chain.block.hash) conflict('CHAIN_MOVED','The collection block changed. Refresh its terms.');
     const stage = (value:NftTerms['publicMint']) => ({start:value.start.toString(),end:value.end.toString(),walletLimitRaw:value.walletLimit.toString(),priceRaw:value.price.toString()});
-    return {network:chain.network,deploymentId:chain.deploymentId,collection:selected,creator:state.creator,name:state.name,symbol:state.symbol,opened:state.opened,
+    return {network:chain.network,deploymentId:chain.deploymentId,marketplace:nftMarketplaceCapabilities(chain.manifest),collection:selected,creator:state.creator,name:state.name,symbol:state.symbol,opened:state.opened,
       totalMintedRaw:state.totalMinted.toString(),terms:{maxSupplyRaw:state.terms.maxSupply.toString(),royaltyBps:state.terms.royaltyBps,allowlistRoot:state.terms.allowlistRoot,
         contentHash:state.terms.contentHash,metadataBaseURI:state.terms.metadataBaseURI,collectionURI:state.terms.collectionURI,
         allowlist:stage(state.terms.allowlist),publicMint:stage(state.terms.publicMint)},termsHash:state.termsHash,
@@ -195,6 +203,18 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const nextCursor=last<count?Buffer.from(JSON.stringify({v:1,deploymentId:chain.deploymentId,wallet:from,blockNumber:block.number.toString(),blockHash:block.hash,offset:last.toString(),count:count.toString()} satisfies EarningsCursor)).toString('base64url'):null;
     return {network:chain.network,deploymentId:chain.deploymentId,wallet:from,blockNumber:block.number.toString(),blockHash:block.hash,blockTimestamp:block.timestamp.toString(),
       marketplace:{contract:chain.manifest.marketplace.address,amountRaw:marketplaceAmount.toString()},collections,scannedCount:Number(last),totalCollectionsRaw:count.toString(),nextCursor};
+  }
+  async function offers(raw:unknown){
+    const query=offerQuery.parse(raw),cursor=readOfferCursor(query.cursor),current=await connect();
+    if(cursor&&(cursor.deploymentId!==current.deploymentId||BigInt(cursor.blockNumber)<current.manifest.startBlock||BigInt(cursor.blockNumber)>current.block.number))conflict('OFFER_CURSOR_STALE','The offers checkpoint changed. Refresh from the first page.');
+    const block=cursor?await current.source.block(BigInt(cursor.blockNumber)):current.block;
+    if(cursor&&cursor.blockHash!==block.hash)conflict('OFFER_CURSOR_STALE','The offers checkpoint changed. Refresh from the first page.');
+    const chain={...current,block};
+    if(chain.manifest.deploymentVersion!=='oneshot-nft-v3')conflict('OFFERS_UNAVAILABLE','Funded offers are unavailable for this collection. Browse its listings instead.');
+    await chain.source.offerAccounting(chain.manifest,block);
+    const page=await readNftOfferPage({query,manifest:chain.manifest,deploymentId:chain.deploymentId,network:chain.network,block,read:(to,abi,name,args=[])=>readContract(chain,to,abi,name,args)});
+    if((await chain.source.block(block.number)).hash!==block.hash)conflict('CHAIN_MOVED','Offers changed while loading. Refresh offers.');
+    return page;
   }
   const progressInput = z.object({ expectedRevision:z.number().int().positive(), from:address, launchId:z.string().uuid().optional(), cursor:z.string().min(1).max(2048).optional() }).strict();
   function sameLaunchScope(item:NftLaunchAssociation, scope:{owner:string;draftId:string;revision:number;deploymentId:string;from:string}) {
@@ -269,7 +289,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if(session.expiresAt*1000<=now())throw new ApiError(401,'AUTH_REQUIRED','Sign in again to view settings.');
     const from=assertLinkedEvmAddress(session,address.parse(wallet)),selected=address.parse(raw),chain=await connect();
     const state=await collectionState(chain,selected);
-    if(state.creator!==from || chain.manifest.deploymentVersion!=='oneshot-nft-v2')throw new ApiError(404,'NOT_FOUND','Settings not available.');
+    if(state.creator!==from || chain.manifest.deploymentVersion==='oneshot-nft-v1')throw new ApiError(404,'NOT_FOUND','Settings not available.');
     const commitment=await readContract(chain,chain.manifest.marketplace.address,GUARDED_MARKETPLACE_ABI,'policyCommitment',[selected]) as Hex;
     const current=await policies.resolve({deploymentId:chain.deploymentId,collection:selected,creator:state.creator},commitment);
     const eligible=policies.eligible(state.creator);
@@ -310,7 +330,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       summary:{enteredPriceRaw:entered.toString(),floorPriceRaw:policy.floorRaw,priceRaw:price.toString(),policyCommitment:commitment,effect:'Move this NFT into marketplace escrow at the final price shown.'}};
   }
   async function policyCall(chain:Chain,input:NftReviewInput,from:Address,creator:Address,previous?:NftReview) {
-    if(from!==creator||chain.manifest.deploymentVersion!=='oneshot-nft-v2')throw new ApiError(404,'NOT_FOUND','Settings not available.');
+    if(from!==creator||chain.manifest.deploymentVersion==='oneshot-nft-v1')throw new ApiError(404,'NOT_FOUND','Settings not available.');
     const collection=input.collection!,to=chain.manifest.marketplace.address;
     const expected=await readContract(chain,to,GUARDED_MARKETPLACE_ABI,'policyCommitment',[collection]) as Hex;
     const context={deploymentId:chain.deploymentId,collection,creator},current=await policies.resolve(context,expected);
@@ -326,6 +346,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       summary:{floorEnabled:String(proposed.enabled),floorPriceRaw:proposed.floorRaw,policyCommitment:proposed.commitment,previousCommitment:expected,effect:'Applies to new listings. Existing orders keep their approved prices.'}};
   }
   async function publicCall(input:NftReviewInput,from:Address,chain:Chain,previous?:NftReview) {
+    if (input.action.startsWith('offer-') || input.action === 'buy-batch') return buildNftV3Call({ input, from, manifest:chain.manifest, block:chain.block, deploymentId:chain.deploymentId, network:chain.network, read:(to,abi,name,args=[])=>readContract(chain,to,abi,name,args), collection:address=>collectionState(chain,address), policies, previous });
     if(!input.collection) {
       const to=chain.manifest.marketplace.address;
       if(input.action!=='claim' || input.contract!==to)conflict('INVALID_CONTRACT','Standalone claims are limited to this deployment’s verified marketplace.');
@@ -335,7 +356,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       if(amount===0n)conflict('NOTHING_TO_CLAIM','This wallet has no pending proceeds at the marketplace.');
       const data=encodeFunctionData({abi:NFT_MARKETPLACE_ABI,functionName:'claimTo',args:[recipient]});
       return {scope:'public' as const,draftId:to,revision:0,from,to,data,value:'0',action:input.action,
-        summary:{contract:to,recipient,claimAmountRaw:amount.toString(),nativeAsset:`${chain.network.name} test ETH (18 decimals)`,effect:'Claim this wallet’s aggregate marketplace proceeds.'}};
+        summary:{contract:to,recipient,claimAmountRaw:amount.toString(),nativeAsset:`${chain.network.name} test ETH (18 decimals)`,effect:'Claim this wallet’s marketplace balance, including sales, royalties and released offer funds.'}};
     }
     const collection = input.collection!, {manifest,block} = chain, state = await collectionState(chain,collection);
     if (!state.opened && input.action!=='policy') conflict('NOT_OPEN','This collection has not opened its frozen mint terms.');
@@ -663,8 +684,8 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if (status === 0n) { await repository.setOutcome(id,hash,'reverted',now()); return {status:'reverted' as const,hash,blockNumber:blockNumber.toString(),blockHash:block.hash}; }
     if (status !== 1n) throw new ApiError(503,'RPC_DATA_INVALID','The transaction receipt status is invalid.');
     let collection: Address | undefined;
-    const expectedEvent = {create:'CollectionCreated',configure:'TermsConfigured',open:'CollectionOpened',mint:'Minted',approve:'Approval',list:'Listed',buy:'Sold',cancel:'Cancelled',claim:'Claimed',policy:'PolicyCommitted'}[reviewed.action];
-    let found = false;
+    const expectedEvent = ({create:'CollectionCreated',configure:'TermsConfigured',open:'CollectionOpened',mint:'Minted',approve:'Approval',list:'Listed',buy:'Sold',cancel:'Cancelled',claim:'Claimed',policy:'PolicyCommitted'} as Partial<Record<NftReviewInput['action'],string>>)[reviewed.action];
+    let found = !expectedEvent && nftV3ReceiptMatches(reviewed,result.logs,hash,block.hash);
     for (const log of result.logs) {
       if (!record(log) || typeof log.address !== 'string' || log.address.toLowerCase() !== reviewed.to || !isData(log.data) || !Array.isArray(log.topics) || !log.topics.every(isHash)) continue;
       try {
@@ -714,6 +735,6 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     await repository.setOutcome(id,hash,'confirmed',now());
     return {status:'confirmed' as const,hash,blockNumber:blockNumber.toString(),blockHash:block.hash,...(collection?{collection}:{})};
   }
-  return {status,collection,earnings,progress,floor,review,validate,submitted,recover,transactions,receipt};
+  return {status,collection,offers,earnings,progress,floor,review,validate,submitted,recover,transactions,receipt};
 }
 export const nftLaunch = createNftLaunchService();

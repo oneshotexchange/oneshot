@@ -32,6 +32,12 @@ export const oneshotApi = api(async request => {
     rateLimit('oneshot:launch:collections',120);
     return json(await nftLaunch.collection(operation));
   }
+  if(resource==='launch'&&segments.length===2&&id==='offers'&&request.method==='GET'){
+    rateLimit('oneshot:launch:offers',30);
+    const query=request.nextUrl.searchParams;
+    for(const key of query.keys())if(query.getAll(key).length!==1)throw new ApiError(400,'INVALID_INPUT','Use one value for each offer filter.');
+    return json(await nftLaunch.offers(Object.fromEntries(query)));
+  }
   if (resource === 'indexed') {
     // Public reads still have a process-wide budget before manifest/RPC/database work.
     rateLimit('oneshot:indexed:public', 240);

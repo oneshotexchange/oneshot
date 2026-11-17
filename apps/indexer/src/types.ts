@@ -18,9 +18,9 @@ type ManifestBase = {
 } & NetworkIdentity<NftExecutionNetwork>;
 export type Manifest = ManifestBase & (
   | { deploymentVersion: 'oneshot-nft-v1'; listingAuthorization?: never }
-  | { deploymentVersion: 'oneshot-nft-v2'; listingAuthorization: { authority: Address; salt: Hex } }
+  | { deploymentVersion: 'oneshot-nft-v2' | 'oneshot-nft-v3'; listingAuthorization: { authority: Address; salt: Hex } }
 );
-export type ProjectionKind = 'collections' | 'items' | 'listings' | 'claims' | 'activity';
+export type ProjectionKind = 'collections' | 'items' | 'listings' | 'claims' | 'activity' | 'offers' | 'offer-sales' | 'offer-accounting';
 export type ProjectionValue = Record<string, unknown>;
 export type Projection = Record<ProjectionKind, Record<string, ProjectionValue>>;
 export type Undo = { kind: ProjectionKind; id: string; before: ProjectionValue | null };
@@ -48,8 +48,9 @@ export interface ChainSource {
   height(): Promise<bigint>;
   block(number: bigint): Promise<Block>;
   logs(block: Block, addresses: readonly Address[]): Promise<RawLog[]>;
+  offerAccounting?(manifest:Manifest,block:Block):Promise<{escrow:string;pending:string;balance:string}>;
 }
 export class IndexerError extends Error {
   constructor(public readonly code: string) { super(code); this.name = 'IndexerError'; }
 }
-export const emptyProjection = (): Projection => ({ collections: {}, items: {}, listings: {}, claims: {}, activity: {} });
+export const emptyProjection = (): Projection => ({ collections: {}, items: {}, listings: {}, claims: {}, activity: {}, offers: {}, 'offer-sales': {}, 'offer-accounting': {} });

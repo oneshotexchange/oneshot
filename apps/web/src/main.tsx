@@ -9,6 +9,7 @@ import { TokenDiscovery } from '../components/discovery';
 import { TokenLaunch } from '../components/token-launch';
 import { TokenTerminal } from '../components/token-terminal';
 import { NftCreate } from '../components/nft-create';
+import { NftCartPage } from '../components/nft-cart';
 import { IndexedNftDiscovery, IndexedNftCollection, IndexedNftItemDetail, IndexedActivityPage, IndexedPortfolioPage } from '../components/indexed-nfts';
 import { AdminPage, SettingsPage } from '../components/workspace-pages';
 import { GenesisWhitelist } from '../components/genesis-whitelist';
@@ -48,6 +49,7 @@ function Workspace() {
     <Route path="/tokens/:id" element={<TokenPage />} />
     <Route path="/nfts" element={<IndexedNftDiscovery />} />
     <Route path="/nfts/new" element={<NftCreate />} />
+    <Route path="/nfts/cart" element={<NftCartPage />} />
     <Route path="/nfts/:id" element={<CollectionPage />} />
     <Route path="/nfts/:id/:item" element={<ItemPage />} />
     <Route path="/activity" element={<IndexedActivityPage />} />

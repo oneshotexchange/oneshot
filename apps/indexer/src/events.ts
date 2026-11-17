@@ -1,5 +1,5 @@
 import { decodeEventLog, encodeAbiParameters, encodeEventTopics, parseAbi, zeroAddress, zeroHash, type AbiEvent, type Address, type Hex } from 'viem';
-import { IndexerError, type IndexerTransaction, type Manifest, type ProjectionValue, type RawLog } from './types';
+import { IndexerError, type Block, type IndexerTransaction, type Manifest, type ProjectionValue, type RawLog } from './types';
 
 export const factoryEvents = parseAbi([
   'event CollectionCreated(address indexed collection, address indexed creator, string name, string symbol)',
@@ -21,6 +21,12 @@ export const marketplaceEvents = parseAbi([
 ]);
 export const guardedMarketplaceEvents = [...marketplaceEvents, ...parseAbi([
   'event PolicyCommitted(address indexed collection, bytes32 indexed previousCommitment, bytes32 indexed commitment)',
+])];
+export const offerMarketplaceEvents=[...guardedMarketplaceEvents,...parseAbi([
+ 'event OfferCreated(uint256 indexed offerId,address indexed collection,address indexed bidder,uint256 tokenId,uint256 unitPrice,uint256 quantity,address recipient,uint256 expiry)',
+ 'event OfferCancelled(uint256 indexed offerId,address indexed bidder,uint256 quantity,uint256 refund)',
+ 'event OfferExpired(uint256 indexed offerId,address indexed bidder,address indexed caller,uint256 quantity,uint256 refund)',
+ 'event OfferAccepted(uint256 indexed offerId,address indexed collection,uint256 indexed tokenId,address seller,address bidder,address recipient,uint256 totalPrice,uint256 platformFee,uint256 royalty,uint256 sellerProceeds,uint256 replacedListingId)',
 ])];
 
 const ADDRESS = /^0x[\da-fA-F]{40}$/;
@@ -150,16 +156,25 @@ async function itemRecord(tx: IndexerTransaction, collection: string, tokenId: b
   check(record && record.collection === collection && record.tokenId === tokenId.toString(), 'ITEM_UNKNOWN');
   return record;
 }
+async function liability(tx:IndexerTransaction,market:string,meta:ProjectionValue,escrow:bigint,pending:bigint,inflow=0n,claimed=0n){
+ const previous=await tx.get('offer-accounting',market),read=(field:string)=>previous?storedAmount(previous[field]):0n;
+ const values={escrow:read('escrow')+escrow,pending:read('pending')+pending,inflows:read('inflows')+inflow,claimed:read('claimed')+claimed};
+ check(values.escrow>=0n&&values.escrow<=UINT256_MAX&&values.pending>=0n&&values.pending<=UINT256_MAX&&values.inflows===values.escrow+values.pending+values.claimed,'OFFER_SOLVENCY_INVALID');
+ await tx.put('offer-accounting',market,{market,...Object.fromEntries(Object.entries(values).map(([key,value])=>[key,value.toString()])),...meta});
+}
 
 /**
  * Project a complete canonical log batch. Call inside the store's block transaction:
  * failures must roll back all projections, raw logs and their checkpoint together.
  * Amounts are decimal strings. Terms events commit hashes, not undisclosed terms.
  */
-export async function projectLogs(tx: IndexerTransaction, manifest: Manifest, logs: readonly RawLog[]): Promise<void> {
+export async function projectLogs(tx: IndexerTransaction, manifest: Manifest, logs: readonly RawLog[],block?:Block): Promise<void> {
   const factory = address(manifest.factory.address), market = address(manifest.marketplace.address);
-  const marketEvents = manifest.deploymentVersion === 'oneshot-nft-v2' ? guardedMarketplaceEvents : marketplaceEvents;
+  const v3=manifest.deploymentVersion==='oneshot-nft-v3';
+  if(v3&&logs.length)check(block&&logs.every(log=>log.blockNumber===block.number&&log.blockHash.toLowerCase()===block.hash.toLowerCase()),'EVENT_BLOCK_REQUIRED');
+  const marketEvents = v3?offerMarketplaceEvents:manifest.deploymentVersion === 'oneshot-nft-v2' ? guardedMarketplaceEvents : marketplaceEvents;
   const mintedTransfers = new Set<string>(), escrowReleases = new Set<string>();
+  const transferProofs=new Set<string>();
   for (const log of orderedLogs(logs)) {
     const source = address(log.address);
     const collection = source !== factory && source !== market ? await tx.get('collections', source) : null;
@@ -193,6 +208,37 @@ export async function projectLogs(tx: IndexerTransaction, manifest: Manifest, lo
         recipient, lastAmount: paid.toString(), ...meta });
       if (collection) await tx.put('collections', source, { ...collection,
         totalClaimed: (storedAmount(collection.totalClaimed) + paid).toString(), ...meta });
+      if(v3&&source===market)await liability(tx,market,meta,0n,-paid,0n,paid);
+    } else if(source===market&&eventName.startsWith('Offer')){
+      check(v3,'EVENT_UNKNOWN');const offerId=amount(args.offerId),id=offerId.toString();check(offerId>0n,'OFFER_INVALID');
+      if(eventName==='OfferCreated'){
+        const collectionAddress=address(args.collection),bidder=address(args.bidder),recipient=address(args.recipient),tokenId=amount(args.tokenId),unitPrice=amount(args.unitPrice),quantity=amount(args.quantity),expiry=amount(args.expiry),escrow=unitPrice*quantity;
+        check(unitPrice>0n&&quantity>0n&&quantity<=20n&&(tokenId===0n||quantity===1n)&&expiry>block!.timestamp&&escrow<=UINT256_MAX&&recipient!==market&&recipient!==collectionAddress&&!await tx.get('offers',id),'OFFER_INVALID');
+        if(offerId>1n)check(await tx.get('offers',(offerId-1n).toString()),'OFFER_SEQUENCE_INVALID');
+        const registered=await collectionRecord(tx,collectionAddress);check(registered.opened===true,'OFFER_COLLECTION_CLOSED');
+        if(tokenId>0n){const item=await itemRecord(tx,collectionAddress,tokenId);check(item.minted===true&&item.burned===false,'OFFER_ITEM_INVALID');}
+        await tx.put('offers',id,{offerId:id,collection:collectionAddress,bidder,recipient,tokenId:tokenId.toString(),unitPrice:unitPrice.toString(),quantity:quantity.toString(),remaining:quantity.toString(),expiry:expiry.toString(),status:'active',...meta});
+        await liability(tx,market,meta,escrow,0n,escrow);
+      }else{
+        const offer=await tx.get('offers',id);check(offer&&offer.status==='active','OFFER_INACTIVE');const remaining=storedAmount(offer.remaining),unitPrice=storedAmount(offer.unitPrice);check(remaining>0n,'OFFER_INACTIVE');
+        if(eventName==='OfferCancelled'||eventName==='OfferExpired'){
+          const quantity=amount(args.quantity),refund=amount(args.refund);check(address(args.bidder)===offer.bidder&&quantity===remaining&&refund===quantity*unitPrice,'OFFER_REFUND_INVALID');if(eventName==='OfferExpired'){address(args.caller);check(block!.timestamp>storedAmount(offer.expiry),'OFFER_NOT_EXPIRED');}
+          await tx.put('offers',id,{...offer,remaining:'0',status:eventName==='OfferCancelled'?'cancelled':'expired',refund:refund.toString(),...meta});await liability(tx,market,meta,-refund,refund);
+        }else{
+          check(eventName==='OfferAccepted','EVENT_UNKNOWN');const collectionAddress=address(args.collection),tokenId=amount(args.tokenId),seller=address(args.seller),bidder=address(args.bidder),recipient=address(args.recipient),total=amount(args.totalPrice),fee=amount(args.platformFee),royalty=amount(args.royalty),proceeds=amount(args.sellerProceeds),replaced=amount(args.replacedListingId);
+          check(block!.timestamp<=storedAmount(offer.expiry)&&collectionAddress===offer.collection&&bidder===offer.bidder&&recipient===offer.recipient&&seller!==bidder&&tokenId>0n&&(offer.tokenId==='0'||offer.tokenId===tokenId.toString())&&total===unitPrice&&fee===total*200n/10000n&&royalty<=total/10n&&fee+royalty+proceeds===total,'OFFER_SALE_INVALID');
+          const item=await itemRecord(tx,collectionAddress,tokenId),transfer=item.lastTransfer as ProjectionValue|undefined,key=itemId(collectionAddress,tokenId);
+          check(item.minted===true&&transferProofs.has(`${key}:${log.transactionHash.toLowerCase()}:${replaced>0n?market:seller}:${recipient}`),'OFFER_TRANSFER_MISSING');
+          if(replaced>0n){
+            const listing=await tx.get('listings',replaced.toString()),release=item.escrowRelease as ProjectionValue|undefined;
+            check(listing&&listing.status==='active'&&listing.collection===collectionAddress&&listing.tokenId===tokenId.toString()&&listing.seller===seller&&item.activeListingId===replaced.toString()&&release&&release.listingId===replaced.toString()&&release.recipient===recipient&&release.transactionHash===log.transactionHash.toLowerCase(),'OFFER_LISTING_INVALID');
+            await tx.put('listings',replaced.toString(),{...listing,status:'offer-filled',originalAsk:listing.totalPrice,totalPrice:total.toString(),platformFee:fee.toString(),royalty:royalty.toString(),sellerProceeds:proceeds.toString(),offerId:id,buyer:bidder,recipient,...meta});escrowReleases.delete(key);
+          }else check(item.activeListingId===null,'OFFER_LISTING_INVALID');
+          await tx.put('items',key,{...item,activeListingId:null,escrowRelease:null,...meta});
+          await tx.put('offers',id,{...offer,remaining:(remaining-1n).toString(),status:remaining===1n?'filled':'active',...meta});
+          await tx.put('offer-sales',activityId(log),{offerId:id,collection:collectionAddress,tokenId:tokenId.toString(),seller,bidder,recipient,totalPrice:total.toString(),platformFee:fee.toString(),royalty:royalty.toString(),sellerProceeds:proceeds.toString(),replacedListingId:replaced.toString(),...meta});await liability(tx,market,meta,-total,total);
+        }
+      }
     } else if (source === market) {
       const listingId = amount(args.listingId);
       check(listingId > 0n, 'LISTING_INVALID');
@@ -231,6 +277,7 @@ export async function projectLogs(tx: IndexerTransaction, manifest: Manifest, lo
             && fee + royalty + sellerProceeds === total, 'SALE_ECONOMICS_INVALID');
           await tx.put('listings', id, { ...listing, status: 'sold', buyer, recipient,
             platformFee: fee.toString(), royalty: royalty.toString(), sellerProceeds: sellerProceeds.toString(), ...meta });
+          if(v3)await liability(tx,market,meta,0n,total,total);
         }
         const key = itemId(listing.collection, listing.tokenId);
         await tx.put('items', key, { ...item, activeListingId: null, escrowRelease: null, ...meta });
@@ -250,6 +297,7 @@ export async function projectLogs(tx: IndexerTransaction, manifest: Manifest, lo
         const from = address(args.from, false), to = address(args.to, false), tokenId = amount(args.tokenId);
         check(tokenId > 0n && (from !== zeroAddress || to !== zeroAddress), 'TRANSFER_INVALID');
         const key = itemId(source, tokenId), previous = await tx.get('items', key);
+        transferProofs.add(`${key}:${log.transactionHash.toLowerCase()}:${from}:${to}`);
         const transfer = { from, to, transactionHash: log.transactionHash.toLowerCase(), logIndex: log.logIndex };
         if (from === zeroAddress) {
           check(!previous && to !== zeroAddress && to !== source && record.opened === true, 'MINT_TRANSFER_INVALID');

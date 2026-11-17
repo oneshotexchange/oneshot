@@ -4,15 +4,20 @@ import { customerErrorDetails, customerFetch, customerResponseJson } from './cus
 import { createNftPendingStore } from './client-nft-recovery';
 import { isSupportedNftChainId, type NftCreatorWorkspace, type NftEarningsPage } from '@oneshot/evm';
 import { readNftNetwork, validNftTestAcknowledgement, type NftChainId } from './nft-network';
+import { readNftMarketplace, type NftMarketplaceCapabilities } from './client-nft-marketplace';
+import { validNftMarketReview } from './client-nft-market-review';
+import type { NftCartItem } from './client-nft-cart';
+import { validateNftOffersPage } from './client-nft-offers';
 
-export type NftLaunchAction = 'create' | 'configure' | 'open' | 'mint' | 'approve' | 'list' | 'buy' | 'cancel' | 'claim' | 'policy';
+export type NftLaunchAction = 'create' | 'configure' | 'open' | 'mint' | 'approve' | 'list' | 'buy' | 'cancel' | 'claim' | 'policy' | 'offer-create' | 'offer-accept' | 'offer-cancel' | 'offer-expire' | 'buy-batch';
 export type LocalLaunchNetwork = { chainId: NftChainId; nativeSymbol: 'ETH'; nativeDecimals: 18; name?: string; mode?: 'local' | 'base-sepolia' };
-export type NftLaunchStatus = { enabled: boolean; reason: string | null; network: LocalLaunchNetwork | null; deploymentId: string | null };
+export type NftLaunchStatus = { enabled: boolean; reason: string | null; network: LocalLaunchNetwork | null; deploymentId: string | null; marketplace?: NftMarketplaceCapabilities | null };
 export type NftLaunchRequest = {
   draftId?: string; expectedRevision?: number; from: string; action: NftLaunchAction; localEthAcknowledged?: true;
   testEthAcknowledged?: true; expectedChainId?: NftChainId;
   collection?: string; tokenId?: string; listingId?: string; quantity?: string; recipient?: string; price?: string; contract?: string;
   floorEnabled?: boolean; floorPrice?: string;
+  offerId?: string; expiresAt?: string; listingIds?: string[];
 };
 export type NftLaunchReview = {
   id: string; reviewHash: string; expiresAt: string; chainId: NftChainId; from: string; to: string; data: string; value: string;
@@ -26,12 +31,14 @@ export type PublicNftCollection = {
   network: LocalLaunchNetwork; deploymentId: string; collection: string; creator: string; name: string; symbol: string;
   opened: boolean; totalMintedRaw: string; termsHash: string; blockNumber: string; blockHash: string; blockTimestamp: string;
   terms: {maxSupplyRaw:string;royaltyBps:number;allowlistRoot:string;contentHash:string;metadataBaseURI:string;collectionURI:string;allowlist:PublicNftStage;publicMint:PublicNftStage};
+  marketplace?: NftMarketplaceCapabilities | null;
 };
 export type NftLaunchReceipt = { status: 'pending' | 'confirmed' | 'reverted'; collection?: string; hash?: string; blockNumber?: string; [key: string]: unknown };
 export type EvmWalletTransaction = {
   chainId: NftChainId; from: string; to: string; data: string; value: string; expectedIdentityScope: string; expiresAt: string;
 };
-export type NftLaunchContext = { identityScope: string | null; address: string | null; chainId: number | null; draftId: string; revision: number; prepared: boolean; deploymentId?: string | null; scope?: 'draft'|'public'; userId?: string | null; selectionKey?: string; termsHash?: string | null };
+export type NftLaunchContext = { identityScope: string | null; address: string | null; chainId: number | null; draftId: string; revision: number; prepared: boolean; deploymentId?: string | null; scope?: 'draft'|'public'; userId?: string | null; selectionKey?: string; termsHash?: string | null; marketplace?: NftMarketplaceCapabilities | null;
+  expectedListings?: NftCartItem[]; expectedOffer?: {id:string;unitPriceRaw:string;escrowRaw:string;bidder:string;recipient:string}; };
 export type NftLaunchState = {
   phase: 'idle' | 'reviewing' | 'review' | 'validating' | 'signing' | 'submitted' | 'confirming' | 'success' | 'reverted' | 'rejected' | 'invalidated' | 'error';
   review: NftLaunchReview | null; hash: string | null; receipt: NftLaunchReceipt | null; message: string | null;
@@ -54,7 +61,9 @@ export function validateNftLaunchStatus(input: unknown): NftLaunchStatus {
     || typeof value.deploymentId !== 'string' || !/^[a-f\d]{64}$/i.test(value.deploymentId) || value.reason !== null) return invalid();
   const network = readNftNetwork(value.network);
   if (!network) return invalid();
-  return { enabled: true, reason: null, deploymentId: value.deploymentId.toLowerCase(), network };
+  const marketplace = value.marketplace === undefined || value.marketplace === null ? value.marketplace : readNftMarketplace(value.marketplace);
+  if (value.marketplace !== undefined && value.marketplace !== null && !marketplace) return invalid();
+  return { enabled: true, reason: null, deploymentId: value.deploymentId.toLowerCase(), network, ...(marketplace !== undefined ? { marketplace } : {}) };
 }
 export function createNftLaunchApi(options: { identityScope(): string | null; getAccessToken(): Promise<string | null>; fetcher?: typeof fetch }) {
   const fetcher = options.fetcher || fetch;
@@ -84,6 +93,10 @@ export function createNftLaunchApi(options: { identityScope(): string | null; ge
       return request<PublicNftCollection>(`collections/${address.toLowerCase()}`,undefined,true).then(value => validatePublicNftCollection(value,address));
     },
     review: (input: NftLaunchRequest) => request<NftLaunchReview>('review', input),
+    offers: (input:{collection:string;tokenId?:string;bidder?:string;cursor?:string})=>{
+      if(!/^0x[\da-f]{40}$/i.test(input.collection)||input.bidder&&!/^0x[\da-f]{40}$/i.test(input.bidder)||input.tokenId&&!/^[1-9]\d{0,77}$/.test(input.tokenId)||input.cursor&&input.cursor.length>2048)throw new NftLaunchError('Refresh offers for this collection.','INVALID_REQUEST');
+      return request<unknown>(`offers?${new URLSearchParams(input)}`,undefined,true).then(value=>validateNftOffersPage(value,input));
+    },
     validate: (input: { reviewId: string; reviewHash: string }) => request<NftLaunchReview>('validate', input),
     receipt: (input: { reviewId: string; hash: string }, signal?:AbortSignal) => request<NftLaunchReceipt>('receipt', input, false, signal),
     submitted: (input: {reviewId:string;reviewHash:string;hash:string}) => request<NftTransactionRecord>('submitted',input),
@@ -125,7 +138,8 @@ export function validatePublicNftCollection(value: PublicNftCollection, collecti
     || !raw(value.totalMintedRaw) || !raw(value.blockNumber) || !raw(value.blockTimestamp) || !hashPattern.test(value.blockHash) || !hashPattern.test(value.termsHash)
     || !value.terms || !raw(value.terms.maxSupplyRaw) || !Number.isInteger(value.terms.royaltyBps) || value.terms.royaltyBps < 0 || value.terms.royaltyBps > 1000
     || !hashPattern.test(value.terms.contentHash) || !hashPattern.test(value.terms.allowlistRoot) || typeof value.terms.metadataBaseURI !== 'string' || typeof value.terms.collectionURI !== 'string'
-    || !stage(value.terms.allowlist) || !stage(value.terms.publicMint)) throw new NftLaunchError('The current collection terms are unavailable. Refresh before reviewing a transaction.','INVALID_COLLECTION');
+    || !stage(value.terms.allowlist) || !stage(value.terms.publicMint)
+    || value.marketplace !== undefined && value.marketplace !== null && !readNftMarketplace(value.marketplace)) throw new NftLaunchError('The current collection terms are unavailable. Refresh before reviewing a transaction.','INVALID_COLLECTION');
   return value;
 }
 function stamp(context: NftLaunchContext) { return JSON.stringify(context); }
@@ -217,13 +231,14 @@ export function createNftLaunchController(options: {
         const context = ready();
         const sameTarget = context.scope === 'public'
           ? input.draftId === undefined && input.expectedRevision === undefined && (input.collection?.toLowerCase() === context.draftId.toLowerCase()
-            || input.action === 'claim' && input.collection === undefined && addressPattern.test(input.contract || '') && input.contract?.toLowerCase() === context.draftId.toLowerCase())
+            || ['claim', 'buy-batch'].includes(input.action) && input.collection === undefined && addressPattern.test(input.contract || '') && input.contract?.toLowerCase() === context.draftId.toLowerCase())
           : input.draftId === context.draftId && input.expectedRevision === context.revision;
         if (!validNftTestAcknowledgement(input, context.chainId) || !sameTarget || input.from.toLowerCase() !== context.address?.toLowerCase()) throw new NftLaunchError('Confirm that you are using test ETH on the reviewed network with the selected collection and wallet.', 'INVALID_REQUEST');
         const review = await options.api.review(input);
         if (!active(ticket, captured)) return;
         assertReview(review, context, now());
         if (review.action !== input.action) throw new NftLaunchError('The review action changed. Prepare a new review.', 'INVALID_REVIEW');
+        if (!validNftMarketReview(input, review, context)) throw new NftLaunchError('The marketplace review does not match your selection. Refresh and prepare a new review.', 'INVALID_REVIEW');
         set({ phase: 'review', review, hash: null, receipt: null, message: null });
       } catch (error) { if (active(ticket, captured)) fail(error); }
     },

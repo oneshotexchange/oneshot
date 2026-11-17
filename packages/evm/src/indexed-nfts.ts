@@ -28,7 +28,7 @@ export type IndexedCollection = {
 };
 export type IndexedListing = {
   id: string; collection: string; tokenId: string; seller: string;
-  totalPriceRaw: string; status: 'active' | 'sold' | 'cancelled';
+  totalPriceRaw: string; status: 'active' | 'sold' | 'cancelled' | 'offer-filled';
   buyer: string | null; recipient: string | null;
   platformFeeRaw: string | null; royaltyRaw: string | null; sellerProceedsRaw: string | null;
 };

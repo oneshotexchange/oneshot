@@ -25,7 +25,7 @@ const version = spawnSync(forge, ['--version'], { cwd: root, encoding: 'utf8', w
 if (version.status !== 0 || !/forge Version: 1\.7\.1\b/.test(version.stdout)) throw new Error('FOUNDRY_1_7_1_REQUIRED');
 const build = spawnSync(forge, ['build', '--root', path.join(root, 'contracts-evm')], { cwd: root, encoding: 'utf8', env: { ...process.env, FOUNDRY_PROFILE: 'default' }, windowsHide: true });
 if (build.status !== 0) throw new Error('CONTRACT_BUILD_FAILED');
-const sources: Record<PlanContract, string> = { OneshotNFTFactory: 'OneshotNFTFactory', OneshotGuardedMarketplace: 'OneshotGuardedMarketplace', OneshotV4OracleDeployer: 'OneshotV4Oracle', OneshotV4Oracle: 'OneshotV4Oracle', OneshotV4MarketFactory: 'OneshotV4Market', OneshotV4Market: 'OneshotV4Market', OneshotV4Quoter: 'OneshotV4Quoter' };
+const sources: Record<PlanContract, string> = { OneshotNFTFactory: 'OneshotNFTFactory', OneshotGuardedMarketplaceV3: 'OneshotGuardedMarketplaceV3', OneshotV4OracleDeployer: 'OneshotV4Oracle', OneshotV4Oracle: 'OneshotV4Oracle', OneshotV4MarketFactory: 'OneshotV4Market', OneshotV4Market: 'OneshotV4Market', OneshotV4Quoter: 'OneshotV4Quoter' };
 const artifacts = {} as Record<PlanContract, DeploymentArtifact>;
 for (const [name, source] of Object.entries(sources)) artifacts[name as PlanContract] = JSON.parse(await readFile(path.join(root, 'contracts-evm', 'out', `${source}.sol`, `${name}.json`), 'utf8'));
 const plan = buildBaseSepoliaPlan(artifacts, { deployer: values.get('--deployer') as Address, nonce: BigInt(values.get('--nonce')!), platform: values.get('--platform') as Address, listingAuthority: values.get('--listing-authority') as Address, deploymentSalt: values.get('--deployment-salt') as Hex });

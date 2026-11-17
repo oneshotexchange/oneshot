@@ -75,7 +75,13 @@ export async function syncIndexer(source: ChainSource, store: IndexerStore, inpu
     if (canonical.hash !== block.hash) throw new IndexerError('CHAIN_MOVED');
     await store.transaction(async tx => {
       if (!same(await tx.head(), head)) throw new IndexerError('CONCURRENT_SYNC');
-      await projectLogs(tx, manifest, logs);
+      await projectLogs(tx, manifest, logs,block);
+      if(manifest.deploymentVersion==='oneshot-nft-v3'){
+        if(!source.offerAccounting)throw new IndexerError('OFFER_ACCOUNTING_UNAVAILABLE');
+        const actual=await source.offerAccounting(manifest,block),projected=await tx.get('offer-accounting',manifest.marketplace.address);
+        if(actual.escrow!==(projected?.escrow??'0')||actual.pending!==(projected?.pending??'0'))throw new IndexerError('OFFER_ACCOUNTING_MISMATCH');
+        if((await source.block(number)).hash!==block.hash)throw new IndexerError('CHAIN_MOVED');
+      }
       await tx.append(block, logs);
     });
     head = block;

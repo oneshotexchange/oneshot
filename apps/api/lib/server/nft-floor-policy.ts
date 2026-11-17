@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { keccak256, stringToHex, zeroHash, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { parseAssetAmount, applyProtectedFloor, guardedListingPermitTypedData, guardedPolicyPermitTypedData, type GuardedListingPermit, type GuardedPolicyPermit } from '@oneshot/evm';
+import { parseAssetAmount, applyProtectedFloor, guardedListingPermitTypedData, guardedPolicyPermitTypedData, guardedOfferAcceptancePermitTypedData, type GuardedOfferAcceptancePermit, type GuardedListingPermit, type GuardedPolicyPermit } from '@oneshot/evm';
 import { putIfAbsent, getRecord } from './store';
 import { stableJson } from './media';
 import { ApiError } from './errors';
@@ -70,5 +70,9 @@ export function createNftFloorPolicyService(environment:()=>Record<string,string
     catch(error){if(error instanceof ApiError)throw error;throw new ApiError(503,'LISTING_AUTHORITY_UNAVAILABLE','The settings authorization could not be prepared.');}
   }
   function assertAuthority(authority:Address){signer(authority);}
-  return{eligible,resolve,stage,signListing,signPolicy,assertAuthority};
+  async function signOffer(market:Address,authority:Address,message:GuardedOfferAcceptancePermit,chainId:31337|84532=31337){
+    try{return await signer(authority).signTypedData(guardedOfferAcceptancePermitTypedData({chainId,verifyingContract:market},message));}
+    catch{throw new ApiError(503,'OFFER_AUTHORITY_UNAVAILABLE','This offer cannot be accepted right now. Try again later.');}
+  }
+  return{eligible,resolve,stage,signListing,signPolicy,signOffer,assertAuthority};
 }

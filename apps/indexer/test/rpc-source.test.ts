@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { encodeAbiParameters, encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, parseAbiParameters, zeroAddress, zeroHash, type Address, type Hex } from 'viem';
-import { BASE_SEPOLIA_GENESIS_HASH, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
+import { encodeAbiParameters, encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, parseAbiParameters, zeroAddress, zeroHash, type Abi, type Address, type Hex } from 'viem';
+import { BASE_SEPOLIA_GENESIS_HASH, GUARDED_MARKETPLACE_V3_ABI, RpcError, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
 import { VerifiedRpcSource } from '../src/rpc-source';
 import type { Block, Manifest } from '../src/types';
 
@@ -40,6 +40,7 @@ function fixture() {
     listingAuthority: wordAddress(address(4)) as unknown, deploymentSalt: hash(700) as unknown,
     height: '0x2' as unknown,
     deploymentChainId:84532n,domainChainId:84532n,
+    v3:false,version:3n,batchLimit:20n,offerLimit:20n,escrow:200n,pending:100n,balance:'0x12c',ignoreBalanceHash:false,
     logs: (_filter: { address: Address[]; blockHash: Hex }): unknown => [],
   };
   const readRpc = vi.fn(async (method: RpcReadMethod, params: readonly unknown[] = []): Promise<unknown> => {
@@ -47,8 +48,15 @@ function fixture() {
     if (method === 'eth_getBlockByNumber') return state.blocks.get(Number(BigInt(params[0] as string)));
     if (method === 'eth_getCode') return params[0] === factory ? state.factoryCode : state.marketCode;
     if (method === 'eth_getLogs') return state.logs(params[0] as Parameters<typeof state.logs>[0]);
+    if(method==='eth_getBalance'){
+      if(!state.ignoreBalanceHash&&(params[1] as {blockHash?:string})?.blockHash!==block.hash)throw new RpcError('RPC_REMOTE_ERROR','block-not-found');
+      return state.balance;
+    }
     if (method === 'eth_call') {
       const request = params[0] as { to: Address; data: Hex };
+      if(state.v3)for(const [name,value] of Object.entries({MARKETPLACE_VERSION:state.version,MAX_BATCH_BUY:state.batchLimit,MAX_OFFER_QUANTITY:state.offerLimit,totalOfferEscrow:state.escrow,totalPending:state.pending})){
+        if(request.data===encodeFunctionData({abi:GUARDED_MARKETPLACE_V3_ABI as Abi,functionName:name}))return encodeAbiParameters([{type:'uint256'}],[value]);
+      }
       // factory() selector is distinct from treasury(); the exact call encoding is asserted below.
       if (request.data === '0xc45a0155') return state.factoryReference;
       if (request.data === encodeFunctionData({ abi: authorizationAbi, functionName: 'listingAuthority' })) return state.listingAuthority;
@@ -262,5 +270,16 @@ describe('verified local RPC source', () => {
     const addresses = Array.from({ length: 9 }, (_, index) => address(index + 1));
     state.logs = filter => Array.from({ length: 6000 }, (_, index) => rpcLog(filter.address[0], index + (filter.address[0] === factory ? 0 : 6000)));
     await expect(source.logs(block, addresses)).rejects.toMatchObject({ code: 'SOURCE_LIMIT' });
+  });
+  it('proves V3 code, domain, limits and solvency at the exact held hash',async()=>{
+    const f=fixture(),v3={...guardedManifest,deploymentVersion:'oneshot-nft-v3' as const};f.state.v3=true;f.state.deploymentChainId=31337n;f.state.domainChainId=31337n;
+    await f.source.verify(v3);expect(await f.source.offerAccounting(v3,block)).toEqual({escrow:'200',pending:'100',balance:'300'});
+    f.state.balance='0x1000';await expect(f.source.offerAccounting(v3,block)).resolves.toMatchObject({balance:'4096'});
+    f.state.balance='0x12b';await expect(f.source.offerAccounting(v3,block)).rejects.toMatchObject({code:'OFFER_SOLVENCY_INVALID'});
+  });
+  it('rejects ignored hash balance selectors and altered V3 capability limits',async()=>{
+    const f=fixture(),v3={...guardedManifest,deploymentVersion:'oneshot-nft-v3' as const};Object.assign(f.state,{v3:true,deploymentChainId:31337n,domainChainId:31337n,ignoreBalanceHash:true});
+    await expect(f.source.offerAccounting(v3,block)).rejects.toMatchObject({code:'HASH_BALANCE_UNVERIFIED'});
+    f.state.ignoreBalanceHash=false;f.state.batchLimit=21n;await expect(f.source.offerAccounting(v3,block)).rejects.toMatchObject({code:'MARKETPLACE_CAPABILITY_MISMATCH'});
   });
 });

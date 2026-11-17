@@ -2,6 +2,8 @@
 
 Base Sepolia is the immediate test-network target. Local protocol rehearsals do not prove a Base deployment. No Zero deployment is claimed.
 
+New deployment plans use `OneshotGuardedMarketplaceV3`: funded native item/collection offers, independent acceptance permits/nonces, partial fills, permissionless expired-offer release, bidder refunds into pull balances and atomic buys of up to 20 listings. The guarded listing/policy entrypoints remain available. See [NFT V3 behavior, verification and rollout](../NFT-MARKETPLACE-V3.md). Earlier v1/v2 local smoke fixtures remain earlier-version evidence; do not label them V3 rehearsals. All 105 Foundry cases pass; the V3 marketplace runtime is 14,011 bytes.
+
 ## Run
 
 Install Node 22.12+ and Foundry (local validation used 1.7.1), then run from the repository root:

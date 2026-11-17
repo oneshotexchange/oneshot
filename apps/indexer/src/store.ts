@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS oneshot_evm_projections (
   value jsonb NOT NULL,
   PRIMARY KEY (manifest_id, kind, entity_id)
 );
+CREATE TABLE IF NOT EXISTS oneshot_evm_offer_projections (
+ manifest_id text NOT NULL REFERENCES oneshot_evm_deployments(manifest_id) ON DELETE CASCADE,
+ kind text NOT NULL CHECK(kind IN('offers','offer-sales','offer-accounting')),entity_id text NOT NULL,value jsonb NOT NULL,PRIMARY KEY(manifest_id,kind,entity_id)
+);
+CREATE INDEX IF NOT EXISTS oneshot_evm_offer_collection_bidder ON oneshot_evm_offer_projections(manifest_id,(value->>'collection'),(value->>'bidder'),((value->>'offerId')::numeric) DESC) WHERE kind='offers';
+CREATE INDEX IF NOT EXISTS oneshot_evm_offer_sale_collection ON oneshot_evm_offer_projections(manifest_id,(value->>'collection')) WHERE kind='offer-sales';
 -- Keep collection discovery independent of mint/transfer activity volume. The same
 -- ordered index supports newest/oldest keyset pages by scanning in either direction.
 CREATE INDEX IF NOT EXISTS oneshot_evm_collection_creation_order
@@ -53,7 +59,8 @@ CREATE INDEX IF NOT EXISTS oneshot_evm_listing_collection_status
   ON oneshot_evm_projections(manifest_id,(value->>'collection'),(value->>'status'))
   WHERE kind='listings';`;
 
-const kinds: readonly ProjectionKind[] = ['collections', 'items', 'listings', 'claims', 'activity'];
+const kinds: readonly ProjectionKind[] = ['collections', 'items', 'listings', 'claims', 'activity', 'offers', 'offer-sales', 'offer-accounting'];
+const projectionTable=(kind:ProjectionKind)=>['offers','offer-sales','offer-accounting'].includes(kind)?'oneshot_evm_offer_projections':'oneshot_evm_projections';
 
 /** Clone strictly JSON values, refusing lossy bigint/undefined/non-finite conversions. */
 function jsonClone<T>(value: T): T {
@@ -297,19 +304,19 @@ class PostgresData implements TransactionData {
     return result.rows[0] ? decodeBlock(result.rows[0]) : null;
   }
   async get(kind: ProjectionKind, id: string): Promise<ProjectionValue | null> {
-    const result = await this.client.query('SELECT value FROM oneshot_evm_projections WHERE manifest_id=$1 AND kind=$2 AND entity_id=$3', [this.manifestId, kind, id]);
+    const result = await this.client.query(`SELECT value FROM ${projectionTable(kind)} WHERE manifest_id=$1 AND kind=$2 AND entity_id=$3`, [this.manifestId, kind, id]);
     return result.rows[0] ? decodeJson<ProjectionValue>(result.rows[0].value) : null;
   }
   async write(kind: ProjectionKind, id: string, value: ProjectionValue | null): Promise<void> {
     if (value === null) {
-      await this.client.query('DELETE FROM oneshot_evm_projections WHERE manifest_id=$1 AND kind=$2 AND entity_id=$3', [this.manifestId, kind, id]);
+      await this.client.query(`DELETE FROM ${projectionTable(kind)} WHERE manifest_id=$1 AND kind=$2 AND entity_id=$3`, [this.manifestId, kind, id]);
     } else {
-      await this.client.query(`INSERT INTO oneshot_evm_projections(manifest_id,kind,entity_id,value) VALUES($1,$2,$3,$4::jsonb)
+      await this.client.query(`INSERT INTO ${projectionTable(kind)}(manifest_id,kind,entity_id,value) VALUES($1,$2,$3,$4::jsonb)
         ON CONFLICT(manifest_id,kind,entity_id) DO UPDATE SET value=EXCLUDED.value`, [this.manifestId, kind, id, JSON.stringify(value)]);
     }
   }
   async list(kind: ProjectionKind): Promise<Record<string, ProjectionValue>> {
-    const result = await this.client.query('SELECT entity_id, value FROM oneshot_evm_projections WHERE manifest_id=$1 AND kind=$2 ORDER BY entity_id', [this.manifestId, kind]);
+    const result = await this.client.query(`SELECT entity_id, value FROM ${projectionTable(kind)} WHERE manifest_id=$1 AND kind=$2 ORDER BY entity_id`, [this.manifestId, kind]);
     return Object.fromEntries(result.rows.map((row) => [String(row.entity_id), decodeJson<ProjectionValue>(row.value)]));
   }
   async append(entry: JournalBlock): Promise<void> {

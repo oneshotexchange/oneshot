@@ -75,7 +75,7 @@ function selection(request: NextRequest): Selection {
   if (query.has('wallet')) wallet = inputAddress(query.get('wallet')!);
   const seller = query.has('seller') ? inputAddress(query.get('seller')!) : undefined;
   const status = query.get('status') ?? undefined;
-  if (status !== undefined && !['active', 'sold', 'cancelled'].includes(status)) return badInput();
+  if (status !== undefined && !['active', 'sold', 'cancelled', 'offer-filled'].includes(status)) return badInput();
   const cursor = query.get('cursor') ?? undefined;
   if (cursor !== undefined && (!cursor || cursor.length > 2048)) return badInput();
   const search = resource === 'collections' ? query.get('q') ?? '' : undefined;
@@ -128,7 +128,7 @@ function collectionDto(input: unknown): IndexedCollection {
 }
 function listingDto(input: unknown): IndexedListing {
   const row = valueRecord(input);
-  if (!['active', 'sold', 'cancelled'].includes(String(row.status))) return invalidData();
+  if (!['active', 'sold', 'cancelled', 'offer-filled'].includes(String(row.status))) return invalidData();
   return { id: numberText(row.listingId), collection: address(row.collection), tokenId: numberText(row.tokenId), seller: address(row.seller),
     totalPriceRaw: numberText(row.totalPrice), status: row.status as IndexedListing['status'], buyer: optionalAddress(row.buyer), recipient: optionalAddress(row.recipient),
     platformFeeRaw: optionalAmount(row.platformFee), royaltyRaw: optionalAmount(row.royalty), sellerProceedsRaw: optionalAmount(row.sellerProceeds) };
@@ -178,7 +178,7 @@ function activityDto(row: Record<string, unknown>): IndexedActivity {
     timestamp: new Date(Number(seconds * 1000n)).toISOString(), args: args as Record<string, string | boolean> };
 }
 
-async function readRows(client: SqlClient, select: Selection, manifest: string, cursor: Cursor | null) {
+async function readRows(client: SqlClient, select: Selection, manifest: string, cursor: Cursor | null, v3=false) {
   if (select.resource === 'status') return [];
   const values: unknown[] = [manifest];
   const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
@@ -221,11 +221,12 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
     if (cursor) where.push(`p.entity_id COLLATE "C" > ${bind(cursor.after[0])} COLLATE "C"`);
   } else {
     where.push("p.kind='activity'");
-    joins = "JOIN oneshot_evm_journal j ON j.manifest_id=p.manifest_id AND j.block_number=(p.value->>'blockNumber')::numeric AND j.block_hash=p.value->>'blockHash' LEFT JOIN oneshot_evm_projections l ON l.manifest_id=p.manifest_id AND l.kind='listings' AND l.entity_id=p.value->'args'->>'listingId' LEFT JOIN oneshot_evm_projections c ON c.manifest_id=p.manifest_id AND c.kind='collections' AND c.entity_id=p.value->>'source'";
-    const collection = "COALESCE(c.entity_id,p.value->'args'->>'collection',l.value->>'collection')";
+    joins = "JOIN oneshot_evm_journal j ON j.manifest_id=p.manifest_id AND j.block_number=(p.value->>'blockNumber')::numeric AND j.block_hash=p.value->>'blockHash' LEFT JOIN oneshot_evm_projections l ON l.manifest_id=p.manifest_id AND l.kind='listings' AND l.entity_id=p.value->'args'->>'listingId' LEFT JOIN oneshot_evm_projections c ON c.manifest_id=p.manifest_id AND c.kind='collections' AND c.entity_id=p.value->>'source' LEFT JOIN oneshot_evm_offer_projections o ON o.manifest_id=p.manifest_id AND o.kind='offers' AND o.entity_id=p.value->'args'->>'offerId'";
+    if(!v3)joins=joins.slice(0,joins.indexOf(' LEFT JOIN oneshot_evm_offer_projections'));
+    const collection = v3?"COALESCE(c.entity_id,p.value->'args'->>'collection',l.value->>'collection',o.value->>'collection')":"COALESCE(c.entity_id,p.value->'args'->>'collection',l.value->>'collection')";
     columns += `,j.block_timestamp::text AS event_timestamp,${collection} AS collection_address`;
     if (select.collection) where.push(`${collection}=${bind(select.collection)}`);
-    if (select.wallet) where.push(`EXISTS(SELECT 1 FROM jsonb_each_text(p.value->'args') field WHERE field.key IN ('creator','payer','recipient','from','to','account','owner','approved','operator','buyer','seller') AND field.value=${bind(select.wallet)})`);
+    if (select.wallet) where.push(`EXISTS(SELECT 1 FROM jsonb_each_text(p.value->'args') field WHERE field.key IN ('creator','payer','recipient','from','to','account','owner','approved','operator','buyer','seller','bidder','caller') AND field.value=${bind(select.wallet)})`);
     order = "(p.value->>'blockNumber')::numeric DESC,(p.value->>'logIndex')::integer DESC";
     if (cursor) where.push(`((p.value->>'blockNumber')::numeric,(p.value->>'logIndex')::integer) < (${bind(cursor.after[0])}::numeric,${bind(cursor.after[1])}::integer)`);
   }
@@ -282,9 +283,21 @@ async function collectionMarketStats(client: SqlClient, identity: string, collec
   if (result.rows.length !== 1) return invalidData();
   const row = result.rows[0];
   if (row.invalid !== false) return invalidData();
-  const activeListings = numberText(row.active_listings, 78), completedSales = numberText(row.completed_sales, 78);
+  const activeListings = numberText(row.active_listings, 78); let completedSales = numberText(row.completed_sales, 78);
   const lowestListingPriceRaw = row.lowest_listing_price === null ? null : numberText(row.lowest_listing_price, 78);
-  const secondaryVolumeRaw = numberText(row.secondary_volume);
+  let secondaryVolumeRaw = numberText(row.secondary_volume);
+  if(manifest.deploymentVersion==='oneshot-nft-v3'){
+    const offers=await client.query(`SELECT count(*)::text AS count,
+      COALESCE(sum(CASE WHEN p.value->>'totalPrice' ~ '^[1-9][0-9]{0,77}$' THEN (p.value->>'totalPrice')::numeric ELSE 0 END),0)::text AS volume,
+      COALESCE(bool_or(CASE WHEN p.value->>'totalPrice' ~ '^[1-9][0-9]{0,77}$' THEN (p.value->>'totalPrice')::numeric >= power(2::numeric,256) ELSE true END
+        OR NOT (a.value->'args' @> jsonb_build_object('offerId',p.value->>'offerId','collection',p.value->>'collection','tokenId',p.value->>'tokenId','seller',p.value->>'seller','bidder',p.value->>'bidder','recipient',p.value->>'recipient','totalPrice',p.value->>'totalPrice','platformFee',p.value->>'platformFee','royalty',p.value->>'royalty','sellerProceeds',p.value->>'sellerProceeds','replacedListingId',p.value->>'replacedListingId'))),false) AS invalid
+      FROM oneshot_evm_offer_projections p JOIN oneshot_evm_journal j ON j.manifest_id=p.manifest_id AND j.block_number=(p.value->>'lastBlockNumber')::numeric AND j.block_hash=p.value->>'lastBlockHash'
+      JOIN oneshot_evm_projections a ON a.manifest_id=p.manifest_id AND a.kind='activity' AND a.entity_id=p.entity_id AND a.value->>'eventName'='OfferAccepted' AND a.value->>'source'=$3 AND a.value->>'blockHash'=j.block_hash AND a.value->>'blockNumber'=p.value->>'lastBlockNumber' AND a.value->>'transactionHash'=p.value->>'lastTransactionHash' AND a.value->>'logIndex'=p.value->>'lastLogIndex'
+      WHERE p.manifest_id=$1 AND p.kind='offer-sales' AND p.value->>'collection'=$2 AND j.block_number BETWEEN $5::numeric AND $4::numeric`,[identity,collection,manifest.marketplace.address,checkpoint,manifest.startBlock.toString()]);
+    if(offers.rows.length!==1||offers.rows[0].invalid!==false)return invalidData();
+    completedSales=(BigInt(completedSales)+BigInt(numberText(offers.rows[0].count))).toString();
+    secondaryVolumeRaw=(BigInt(secondaryVolumeRaw)+BigInt(numberText(offers.rows[0].volume))).toString();
+  }
   if (activeListings === '0' ? lowestListingPriceRaw !== null : lowestListingPriceRaw === null || BigInt(lowestListingPriceRaw) === 0n
     || BigInt(lowestListingPriceRaw) >= 2n ** 256n) return invalidData();
   if (completedSales === '0' ? secondaryVolumeRaw !== '0' : BigInt(secondaryVolumeRaw) === 0n) return invalidData();
@@ -371,7 +384,14 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
       const context: IndexedNftContext = { enabled: true, available: true, reason: null, deploymentId: identity,
         network,
         checkpoint: { number: block, hash: blockHash, timestamp }, sync: null, readonly: true, finalized: false };
-      const resultRows = await readRows(client, select, identity, cursor);
+      if(manifest.deploymentVersion==='oneshot-nft-v3'){
+        if(!source.offerAccounting)throw new ApiError(503,'OFFERS_UNAVAILABLE','NFT balances could not be verified. Try again.');
+        const actual=await source.offerAccounting(manifest,{number:BigInt(block),hash:blockHash as `0x${string}`,parentHash:hash(head.parent_hash) as `0x${string}`,timestamp:BigInt(timestamp)});
+        const accounting=await client.query("SELECT value FROM oneshot_evm_offer_projections WHERE manifest_id=$1 AND kind='offer-accounting' AND entity_id=$2",[identity,manifest.marketplace.address]);
+        const value=accounting.rows.length?valueRecord(accounting.rows[0].value):null;
+        if(actual.escrow!==(value?.escrow??'0')||actual.pending!==(value?.pending??'0'))return invalidData();
+      }
+      const resultRows = await readRows(client, select, identity, cursor, manifest.deploymentVersion==='oneshot-nft-v3');
       // Read only the SQL snapshot above; do not attach data from a later journal state.
       const resolveContent = deps.contentResolver(client);
       const convert = async (row: Record<string, unknown>) => {

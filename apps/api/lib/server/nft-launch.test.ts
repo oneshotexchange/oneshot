@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, verifyTypedData, zeroHash, type Abi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { NFT_COLLECTION_ABI, NFT_FACTORY_ABI, NFT_MARKETPLACE_ABI, GUARDED_MARKETPLACE_ABI, BASE_SEPOLIA_GENESIS_HASH, guardedListingPermitTypedData, prepareNftTerms, type createVerifiedRpc, type RpcReadMethod } from '@oneshot/evm';
+import { NFT_COLLECTION_ABI, NFT_FACTORY_ABI, NFT_MARKETPLACE_ABI, GUARDED_MARKETPLACE_ABI, GUARDED_MARKETPLACE_V3_ABI, RpcError, BASE_SEPOLIA_GENESIS_HASH, guardedListingPermitTypedData, prepareNftTerms, type createVerifiedRpc, type RpcReadMethod } from '@oneshot/evm';
 import { parseManifest, manifestId } from '../../../indexer/src/manifest';
 import { createNftLaunchRepository, NFT_REVIEW_NAMESPACE } from './nft-launch-store';
 import { createNftLaunchProgressRepository } from './nft-launch-progress-store';
@@ -200,10 +200,11 @@ describe('private protected minimum on the guarded marketplace',()=>{
   });
 });
 
-function fixture(environment: Record<string, string | undefined> = {}, guarded=false) {
+function fixture(environment: Record<string, string | undefined> = {}, guarded:boolean|'v3'=false) {
+  const selected=guarded==='v3'?parseManifest({...guardedManifest,startBlock:'1',deploymentVersion:'oneshot-nft-v3'}):guarded?guardedManifest:manifest;
   const base = environment.ONESHOT_NETWORK === 'base-sepolia';
-  const selectedManifest = base ? parseManifest({...JSON.parse(JSON.stringify({...guarded?guardedManifest:manifest,startBlock:'1'})),
-    mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH,anchorHash:BASE_SEPOLIA_GENESIS_HASH}) : guarded?guardedManifest:manifest;
+  const selectedManifest = base ? parseManifest({...JSON.parse(JSON.stringify({...selected,startBlock:'1'})),
+    mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH,anchorHash:BASE_SEPOLIA_GENESIS_HASH}) : selected;
   const draft: OneshotDraft = { id: draftId, ownerUserId: session.userId, revision: 2, status: 'prepared', createdAt: '2030-01-01T00:00:00Z', updatedAt: '2030-01-01T00:00:00Z',
     ...(base ? {pricingNetwork:'base-sepolia' as const} : {}), name: 'Originals', symbol: 'SHOT', description: 'A prepared collection', maxSupply: 10, royaltyBps: 500, publicPrice: '0.123456789012345678', allowlistPrice: '0', perWalletLimit: 2,
     publicStart: '2030-01-02T00:00:00Z', publicEnd: '2030-01-03T00:00:00Z', allowlistAddresses: [], creatorWallet: creator, metadataMode: 'upload',
@@ -214,6 +215,7 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
     onchainTerms: undefined as ReturnType<typeof prepareNftTerms>['terms'] | undefined, opened:true, minted:0n,
     listingPrice: 2_000_000_000_000_000_000n, listingActive: true, listingSeller: other,
     policyCommitment:zeroHash as Hex,listingNonce:0n,
+    offerRemaining:2n,offerPrice:10000n,itemOwner:creator,activeListing:0n,
     transaction: null as Record<string, unknown> | null, transactionReceipt: null as Record<string, unknown> | null,
   };
   const blockHash = (number: bigint) => state.blockHashes.get(number) ?? (number === 0n ? selectedManifest.genesisHash : hash(Number(number) + 100));
@@ -224,11 +226,15 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
     }
     if (method === 'eth_blockNumber') return quantity(state.head);
     if (method === 'eth_getCode') return state.code;
+    if(method==='eth_getBalance'){
+      if(!Array.from({length:30},(_,n)=>blockHash(BigInt(n))).includes((params[1] as {blockHash:Hex}).blockHash))throw new RpcError('RPC_REMOTE_ERROR','block-not-found');
+      return quantity(1000000000000000000n);
+    }
     if (method === 'eth_getTransactionByHash') return state.transaction;
     if (method === 'eth_getTransactionReceipt') return state.transactionReceipt;
     if (method !== 'eth_call') throw new Error(`Unexpected RPC method: ${method}`);
     const call = params[0] as { to: Address; data: Hex };
-    const abi: Abi = call.to === factory ? NFT_FACTORY_ABI : call.to === marketplace ? (guarded?GUARDED_MARKETPLACE_ABI:NFT_MARKETPLACE_ABI) : NFT_COLLECTION_ABI;
+    const abi: Abi = call.to === factory ? NFT_FACTORY_ABI : call.to === marketplace ? (guarded==='v3'?GUARDED_MARKETPLACE_V3_ABI:guarded?GUARDED_MARKETPLACE_ABI:NFT_MARKETPLACE_ABI) : NFT_COLLECTION_ABI;
     const { functionName } = decodeFunctionData({ abi, data: call.data });
     let result: unknown;
     switch (functionName) {
@@ -239,6 +245,14 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
       case 'eip712Domain': result = ['0x0f','OneshotGuardedMarketplace','1',BigInt(selectedManifest.chainId),marketplace,zeroHash,[]]; break;
       case 'policyCommitment': result = state.policyCommitment; break;
       case 'listingNonces': result = state.listingNonce; break;
+      case 'offerAcceptanceNonces': result=state.listingNonce;break;
+      case 'MARKETPLACE_VERSION': result=3n;break;
+      case 'MAX_BATCH_BUY': case 'MAX_OFFER_QUANTITY': result=20n;break;
+      case 'totalOfferEscrow': result=0n;break;
+      case 'totalPending': result=10n;break;
+      case 'nextOfferId': result=2n;break;
+      case 'offers': result=[collection,other,other,0n,state.offerPrice,state.offerRemaining,state.chainTime+1000n];break;
+      case 'activeListing': result=state.activeListing;break;
       case 'treasury': result = treasury; break;
       case 'isCollection': result = state.registered; break;
       case 'creator': result = state.collectionCreator; break;
@@ -247,7 +261,7 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
       case 'opened': result = state.opened; break;
       case 'totalMinted': result = state.minted; break;
       case 'terms': result = state.onchainTerms ?? prepareNftTerms(state.draft, { chainId: selectedManifest.chainId, nativeDecimals: 18, collection, nowSeconds: 0n }).terms; break;
-      case 'ownerOf': result = creator; break;
+      case 'ownerOf': result = state.itemOwner; break;
       case 'pending': result = 10n; break;
       case 'listings': result = [collection, state.listingSeller, 1n, state.listingPrice, state.listingActive]; break;
       default: throw new Error(`Unexpected contract read: ${functionName}`);
@@ -278,6 +292,32 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
   }
   return { state, env, service, dependencies, selectedManifest, progressRepository, rpc, verified, readRpc, simulateCall, loadManifest, getDraft, verifySnapshot, input, mined };
 }
+
+describe('funded V3 service review and confirmation',()=>{
+  const request=(patch:Partial<NftReviewInput>={}):NftReviewInput=>({from:creator,collection,action:'offer-create',price:'0.00000000000001',quantity:'2',expiresAt:(initialTime+500n).toString(),localEthAcknowledged:true,...patch});
+  it('simulates and revalidates exact funding without touching a private creator draft',async()=>{
+    const f=fixture({},'v3'),review=await f.service.review(request(),session);
+    expect(review).toMatchObject({scope:'public',value:'20000',to:marketplace,summary:{escrowRaw:'20000',quantity:'2'}});
+    await expect(f.service.validate(review.id,review.reviewHash,session)).resolves.toMatchObject({data:review.data,value:'20000'});
+    expect(f.getDraft).not.toHaveBeenCalled();expect(f.simulateCall.mock.calls[0][0].value).toBe('0x4e20');
+    await expect(f.service.validate(review.id,review.reviewHash,{...session,sessionId:'different-session'})).rejects.toMatchObject({code:'REVIEW_NOT_FOUND'});
+  });
+  it('reuses acceptance authorization but refuses a changed remaining offer or nonce',async()=>{
+    const f=fixture({},'v3'),review=await f.service.review(request({action:'offer-accept',offerId:'1',tokenId:'1'}),session);
+    await expect(f.service.validate(review.id,review.reviewHash,session)).resolves.toMatchObject({data:review.data});
+    f.state.listingNonce++;await expect(f.service.validate(review.id,review.reviewHash,session)).rejects.toMatchObject({code:'REVIEW_CHANGED'});
+    f.state.listingNonce=0n;f.state.offerRemaining=0n;await expect(f.service.validate(review.id,review.reviewHash,session)).rejects.toMatchObject({code:'OFFER_CHANGED'});
+  });
+  it('refuses a cart price change and requires exact canonical offer funding events',async()=>{
+    const f=fixture({},'v3');f.state.itemOwner=marketplace;f.state.activeListing=1n;
+    const cart=await f.service.review(request({action:'buy-batch',collection:undefined,contract:marketplace,listingIds:['1']}),session);f.state.listingPrice++;
+    await expect(f.service.validate(cart.id,cart.reviewHash,session)).rejects.toMatchObject({code:'REVIEW_CHANGED'});
+    const review=await f.service.review(request(),session),txHash=f.mined(review),args={offerId:1n,collection,bidder:creator,tokenId:0n,unitPrice:10000n,quantity:2n,recipient:creator,expiry:initialTime+500n};
+    const log={address:marketplace,blockHash:hash(111),transactionHash:txHash,removed:false,topics:encodeEventTopics({abi:GUARDED_MARKETPLACE_V3_ABI,eventName:'OfferCreated',args}),data:encodeAbiParameters([{type:'uint256'},{type:'uint256'},{type:'uint256'},{type:'address'},{type:'uint256'}],[0n,10000n,2n,creator,initialTime+500n])};
+    f.state.transactionReceipt!.logs=[{...log,data:`${log.data}00`}];await expect(f.service.receipt(review.id,txHash,session)).rejects.toMatchObject({code:'RECEIPT_EVENT_MISSING'});
+    f.state.transactionReceipt!.logs=[log];await expect(f.service.receipt(review.id,txHash,session)).resolves.toMatchObject({status:'confirmed'});
+  });
+});
 
 describe('strict Base Sepolia NFT execution', () => {
   const base = () => fixture({ONESHOT_NETWORK:'base-sepolia'});

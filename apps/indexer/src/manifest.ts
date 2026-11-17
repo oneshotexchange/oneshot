@@ -13,7 +13,7 @@ const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(va
 /** Only exact supported test-network identities can become an indexed deployment. */
 export function parseManifest(input: unknown): Manifest {
   if (!object(input)) return fail();
-  const guarded = input.deploymentVersion === 'oneshot-nft-v2';
+  const guarded = input.deploymentVersion === 'oneshot-nft-v2' || input.deploymentVersion === 'oneshot-nft-v3';
   const keys = ['schemaVersion', 'deploymentVersion', 'mode', 'chainId', 'genesisHash', 'startBlock', 'anchorHash', 'factory', 'marketplace'];
   if (!exact(input, guarded ? [...keys, 'listingAuthorization'] : keys)
     || input.schemaVersion !== 1 || (!guarded && input.deploymentVersion !== 'oneshot-nft-v1')
@@ -39,7 +39,7 @@ export function parseManifest(input: unknown): Manifest {
   if (!object(authorization) || !exact(authorization, ['authority', 'salt'])
     || !isAddress(authorization.authority) || authorization.authority.toLowerCase() === zeroAddress
     || !isHash(authorization.salt) || authorization.salt.toLowerCase() === zeroHash) return fail();
-  return { ...common, deploymentVersion: 'oneshot-nft-v2', listingAuthorization: {
+  return { ...common, deploymentVersion: input.deploymentVersion as 'oneshot-nft-v2'|'oneshot-nft-v3', listingAuthorization: {
     authority: authorization.authority.toLowerCase() as Address, salt: authorization.salt.toLowerCase() as Hex,
   } };
 }
@@ -49,7 +49,7 @@ export function manifestJson(manifest: Manifest) {
     schemaVersion: manifest.schemaVersion, deploymentVersion: manifest.deploymentVersion, mode: manifest.mode,
     chainId: manifest.chainId, genesisHash: manifest.genesisHash, startBlock: manifest.startBlock.toString(),
     anchorHash: manifest.anchorHash, factory: { ...manifest.factory }, marketplace: { ...manifest.marketplace },
-    ...(manifest.deploymentVersion === 'oneshot-nft-v2' ? { listingAuthorization: { ...manifest.listingAuthorization } } : {}),
+    ...(manifest.deploymentVersion !== 'oneshot-nft-v1' ? { listingAuthorization: { ...manifest.listingAuthorization } } : {}),
   };
 }
 export function manifestId(manifest: Manifest): string {

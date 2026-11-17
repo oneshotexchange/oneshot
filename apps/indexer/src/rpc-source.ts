@@ -1,5 +1,6 @@
-import { keccak256, encodeFunctionData, decodeFunctionResult, parseAbi, zeroAddress, type Address, type Hex } from 'viem';
-import { BASE_SEPOLIA_GENESIS_HASH, nftExecutionNetwork, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
+import {randomBytes} from 'node:crypto';
+import { keccak256, encodeFunctionData, decodeFunctionResult,encodeFunctionResult, parseAbi, zeroAddress, type Abi, type Address, type Hex } from 'viem';
+import { BASE_SEPOLIA_GENESIS_HASH, nftExecutionNetwork,RpcError,GUARDED_MARKETPLACE_V3_ABI, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
 import { isAddress, isData, isHash } from './manifest';
 import { IndexerError, type Block, type ChainSource, type Manifest, type RawLog } from './types';
 
@@ -13,6 +14,7 @@ function quantity(value: unknown): bigint {
 const tag = (number: bigint) => `0x${number.toString(16)}`;
 const referenceAbi = parseAbi(['function factory() view returns (address)', 'function treasury() view returns (address)']);
 const authorizationAbi = parseAbi(['function listingAuthority() view returns (address)', 'function deploymentSalt() view returns (bytes32)']);
+const versionAbi=parseAbi(['function MARKETPLACE_VERSION() view returns(uint256)']);
 const chainBindingAbi = parseAbi(['function deploymentChainId() view returns (uint256)',
   'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)']);
 
@@ -41,7 +43,12 @@ export class VerifiedRpcSource implements ChainSource {
     if (await callAddress(manifest.marketplace.address, 'factory') !== manifest.factory.address) throw new IndexerError('FACTORY_REFERENCE_MISMATCH');
     const treasury = await callAddress(manifest.factory.address, 'treasury');
     if (treasury === zeroAddress || treasury !== await callAddress(manifest.marketplace.address, 'treasury')) throw new IndexerError('TREASURY_REFERENCE_MISMATCH');
-    if (manifest.deploymentVersion === 'oneshot-nft-v2') {
+    if (manifest.deploymentVersion !== 'oneshot-nft-v1') {
+      if(manifest.deploymentVersion==='oneshot-nft-v3'){
+        const result=await this.rpc.readRpc('eth_call',[{to:manifest.marketplace.address,data:encodeFunctionData({abi:versionAbi,functionName:'MARKETPLACE_VERSION'})},'latest']);
+        if(!isData(result))return invalid();
+        try{if(decodeFunctionResult({abi:versionAbi,functionName:'MARKETPLACE_VERSION',data:result})!==3n||result.toLowerCase()!==`0x${'3'.padStart(64,'0')}`)throw new Error();}catch{throw new IndexerError('MARKETPLACE_VERSION_MISMATCH');}
+      }
       const callAuthorization = async (functionName: 'listingAuthority' | 'deploymentSalt') => {
         const data = await this.rpc.readRpc('eth_call', [{ to: manifest.marketplace.address,
           data: encodeFunctionData({ abi: authorizationAbi, functionName }) }, 'latest']);
@@ -53,7 +60,7 @@ export class VerifiedRpcSource implements ChainSource {
       if (await callAuthorization('deploymentSalt') !== manifest.listingAuthorization.salt) throw new IndexerError('DEPLOYMENT_SALT_MISMATCH');
       // Existing local v2 deployments predate the immutable chain getter. New
       // Base deployments must prove both admission and EIP-712 replay binding.
-      if (manifest.mode === 'base-sepolia') {
+      if (manifest.mode === 'base-sepolia' || manifest.deploymentVersion==='oneshot-nft-v3') {
         const chainData=await this.rpc.readRpc('eth_call',[{to:manifest.marketplace.address,
           data:encodeFunctionData({abi:chainBindingAbi,functionName:'deploymentChainId'})},'latest']);
         const domainData=await this.rpc.readRpc('eth_call',[{to:manifest.marketplace.address,
@@ -70,6 +77,30 @@ export class VerifiedRpcSource implements ChainSource {
           || domain[5]!==`0x${'0'.repeat(64)}` || domain[6].length!==0) throw new IndexerError('EIP712_DOMAIN_MISMATCH');
       }
     }
+    if(manifest.deploymentVersion==='oneshot-nft-v3')await this.offerAccounting(manifest,await this.block(await this.height()));
+  }
+  /** Exact-hash v3 identity and liabilities. Force-sent native may exceed liabilities. */
+  async offerAccounting(manifest:Manifest,block:Block){
+    if(manifest.deploymentVersion!=='oneshot-nft-v3')throw new IndexerError('OFFERS_UNSUPPORTED');
+    const seen=this.rpc.verification;
+    if(seen.mode!==manifest.mode||seen.chainId!==manifest.chainId||seen.genesisHash.toLowerCase()!==manifest.genesisHash||(await this.block(0n)).hash!==manifest.genesisHash||(await this.block(manifest.startBlock-1n)).hash!==manifest.anchorHash||block.number<manifest.startBlock)throw new IndexerError('CHAIN_IDENTITY_MISMATCH');
+    const selected={blockHash:block.hash,requireCanonical:true},market=manifest.marketplace.address;
+    const call=async(to:Address,functionName:string)=>{
+      const abi:Abi=functionName==='treasury'&&to===manifest.factory.address?referenceAbi:GUARDED_MARKETPLACE_V3_ABI;
+      const data=await this.rpc.readRpc('eth_call',[{to,data:encodeFunctionData({abi,functionName})},selected]);
+      if(!isData(data))return invalid();try{const value=decodeFunctionResult({abi,functionName,data});if(encodeFunctionResult({abi,functionName,result:value}).toLowerCase()!==data.toLowerCase())return invalid();return value;}catch{return invalid();}
+    };
+    for(const contract of [manifest.factory,manifest.marketplace]){const code=await this.rpc.readRpc('eth_getCode',[contract.address,selected]);if(!isData(code)||code==='0x'||keccak256(code)!==contract.codeHash)throw new IndexerError('CONTRACT_CODE_MISMATCH');}
+    if(await call(market,'MARKETPLACE_VERSION')!==3n||await call(market,'MAX_BATCH_BUY')!==20n||await call(market,'MAX_OFFER_QUANTITY')!==20n||await call(market,'deploymentChainId')!==BigInt(manifest.chainId)||String(await call(market,'factory')).toLowerCase()!==manifest.factory.address
+      ||String(await call(market,'listingAuthority')).toLowerCase()!==manifest.listingAuthorization.authority||String(await call(market,'deploymentSalt')).toLowerCase()!==manifest.listingAuthorization.salt
+      ||String(await call(market,'treasury')).toLowerCase()!==String(await call(manifest.factory.address,'treasury')).toLowerCase())throw new IndexerError('MARKETPLACE_CAPABILITY_MISMATCH');
+    const domain=await call(market,'eip712Domain') as readonly unknown[];
+    if(!Array.isArray(domain)||domain[0]!=='0x0f'||domain[1]!=='OneshotGuardedMarketplace'||domain[2]!=='1'||domain[3]!==BigInt(manifest.chainId)||String(domain[4]).toLowerCase()!==market||domain[5]!==`0x${'0'.repeat(64)}`||!Array.isArray(domain[6])||domain[6].length)throw new IndexerError('EIP712_DOMAIN_MISMATCH');
+    let rejected=false;try{await this.rpc.readRpc('eth_getBalance',[market,{blockHash:`0x${randomBytes(32).toString('hex')}`,requireCanonical:true}]);}catch(error){rejected=error instanceof RpcError&&error.code==='RPC_REMOTE_ERROR'&&error.remoteRejection==='block-not-found';}if(!rejected)throw new IndexerError('HASH_BALANCE_UNVERIFIED');
+    const escrow=await call(market,'totalOfferEscrow'),pending=await call(market,'totalPending'),balance=quantity(await this.rpc.readRpc('eth_getBalance',[market,selected]));
+    if(typeof escrow!=='bigint'||typeof pending!=='bigint'||escrow<0n||pending<0n||escrow+pending>balance)throw new IndexerError('OFFER_SOLVENCY_INVALID');
+    const observed=await this.block(block.number);if(observed.hash!==block.hash||observed.parentHash!==block.parentHash||observed.timestamp!==block.timestamp)throw new IndexerError('CHAIN_MOVED');
+    return{escrow:escrow.toString(),pending:pending.toString(),balance:balance.toString()};
   }
   async height() { return quantity(await this.rpc.readRpc('eth_blockNumber')); }
   async block(number: bigint): Promise<Block> {

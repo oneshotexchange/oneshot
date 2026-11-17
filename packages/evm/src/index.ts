@@ -9,6 +9,7 @@ export * from './nft-launch-progress';
 export * from './nft-earnings';
 export * from './protected-floor';
 export * from './guarded-market';
+export * from './nft-offers';
 export * from './token-market';
 export * from './token-market-review';
 export * from './indexed-tokens';

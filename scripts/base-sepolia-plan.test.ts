@@ -10,7 +10,7 @@ function artifact(lines: string[]): DeploymentArtifact {
 function artifacts(): Record<PlanContract, DeploymentArtifact> {
   return {
     OneshotNFTFactory: artifact(['constructor(address platform)']),
-    OneshotGuardedMarketplace: artifact(['constructor(address factory,address authority,bytes32 salt)']),
+    OneshotGuardedMarketplaceV3: artifact(['constructor(address factory,address authority,bytes32 salt)']),
     OneshotV4OracleDeployer: artifact(['function deploy(address manager,bytes32 salt) returns (address)']),
     OneshotV4Oracle: artifact(['constructor(address manager)']),
     OneshotV4MarketFactory: artifact(['constructor(address manager,address oracle,address platform)']),
@@ -38,6 +38,10 @@ describe('unsigned Base Sepolia contract preparation', () => {
     expect(() => parseManifest(plan.manifestPreparation.nft)).toThrow();
     expect(() => parseTokenManifest(plan.manifestPreparation.token)).toThrow();
     expect(plan.manifestPreparation.nft.listingAuthorization.salt).toBe(inputs.deploymentSalt);
+    expect(plan.manifestPreparation.nft.deploymentVersion).toBe('oneshot-nft-v3');
+    expect(plan.transactions[1].action).toContain('marketplace v3');
+    expect(plan.artifacts).toHaveProperty('OneshotGuardedMarketplaceV3');
+    expect(plan.requiredPostDeploymentEvidence.some(value => value.includes('MARKETPLACE_VERSION() is 3'))).toBe(true);
     expect(plan.manifestPreparation.token.quoter).toEqual({ address: plan.predicted.quoter, codeHash: null });
   });
 

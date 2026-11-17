@@ -79,7 +79,7 @@ const keysOnly = (value: ObjectRecord, keys: string[]) => Object.keys(value).eve
 
 /** Only clear, hash-selected block lookup rejections can satisfy a capability negative control. */
 function remoteRejection(error: ObjectRecord, method: string, params: readonly unknown[]): 'block-not-found' | undefined {
-  const selected = method === 'eth_call' || method === 'eth_getCode' ? params[1] : method === 'eth_getLogs' ? params[0] : null;
+  const selected = method === 'eth_call' || method === 'eth_getCode' || method === 'eth_getBalance' ? params[1] : method === 'eth_getLogs' ? params[0] : null;
   if (!object(selected) || !hexHash(selected.blockHash) || ![-32000, -32001].includes(error.code as number)
     || typeof error.message !== 'string' || error.message.length > 256) return;
   const message = error.message.trim();
@@ -246,10 +246,10 @@ function boundedParams(method: RpcReadMethod, params: readonly unknown[]): reado
     case 'eth_getBlockByNumber':
       if (params.length !== 2 || !blockTag(params[0]) || params[1] !== false) return invalid();
       break;
-    case 'eth_getBalance': case 'eth_getTransactionCount':
+    case 'eth_getTransactionCount':
       if (params.length !== 2 || !hexAddress(params[0]) || !blockTag(params[1])) return invalid();
       break;
-    case 'eth_getCode':
+    case 'eth_getCode': case 'eth_getBalance':
       if (params.length !== 2 || !hexAddress(params[0]) || !callBlock(params[1])) return invalid();
       break;
     case 'eth_getTransactionReceipt': case 'eth_getTransactionByHash':

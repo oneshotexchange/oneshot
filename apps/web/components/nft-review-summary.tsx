@@ -16,6 +16,8 @@ const labels: Record<string, string> = {
   approvedSpender: 'Approved marketplace', publicStart: 'Public mint starts', publicEnd: 'Public mint ends',
   allowlistStart: 'Allowlist starts', allowlistEnd: 'Allowlist ends',
   floorEnabled: 'Floor protection', enabled: 'Floor protection',
+  offerId: 'Offer number', bidder: 'Offer maker', escrowRaw: 'Test ETH reserved', expiresAt: 'Offer expires',
+  releasedAmountRaw: 'Released to marketplace balance', claimBeneficiary: 'Balance owner', listingIds: 'Listing numbers',
 };
 
 export function nftTransactionPhase(phase: NftLaunchState['phase']): string {
@@ -39,12 +41,18 @@ export function NftReviewSummary({ summary, action }: { summary: Record<string, 
     cancel: 'Returns this NFT to the recipient shown.',
     claim: 'Transfers your available proceeds to the recipient shown.',
     policy: 'Applies to new listings. Existing orders keep their approved prices.',
+    'offer-create': 'Reserves the full offer amount in the marketplace. Canceling or releasing an expired offer moves unused funds to your marketplace balance; withdrawing them requires a separate transaction.',
+    'offer-accept': 'Transfers this NFT to the fixed offer recipient. The inclusive platform fee and creator royalty are deducted from the offer amount; the seller receives claimable marketplace balance.',
+    'offer-cancel': 'Cancels the unfilled offer quantity and moves unused funds to the offer maker’s marketplace balance. A separate withdrawal transaction is required.',
+    'offer-expire': 'Releases unused offer funds to the offer maker’s marketplace balance. Anyone can release an expired offer; only its owner can withdraw the proceeds.',
+    'buy-batch': 'Buys every selected listing in one transaction. If any listing cannot be purchased, the entire purchase fails. Network gas is paid separately.',
   };
   function value(key: string, text: string): string {
     if (key.endsWith('Raw') && /^(0|[1-9]\d*)$/.test(text)) return `${formatIndexedAmount(text, 18)} ETH`;
     if (key === 'royaltyBps' && /^\d{1,4}$/.test(text)) return `${Number(text) / 100}%`;
     if (key === 'floorEnabled' || key === 'enabled') return text === 'true' ? 'Enabled' : text === 'false' ? 'Disabled' : text;
     if (key === 'stage') return text === 'allowlist' ? 'Allowlist' : text === 'public' ? 'Public mint' : text;
+    if (key === 'expiresAt' && /^(0|[1-9]\d*)$/.test(text)) return BigInt(text) <= 8_640_000_000_000n ? new Date(Number(text) * 1000).toLocaleString() : 'Outside the displayable date range';
     if (['publicStart', 'publicEnd', 'allowlistStart', 'allowlistEnd'].includes(key) && Number.isFinite(Date.parse(text))) return new Date(text).toLocaleString();
     return text;
   }

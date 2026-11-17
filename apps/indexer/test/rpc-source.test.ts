@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters, zeroAddress, type Address, type Hex } from 'viem';
-import type { RpcReadMethod, RpcVerification } from '@oneshot/evm';
+import { encodeAbiParameters, encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, parseAbiParameters, zeroAddress, zeroHash, type Address, type Hex } from 'viem';
+import { BASE_SEPOLIA_GENESIS_HASH, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
 import { VerifiedRpcSource } from '../src/rpc-source';
 import type { Block, Manifest } from '../src/types';
 
@@ -22,6 +22,8 @@ const rpcLog = (source: Address = factory, index = 0) => ({
   data: '0x', topics: [hash(600)],
 });
 const authorizationAbi = parseAbi(['function listingAuthority() view returns (address)', 'function deploymentSalt() view returns (bytes32)']);
+const chainBindingAbi = parseAbi(['function deploymentChainId() view returns (uint256)',
+  'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)']);
 const guardedManifest: Manifest = { ...manifest, deploymentVersion: 'oneshot-nft-v2',
   listingAuthorization: { authority: address(4), salt: hash(700) } };
 
@@ -37,6 +39,7 @@ function fixture() {
     factoryTreasury: wordAddress(treasury) as unknown, marketTreasury: wordAddress(treasury) as unknown,
     listingAuthority: wordAddress(address(4)) as unknown, deploymentSalt: hash(700) as unknown,
     height: '0x2' as unknown,
+    deploymentChainId:84532n,domainChainId:84532n,
     logs: (_filter: { address: Address[]; blockHash: Hex }): unknown => [],
   };
   const readRpc = vi.fn(async (method: RpcReadMethod, params: readonly unknown[] = []): Promise<unknown> => {
@@ -50,6 +53,8 @@ function fixture() {
       if (request.data === '0xc45a0155') return state.factoryReference;
       if (request.data === encodeFunctionData({ abi: authorizationAbi, functionName: 'listingAuthority' })) return state.listingAuthority;
       if (request.data === encodeFunctionData({ abi: authorizationAbi, functionName: 'deploymentSalt' })) return state.deploymentSalt;
+      if (request.data === encodeFunctionData({abi:chainBindingAbi,functionName:'deploymentChainId'})) return encodeFunctionResult({abi:chainBindingAbi,functionName:'deploymentChainId',result:state.deploymentChainId});
+      if (request.data === encodeFunctionData({abi:chainBindingAbi,functionName:'eip712Domain'})) return encodeFunctionResult({abi:chainBindingAbi,functionName:'eip712Domain',result:['0x0f','OneshotGuardedMarketplace','1',state.domainChainId,market,zeroHash,[]]});
       return request.to === factory ? state.factoryTreasury : state.marketTreasury;
     }
     throw new Error(`Unexpected read: ${method}`);
@@ -59,6 +64,29 @@ function fixture() {
 }
 
 describe('verified local RPC source', () => {
+  it('verifies pinned Base Sepolia identity with the same contract, treasury and deployment-anchor checks', async () => {
+    const {source,verification,state,readRpc}=fixture();
+    const base:Manifest={...manifest,mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH};
+    Object.assign(verification,{mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH,genesisMatched:true});
+    state.blocks.set(0,{...rpcBlock(0),hash:BASE_SEPOLIA_GENESIS_HASH});
+    await source.verify(base);
+    expect(readRpc).toHaveBeenCalledWith('eth_getCode',[factory,'latest']);
+    verification.chainId=8453;
+    await expect(source.verify(base)).rejects.toMatchObject({code:'CHAIN_IDENTITY_MISMATCH'});
+    verification.chainId=84532;verification.genesisHash=hash(999);
+    await expect(source.verify(base)).rejects.toMatchObject({code:'CHAIN_IDENTITY_MISMATCH'});
+  });
+  it('requires Base guarded immutable chain and EIP712 domain while preserving old local v2 compatibility',async()=>{
+    const {source,verification,state}=fixture();
+    const base:Manifest={...guardedManifest,mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH};
+    Object.assign(verification,{mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH});
+    state.blocks.set(0,{...rpcBlock(0),hash:BASE_SEPOLIA_GENESIS_HASH});
+    await source.verify(base);
+    state.deploymentChainId=31337n;
+    await expect(source.verify(base)).rejects.toMatchObject({code:'DEPLOYMENT_CHAIN_MISMATCH'});
+    state.deploymentChainId=84532n;state.domainChainId=31337n;
+    await expect(source.verify(base)).rejects.toMatchObject({code:'EIP712_DOMAIN_MISMATCH'});
+  });
   it('checks guarded immutable authority and deployment salt in addition to existing identities', async () => {
     const { source, readRpc } = fixture();
     await source.verify(guardedManifest);

@@ -7,6 +7,7 @@ import { api } from './http';
 import { manifestId, parseManifest } from '../../../indexer/src/manifest';
 import { PostgresIndexerStore, type SqlPool } from '../../../indexer/src/store';
 import type { Block, ChainSource, IndexerTransaction, Manifest, ProjectionValue } from '../../../indexer/src/types';
+import { BASE_SEPOLIA_GENESIS_HASH } from '@oneshot/evm';
 
 // This suite can never fall back to an ambient application/production database.
 const databaseUrl = process.env.ONESHOT_API_TEST_DATABASE_URL;
@@ -26,25 +27,27 @@ type Fixture = {
 function block(number: bigint, ownHash = hash(Number(number) + 100), parentHash = hash(Number(number) + 99)): Block {
   return { number, hash: ownHash, parentHash, timestamp: 1_700_000_000n + number };
 }
-async function withDatabase(run: (fixture: Fixture) => Promise<void>) {
+async function withDatabase(run: (fixture: Fixture) => Promise<void>, baseSepolia = false) {
   if (!databaseUrl) throw new Error('ONESHOT_API_TEST_DATABASE_URL is required');
   const configuration = { connectionString: databaseUrl, max: 3, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000, statement_timeout: 10_000 };
   const pool = new Pool(configuration);
   const store = new PostgresIndexerStore(new Pool(configuration));
   const genesis = `0x${createHash('sha256').update(randomUUID()).digest('hex')}`;
-  const manifest = parseManifest({ schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', mode: 'local', chainId: 31337,
-    genesisHash: genesis, startBlock: '1', anchorHash: hash(100),
-    factory: { address: factory, codeHash: hash(20) }, marketplace: { address: market, codeHash: hash(21) },
+  const manifest = parseManifest({ schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', mode: baseSepolia?'base-sepolia':'local', chainId: baseSepolia?84532:31337,
+    genesisHash: baseSepolia?BASE_SEPOLIA_GENESIS_HASH:genesis, startBlock: '1', anchorHash: baseSepolia?BASE_SEPOLIA_GENESIS_HASH:hash(100),
+    // A random code identity isolates the simulated Base fixture without changing its pinned genesis.
+    factory: { address: factory, codeHash: baseSepolia?genesis:hash(20) }, marketplace: { address: market, codeHash: hash(21) },
   });
   const id = manifestId(manifest);
   const canonical = new Map<bigint, Block>([[0n, block(0n)], [1n, block(1n)], [2n, block(2n)], [3n, block(3n)]]);
+  if (baseSepolia) {canonical.set(0n,block(0n,BASE_SEPOLIA_GENESIS_HASH));canonical.set(1n,block(1n,hash(101),BASE_SEPOLIA_GENESIS_HASH));}
   const source: ChainSource = {
     async verify(observed) { expect(observed).toEqual(manifest); },
     async height() { return [...canonical.keys()].reduce((maximum, number) => number > maximum ? number : maximum, 0n); },
     async block(number) { const value = canonical.get(number); if (!value) throw new Error('Missing local test block'); return value; },
     async logs() { throw new Error('Public reads must never request event ingestion'); },
   };
-  const env: Record<string, string | undefined> = { ONESHOT_INDEXER_READS_ENABLED: 'true', ONESHOT_NETWORK: 'local', DATABASE_URL: databaseUrl, ONESHOT_INDEXER_MANIFEST_PATH: 'injected-local-test-manifest.json' };
+  const env: Record<string, string | undefined> = { ONESHOT_INDEXER_READS_ENABLED: 'true', ONESHOT_NETWORK: manifest.mode, DATABASE_URL: databaseUrl, ONESHOT_INDEXER_MANIFEST_PATH: 'injected-local-test-manifest.json' };
   const reader = (poolOverride: SqlPool = pool, contentResolver?: IndexedReaderDependencies['contentResolver']) => createIndexedNftReader({ pool: () => poolOverride, loadManifest: async () => manifest, source: async () => source, env: () => env, ...(contentResolver ? { contentResolver } : {}) });
   const serve = (handler: ReturnType<typeof createIndexedNftReader>, path: string) => api(request => handler(request))(
     new NextRequest(`http://localhost/api/oneshot/indexed${path}`), {},
@@ -54,7 +57,7 @@ async function withDatabase(run: (fixture: Fixture) => Promise<void>) {
     await store.initialize(id); initialized = true;
     await run({ pool, store, manifest, deploymentId: id, canonical, reader,
       read: (path, contentResolver) => serve(reader(pool, contentResolver), path),
-      meta(number = 1n) { const at = canonical.get(number)!; return { schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
+      meta(number = 1n) { const at = canonical.get(number)!; return { schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: manifest.chainId,
         lastBlockNumber: number.toString(), lastBlockHash: at.hash, lastTransactionHash: hash(500), lastLogIndex: 0 }; },
     });
   } finally {
@@ -98,7 +101,7 @@ async function putListing(fixture: Fixture, tx: IndexerTransaction, id: string, 
       ? { collection: listing.collection, tokenId: listing.tokenId, seller: listing.seller }
       : { buyer: alice, recipient: alice, platformFee: '200', royalty: '500', sellerProceeds: '9300' }) },
     blockNumber: number.toString(), blockHash: fixture.canonical.get(number)!.hash, transactionHash, transactionIndex: 1, logIndex,
-    schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
+    schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: fixture.manifest.chainId,
   });
 }
 async function seed(fixture: Fixture) {
@@ -116,7 +119,7 @@ async function seed(fixture: Fixture) {
     for (const [logIndex, at] of [collection, otherCollection].entries()) await tx.put('activity', `${hash(499)}:${logIndex}`, {
       eventName: 'CollectionCreated', source: factory, args: { collection: at, creator: alice, name: 'Indexed originals', symbol: 'SHOT' },
       blockNumber: '1', blockHash: fixture.canonical.get(1n)!.hash, transactionHash: hash(499), transactionIndex: 0, logIndex,
-      schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: 31337,
+      schemaVersion: 1, deploymentVersion: 'oneshot-nft-v1', chainId: fixture.manifest.chainId,
     });
     await tx.append(fixture.canonical.get(1n)!, []);
   });
@@ -124,6 +127,17 @@ async function seed(fixture: Fixture) {
 const payload = async (response: Response) => { expect(response.status).toBe(200); return response.json(); };
 
 describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => {
+  it('reads exact statistics in a simulated pinned Base deployment on PostgreSQL and rejects a replaced canonical branch',async()=>{
+    await withDatabase(async fixture=>{
+      await seed(fixture);
+      const detail=await payload(await fixture.read(`/collections/${collection}`));
+      expect(detail.context).toMatchObject({deploymentId:fixture.deploymentId,network:{mode:'base-sepolia',chainId:84532,nativeSymbol:'ETH',nativeDecimals:18},finalized:false});
+      expect(detail.marketStats).toEqual({activeListings:'1',lowestListingPriceRaw:exactPrice,completedSales:'1',secondaryVolumeRaw:'10000'});
+      fixture.canonical.set(1n,block(1n,hash(999),BASE_SEPOLIA_GENESIS_HASH));
+      const orphaned=await fixture.read(`/collections/${collection}`);
+      expect(orphaned.status).toBe(409);expect(await orphaned.json()).not.toHaveProperty('marketStats');
+    },true);
+  });
   it('aggregates canonical escrow listings and every completed resale, with exact gross volume above uint256', async () => {
     await withDatabase(async fixture => {
       await seed(fixture);

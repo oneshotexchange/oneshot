@@ -1,18 +1,22 @@
 import { z } from 'zod';
 import type { LocalCollectionDraft } from './client-oneshot-api';
 import { portableCollectionDraftSchema } from './draft-backup';
+import { readDraftStorage } from './draft-storage-migration';
 
-export const collectionDraftStorageKey = 'oneshot.zero.collectionDrafts.v1';
+export const legacyCollectionDraftStorageKey = 'oneshot.zero.collectionDrafts.v1';
+export const collectionDraftStorageKey = 'oneshot.collectionDrafts.v2';
 const storedDraft = portableCollectionDraftSchema.extend({ id: z.string().min(1).max(200), savedAt: z.string().datetime() }).passthrough();
 const storedDrafts = z.array(storedDraft).max(100).refine(items => new Set(items.map(item => item.id)).size === items.length);
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 export function readCollectionDrafts(storage: Pick<Storage, 'getItem'>): { items: LocalCollectionDraft[]; snapshot: string | null } {
   try {
-    const snapshot = storage.getItem(collectionDraftStorageKey);
-    if (snapshot === null) return { items: [], snapshot };
-    if (new TextEncoder().encode(snapshot).length > 8 * 1024 * 1024) throw new Error();
-    return { items: storedDrafts.parse(JSON.parse(snapshot)), snapshot };
+    const { raw, snapshot, sourceKey } = readDraftStorage(storage, collectionDraftStorageKey, [legacyCollectionDraftStorageKey]);
+    if (raw === null) return { items: [], snapshot };
+    if (new TextEncoder().encode(raw).length > 8 * 1024 * 1024) throw new Error();
+    const items = storedDrafts.parse(JSON.parse(raw));
+    if (sourceKey === legacyCollectionDraftStorageKey) for (const item of items) delete item.pricingNetwork;
+    return { items, snapshot };
   } catch { throw new Error('Saved collection drafts could not be opened. They have not been changed. Download your open draft before trying again.'); }
 }
 

@@ -5,6 +5,12 @@ import { api } from './http';
 
 afterEach(() => vi.unstubAllEnvs());
 describe('active Zero routes cannot fall through into the Aptos prototype', () => {
+  it('presents the Base testnet profile without inferring deployed services from network configuration',()=>{
+    const status=oneshotStatus({ONESHOT_NETWORK:'base-sepolia'});
+    expect(status).toMatchObject({network:'Base Sepolia testnet',chainId:84532,nativeSymbol:'ETH',nativeDecimals:18,executionScope:'Base Sepolia'});
+    expect(Object.values(status.features).every(feature=>!feature.enabled)).toBe(true);
+    expect(JSON.stringify(publicOneshotStatus({ONESHOT_NETWORK:'base-sepolia'}))).not.toMatch(/RPC|manifest|configure|custody|AMM/);
+  });
   it('ignores every old deployment readiness flag', () => {
     const result = oneshotStatus({ B20_NFT_PACKAGE_ADDRESS: '0x1', B20_DEPLOYMENT_VERIFIED: 'true', GEOMI_API_KEY: 'old-key' });
     expect(result.app).toBe('oneshot'); expect(result.chainId).toBeNull(); expect(result.nativeDecimals).toBeNull();

@@ -48,11 +48,11 @@ function uint(value: unknown, field: string): bigint {
   return value;
 }
 function domain(context: GuardedMarketContext) {
-  if (!context || context.chainId!==31337) throw new RangeError('Guarded marketplace permits require local chain 31337.');
-  return Object.freeze({name:'OneshotGuardedMarketplace',version:'1',chainId:31337,verifyingContract:address(context.verifyingContract,'Marketplace')} as const);
+  if (!context || (context.chainId !== 31337 && context.chainId !== 84532)) throw new RangeError('Guarded marketplace permits require a supported test network.');
+  return Object.freeze({name:'OneshotGuardedMarketplace',version:'1',chainId:context.chainId,verifyingContract:address(context.verifyingContract,'Marketplace')} as const);
 }
 
-/** A deep-frozen snapshot of the exact local contract authorization; this helper never signs. */
+/** A deep-frozen snapshot of the exact test-network authorization; this helper never signs. */
 export function guardedListingPermitTypedData(context: GuardedMarketContext, input: GuardedListingPermit) {
   const selected=domain(context);
   if (!input || typeof input!=='object') throw new TypeError('A listing permit is required.');
@@ -82,6 +82,7 @@ export const GUARDED_MARKETPLACE_ABI = [
     'constructor(address factory_, address listingAuthority_, bytes32 deploymentSalt_)',
     'function listingAuthority() view returns (address)',
     'function deploymentSalt() view returns (bytes32)',
+    'function deploymentChainId() view returns (uint256)',
     'function listingNonces(address) view returns (uint256)',
     'function policyCommitment(address) view returns (bytes32)',
     'function listAuthorized(address collection, uint256 tokenId, uint256 totalPrice, uint256 nonce, bytes32 expectedPolicyCommitment, uint256 deadline, bytes signature) returns (uint256 listingId)',
@@ -89,7 +90,7 @@ export const GUARDED_MARKETPLACE_ABI = [
     'event PolicyCommitted(address indexed collection, bytes32 indexed previousCommitment, bytes32 indexed commitment)',
     'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)',
     'event EIP712DomainChanged()',
-    'error LocalChainOnly()', 'error InvalidListingAuthority()', 'error InvalidDeploymentSalt()',
+    'error UnsupportedTestChain(uint256 chainId)', 'error InvalidListingAuthority()', 'error InvalidDeploymentSalt()',
     'error AuthorizationExpired()', 'error InvalidAuthorization()', 'error InvalidNonce()',
     'error PolicyChanged()', 'error InvalidPolicyCommitment()', 'error OnlyCreator()', 'error PolicyAuthorizationUsed()',
     'error InvalidShortString()', 'error StringTooLong(string str)',

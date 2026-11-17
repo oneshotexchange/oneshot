@@ -50,8 +50,8 @@ describe('public checkout availability before wallet setup', () => {
   it('offers the supported network only after an authenticated connected wallet and verified available terms', () => {
     const access = nftCheckoutAccess({ ...input(), chainId: 1 });
     expect(access).toMatchObject({ available: true, needsWallet: false, needsNetwork: true, ready: false });
-    const html = renderToStaticMarkup(createElement(NftCheckoutWalletGuidance, { access }));
-    expect(html).toContain('Switch your wallet to the test network (31337)'); expect(html).not.toContain('Connect fixture wallet');
+    const html = renderToStaticMarkup(createElement(NftCheckoutWalletGuidance, { access, network: details().network }));
+    expect(html).toContain('Switch your wallet to Local test network (31337)'); expect(html).not.toContain('Connect fixture wallet');
   });
 
   it('permits review only for a matching opened collection and the current linked wallet on the correct network', () => {

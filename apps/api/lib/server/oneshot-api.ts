@@ -6,8 +6,11 @@ import { archiveOneshotDraft, createOneshotDraft, getOneshotDraft, listOneshotDr
 import { storeImage } from './media';
 import { apiOrigin } from './origins';
 import { indexedNftRead } from './indexed-nfts';
+import { indexedTokenRead } from './indexed-tokens';
+import { tokenAnalyticsRead } from './token-analytics';
 import { nftLaunch } from './nft-launch';
 import { genesisApi } from './genesis-api';
+import { tokenExecutionApi } from './token-execution-api';
 
 const revision = z.number().int().positive();
 const change = z.object({ expectedRevision: revision, draft: z.unknown() }).strict();
@@ -18,6 +21,7 @@ export const oneshotApi = api(async request => {
   const segments = request.nextUrl.pathname.slice(prefix.length).replace(/\/$/,'').split('/');
   const [resource, id, operation, extra] = segments;
   if (resource === 'genesis') return genesisApi(request);
+  if (resource === 'token-execution') return tokenExecutionApi(request);
   if (resource === 'launch' && segments.length === 2 && id === 'status' && request.method === 'GET') {
     rateLimit('oneshot:launch:status', 60);
     const status = await nftLaunch.status();
@@ -31,6 +35,14 @@ export const oneshotApi = api(async request => {
     // Public reads still have a process-wide budget before manifest/RPC/database work.
     rateLimit('oneshot:indexed:public', 240);
     return indexedNftRead(request);
+  }
+  if(resource==='token-indexed'){
+    rateLimit('oneshot:token-indexed:public',240);
+    return indexedTokenRead(request);
+  }
+  if(resource==='token-analytics'){
+    rateLimit('oneshot:token-analytics:public',120);
+    return tokenAnalyticsRead(request);
   }
   if (resource === 'metadata' && request.method === 'GET' && segments.length === 3) {
     const blob = await readOneshotMetadata(id, operation);

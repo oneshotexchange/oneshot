@@ -1,10 +1,12 @@
+import type { NftExecutionNetwork } from './execution-network';
+
 /** Public read-only DTOs. Amounts are integer base units, never floating-point prices. */
 export type IndexedNftContext = {
   enabled: boolean;
   available: boolean;
   reason: string | null;
   deploymentId: string | null;
-  network: { mode: 'local'; name: 'Local Anvil'; chainId: 31337; nativeSymbol: 'ETH'; nativeDecimals: 18 } | null;
+  network: NftExecutionNetwork | null;
   checkpoint: { number: string; hash: string; timestamp: string } | null;
   /** Observed chain height and distance from the canonical indexed checkpoint; no worker liveness claim. */
   sync?: { chainHead: string; behindBlocks: string } | null;

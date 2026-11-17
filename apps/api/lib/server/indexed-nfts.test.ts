@@ -8,7 +8,7 @@ import { oneshotApi } from './oneshot-api';
 import * as auth from './oneshot-auth';
 import { parseManifest } from '../../../indexer/src/manifest';
 import type { ChainSource } from '../../../indexer/src/types';
-import type { IndexedNftPresentation } from '@oneshot/evm';
+import { BASE_SEPOLIA_GENESIS_HASH, type IndexedNftPresentation } from '@oneshot/evm';
 import { stableJson } from './media';
 
 const hash = (value: number): `0x${string}` => `0x${value.toString(16).padStart(64, '0')}`;
@@ -74,6 +74,18 @@ const projectedItem = (tokenId = '2') => ({
 });
 
 describe('collection marketplace statistics', () => {
+  it('uses an independent Base Sepolia manifest and network context without weakening snapshot statistics', async () => {
+    const state=indexedFixture();state.env.ONESHOT_NETWORK='base-sepolia';
+    const base=parseManifest({...manifest,startBlock:'1',mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH});
+    state.loadManifest.mockResolvedValue(base);
+    const response=await state.read(`/collections/${address(3)}`);
+    expect(response.status).toBe(200);
+    const body=await response.json();
+    expect(body.context).toMatchObject({network:{mode:'base-sepolia',chainId:84532,name:'Base Sepolia',nativeSymbol:'ETH',nativeDecimals:18},finalized:false});
+    expect(body.marketStats).toEqual({activeListings:'0',lowestListingPriceRaw:null,completedSales:'0',secondaryVolumeRaw:'0'});
+    state.env.ONESHOT_NETWORK='local';
+    expect((await state.read(`/collections/${address(3)}`)).status).toBe(503);
+  });
   it('reads one exact aggregate on the held snapshot, bound to collection, deployment, marketplace and checkpoint', async () => {
     const state = indexedFixture();
     const price = (2n ** 256n - 1n).toString(), volume = (2n ** 257n - 2n).toString();

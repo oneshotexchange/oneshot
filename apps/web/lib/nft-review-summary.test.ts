@@ -69,7 +69,7 @@ describe('customer transaction summaries', () => {
     } };
     const html = render(createElement(ReviewResult, { state, onCheck() {}, onApprove() {}, canApprove: true }));
     expect(html).toContain(address); expect(html).toContain(recipient); expect(html).toContain(hash);
-    expect(html).toContain('0.000000000000000001 ETH'); expect(html).toContain('Test network (31337)');
+    expect(html).toContain('0.000000000000000001 ETH'); expect(html).toContain('Local test network (31337)');
     expect(html).toContain('22000 gas units'); expect(html).toContain('0x1234'); expect(html).toContain('Approve in wallet');
     expect(html).not.toContain('internal-review-hash'); expect(html).not.toContain('internal-deployment-id'); expect(html).not.toContain('internal-block-hash');
   });

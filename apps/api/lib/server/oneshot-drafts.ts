@@ -37,7 +37,9 @@ function assertRevision(draft: OneshotDraft, revision: number) {
 export async function updateOneshotDraft(id: string, input: unknown, revision: number, session: OneshotSession) {
   const previous = await getOneshotDraft(id, session); assertRevision(previous, revision);
   if (previous.status !== 'draft') throw new ApiError(409, 'SNAPSHOT_FROZEN', 'Prepared content cannot be overwritten. Create a new draft for changed terms.');
-  const updated: OneshotDraft = { ...fields(input, session), id, ownerUserId: session.userId, revision: revision + 1, status: 'draft', createdAt: previous.createdAt, updatedAt: new Date().toISOString() };
+  const next = fields(input, session);
+  if ((next.pricingNetwork ?? 'zero') !== (previous.pricingNetwork ?? 'zero')) throw new ApiError(409, 'DRAFT_PRICING_NETWORK_MISMATCH', 'Copy this draft into a new draft for the selected network and review its prices.');
+  const updated: OneshotDraft = { ...next, id, ownerUserId: session.userId, revision: revision + 1, status: 'draft', createdAt: previous.createdAt, updatedAt: new Date().toISOString() };
   if (!await compareAndSetRecord(namespace, id, previous, updated)) throw new ApiError(409, 'DRAFT_CHANGED', 'This draft changed elsewhere. Reload it before saving.');
   return updated;
 }

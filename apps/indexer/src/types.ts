@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem';
+import type { NftExecutionNetwork } from '@oneshot/evm';
 
 export type Block = { number: bigint; hash: Hex; parentHash: Hex; timestamp: bigint };
 export type RawLog = {
@@ -6,16 +7,15 @@ export type RawLog = {
   blockNumber: bigint; blockHash: Hex; transactionHash: Hex;
   transactionIndex: number; logIndex: number;
 };
+type NetworkIdentity<T extends NftExecutionNetwork> = T extends unknown ? Pick<T, 'mode' | 'chainId'> : never;
 type ManifestBase = {
   schemaVersion: 1;
-  mode: 'local';
-  chainId: 31337;
   genesisHash: Hex;
   startBlock: bigint;
   anchorHash: Hex;
   factory: { address: Address; codeHash: Hex };
   marketplace: { address: Address; codeHash: Hex };
-};
+} & NetworkIdentity<NftExecutionNetwork>;
 export type Manifest = ManifestBase & (
   | { deploymentVersion: 'oneshot-nft-v1'; listingAuthorization?: never }
   | { deploymentVersion: 'oneshot-nft-v2'; listingAuthorization: { authority: Address; salt: Hex } }

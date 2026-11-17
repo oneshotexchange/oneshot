@@ -128,6 +128,8 @@ const encoder = new TextEncoder();
 
 export type NftLaunchDraft = {
   status: string;
+  /** Undefined means a legacy Zero-priced draft, never implicit test ETH. */
+  pricingNetwork?: 'zero' | 'base-sepolia';
   name: string;
   symbol?: string;
   maxSupply: number;
@@ -251,6 +253,7 @@ function allowlistTree(values: readonly string[], context: NftTermsContext): Pre
 export function prepareNftTerms(draft: NftLaunchDraft, context: NftTermsContext): PreparedNftTerms {
   if (draft.status !== 'prepared') fail('DRAFT_NOT_PREPARED', 'Prepare the metadata snapshot before reviewing collection terms.');
   const { nativeDecimals, chainId, nowSeconds } = context;
+  if (chainId === 84532 && draft.pricingNetwork !== 'base-sepolia') fail('PRICE_NETWORK_MISMATCH', 'Copy this draft for Base Sepolia and enter its test ETH prices before reviewing a launch.');
   if (nativeDecimals === null) fail('UNKNOWN_PRECISION', 'Native asset precision is not verified.');
   if (!Number.isInteger(nativeDecimals) || nativeDecimals < 0 || nativeDecimals > 38) fail('UNKNOWN_PRECISION', 'Native asset precision must be verified between 0 and 38 decimals.');
   if (!Number.isSafeInteger(chainId) || chainId < 1) fail('INVALID_CHAIN', 'A verified positive chain ID is required.');

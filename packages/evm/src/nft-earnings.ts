@@ -1,6 +1,8 @@
-/** Current native credits at a single canonical local deployment checkpoint. */
+import type { NftExecutionNetwork } from './execution-network';
+
+/** Current native credits at one canonical supported test-network deployment checkpoint. */
 export type NftEarningsPage = {
-  network: { mode: 'local'; chainId: 31337; name: string; nativeSymbol: 'ETH'; nativeDecimals: 18 };
+  network: NftExecutionNetwork;
   deploymentId: string;
   wallet: string;
   blockNumber: string;

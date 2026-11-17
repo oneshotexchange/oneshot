@@ -12,6 +12,8 @@ import Link from './navigation';
 import { nftDeployedCollectionHref, nftDraftResumeHref } from '../lib/client-nft-handoff';
 import { NftReviewSummary, NftTransactionData, nftTransactionPhase } from './nft-review-summary';
 import { nftCheckoutAccess, type NftCheckoutAccess } from '../lib/client-nft-checkout-access';
+import { nftExplorerHref, nftNetworkLabel, nftTestAcknowledgement, readNftNetwork } from '../lib/nft-network';
+import { isSupportedNftChainId } from '@oneshot/evm';
 
 const money = (value: string) => `${formatIndexedAmount(value,18)} ETH`;
 const busyPhases = ['reviewing','validating','signing','confirming'];
@@ -22,7 +24,7 @@ export function ReviewResult({state,onApprove,onCheck,canApprove,confirmationCha
     {state.review && <div className="nft-launch-review section-gap">
       <div className="section-header"><h3>Transaction review</h3><Badge tone={state.phase==='success'&&!confirmationChanged?'mint':'amber'}>{confirmationChanged?'Confirmation changed':nftTransactionPhase(state.phase)}</Badge></div>
       <p className="field-hint">{actionName[state.review.action] || state.review.action}</p>
-      <div className="review-rows"><InfoRow label="Network">Test network (31337), ETH</InfoRow><InfoRow label="From"><Address value={state.review.from} full /></InfoRow><InfoRow label="To"><Address value={state.review.to} full /></InfoRow><InfoRow label="Transaction value">{money(state.review.value)}<small className="indexed-subline">{state.review.value} wei</small></InfoRow><InfoRow label="Estimated gas">{state.review.simulation.gasEstimate} gas units, paid separately</InfoRow>
+      <div className="review-rows"><InfoRow label="Network">{nftNetworkLabel(readNftNetwork(state.review.network))}, ETH</InfoRow><InfoRow label="From"><Address value={state.review.from} full /></InfoRow><InfoRow label="To"><Address value={state.review.to} full /></InfoRow><InfoRow label="Transaction value">{money(state.review.value)}<small className="indexed-subline">{state.review.value} wei</small></InfoRow><InfoRow label="Estimated gas">{state.review.simulation.gasEstimate} gas units, paid separately</InfoRow>
         <NftReviewSummary summary={state.review.summary} action={state.review.action} />
         <InfoRow label="Review expires">{new Date(state.review.expiresAt).toLocaleString()}</InfoRow>
       </div>
@@ -30,17 +32,17 @@ export function ReviewResult({state,onApprove,onCheck,canApprove,confirmationCha
       {state.phase==='review' && onApprove && <Button type="button" disabled={!canApprove} onClick={onApprove}>Approve in wallet</Button>}
     </div>}
     {state.message && !confirmationChanged && <div className="section-gap" aria-live="polite">{['error','rejected','reverted'].includes(state.phase)?<ErrorState message={state.message}/>:<p className="data-notice">{state.message}</p>}</div>}
-    {state.hash && <div className="nft-launch-receipt"><InfoRow label="Transaction"><span className="indexed-hash">{state.hash}</span></InfoRow><p className="field-hint">Keep this transaction hash to check its confirmation later.</p><Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)} onClick={onCheck}>Check receipt</Button></div>}
+    {state.hash && <div className="nft-launch-receipt"><InfoRow label="Transaction">{nftExplorerHref(state.review?.chainId, state.hash, 'tx') ? <a className="text-link indexed-hash" href={nftExplorerHref(state.review?.chainId, state.hash, 'tx')!} target="_blank" rel="noreferrer">{state.hash}</a> : <span className="indexed-hash">{state.hash}</span>}</InfoRow><p className="field-hint">Keep this transaction hash to check its confirmation later.</p><Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)} onClick={onCheck}>Check receipt</Button></div>}
   </>;
 }
 function Stage({name,stage}:{name:string;stage:PublicNftStage}) {
   return <div className="nft-checkout-stage"><h3>{name}</h3><InfoRow label="Price per NFT">{money(stage.priceRaw)}</InfoRow><InfoRow label="Starts">{date(stage.start)}</InfoRow><InfoRow label="Ends">{date(stage.end)}</InfoRow><InfoRow label="Per-wallet limit">{stage.walletLimitRaw}</InfoRow></div>;
 }
 
-export function NftCheckoutWalletGuidance({ access }: { access: NftCheckoutAccess }) {
+export function NftCheckoutWalletGuidance({ access, network }: { access: NftCheckoutAccess; network?: PublicNftCollection['network'] | null }) {
   return <>
     {access.needsWallet && <div className="button-row section-gap"><WalletButton/><span className="field-hint">Connect a wallet to continue.</span></div>}
-    {access.needsNetwork && <p className="data-notice">Switch your wallet to the test network (31337) to continue.</p>}
+    {access.needsNetwork && <p className="data-notice">Switch your wallet to {nftNetworkLabel(readNftNetwork(network))} to continue.</p>}
   </>;
 }
 
@@ -72,7 +74,7 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
     review:state.review,receipt:state.receipt,hash:state.hash,enabled:state.phase==='success',readReceipt:api.receipt,onRefresh:()=>{void refresh();onRefresh?.();}});
   useEffect(()=>()=>controller.invalidate('The checkout was closed.'),[controller]);
   function change(callback:()=>void){controller.invalidate('The checkout details changed. Prepare a fresh review.');callback();}
-  function prepare(){if(!ready||!ack||!wallet.account||!actions.includes(action))return;void controller.prepare({from:wallet.account.address,collection,action,localEthAcknowledged:true,
+  function prepare(){if(!ready||!ack||!wallet.account||!details||!actions.includes(action))return;void controller.prepare({from:wallet.account.address,collection,action,...nftTestAcknowledgement(details.network.chainId),
     ...(action==='mint'?{quantity,...(recipient.trim()?{recipient:recipient.trim()}:{})}:{}),
     ...(['approve','list'].includes(action)&&item?{tokenId:item.tokenId}:{}),...(action==='list'?{price}:{}),
     ...(['buy','cancel'].includes(action)&&item?.listing?{listingId:item.listing.id,...(recipient.trim()?{recipient:recipient.trim()}:{})}:{}),
@@ -85,18 +87,18 @@ export function NftCheckout({collection,item,indexedDeploymentId,onRefresh}:{col
   const introduction = !item ? 'Choose how many to mint, then check the total before wallet approval.' : item.listing?.status === 'active' ? item.listing.seller.toLowerCase() === localSender ? 'Review your listing or cancel it to recover the NFT.' : 'Review the price, fees and recipient before buying.' : item.owner?.toLowerCase() === localSender ? 'Approve marketplace access, then set your listing price.' : 'This NFT is not currently listed for sale.';
   return <section className="panel nft-launch-panel" aria-label={item?'NFT checkout':'Collection mint checkout'}>
     <div className="section-header"><div><h2>{heading}</h2><p>{introduction}</p></div><Button type="button" variant="ghost" loading={loading} onClick={()=>void refresh()}>Refresh terms</Button></div>
-    {details && matchingDeployment && <SafetyNote amber>This collection uses test ETH on a local test network. Minting and trading on Zero are unavailable.</SafetyNote>}
+    {details && matchingDeployment && <SafetyNote amber>This collection uses test ETH on {nftNetworkLabel(readNftNetwork(details.network))}. Test-network assets have no monetary value.</SafetyNote>}
     {error&&<ErrorState message={error} retry={()=>void refresh()}/>}
     {details&&details.collection.toLowerCase()===collection.toLowerCase()&&<><div className="review-rows"><InfoRow label="Collection"><Address value={details.collection} full/></InfoRow><InfoRow label="Minted / maximum supply">{details.totalMintedRaw} / {details.terms.maxSupplyRaw}</InfoRow><InfoRow label="Creator royalty">{details.terms.royaltyBps/100}% on resale</InfoRow><InfoRow label="Terms">{details.opened?'Permanently frozen':'Mint has not opened'}</InfoRow><InfoRow label="Current mint phase">{allowlistActive?'Allowlist':publicActive?'Public mint':'No active mint phase'}</InfoRow><InfoRow label="Last checked">{details.blockNumber}, {date(details.blockTimestamp)}</InfoRow></div><div className="field-grid section-gap">{details.terms.allowlistRoot!==`0x${'0'.repeat(64)}`&&<Stage name="Allowlist mint" stage={details.terms.allowlist}/>}<Stage name="Public mint" stage={details.terms.publicMint}/></div></>}
     {details&&!matchingDeployment&&<ErrorState message="This collection’s network changed. Refresh the page before continuing."/>}
     {details&&!details.opened&&<p className="data-notice">Minting opens after the creator locks the collection terms.</p>}
-    <NftCheckoutWalletGuidance access={access}/>
+    <NftCheckoutWalletGuidance access={access} network={details?.network}/>
     {ready&&actions.length>0&&<><div className="field-grid section-gap"><Field label="Action"><select value={action} disabled={busy||submitted} onChange={event=>change(()=>setAction(event.target.value as NftLaunchAction))}>{actions.map(value=><option key={value} value={value}>{actionName[value]}</option>)}</select></Field>
       {action==='mint'&&<Field label="Quantity" required><input inputMode="numeric" value={quantity} disabled={busy||submitted} onChange={event=>change(()=>setQuantity(event.target.value))}/></Field>}
       {action==='list'&&<Field label="Listing amount (test ETH)" required hint="Review the final buyer total before wallet approval. Platform fee and royalty are included."><input inputMode="decimal" value={price} disabled={busy||submitted} onChange={event=>change(()=>setPrice(event.target.value))}/></Field>}
       {action==='claim'&&<Field label="Proceeds"><select value={claimSource} disabled={busy||submitted} onChange={event=>change(()=>setClaimSource(event.target.value))}><option value="marketplace">Resale proceeds</option><option value="collection">Mint proceeds</option></select></Field>}
       {['mint','buy','cancel','claim'].includes(action)&&<Field label="Recipient" hint="Leave blank for your selected wallet."><input value={recipient} placeholder={wallet.account?.address} disabled={busy||submitted} onChange={event=>change(()=>setRecipient(event.target.value))}/></Field>}
-    </div><label className="checkbox-field"><input type="checkbox" checked={ack} disabled={busy||submitted} onChange={event=>{if(!event.target.checked)controller.invalidate('Local ETH acknowledgement was removed.');setAck(event.target.checked);}}/><span>I understand this uses test ETH on chain 31337 and requires gas.</span></label><Button type="button" variant="secondary" disabled={!ack||busy||submitted||(action==='mint'&&!allowlistActive&&!publicActive)} onClick={prepare}>Review transaction</Button></>}
+    </div><label className="checkbox-field"><input type="checkbox" checked={ack} disabled={busy||submitted} onChange={event=>{if(!event.target.checked)controller.invalidate('Test ETH acknowledgement was removed.');setAck(event.target.checked);}}/><span>I understand this uses test ETH on {nftNetworkLabel(readNftNetwork(details?.network))} and requires gas.</span></label><Button type="button" variant="secondary" disabled={!ack||busy||submitted||(action==='mint'&&!allowlistActive&&!publicActive)} onClick={prepare}>Review transaction</Button></>}
     {ready&&item&&actions.length===0&&<p className="data-notice">Only its owner wallet can create a listing.</p>}
     <ReviewResult state={state} confirmationChanged={indexedSync.phase==='reorg'} canApprove={ready&&ack&&Boolean(state.review&&Date.parse(state.review.expiresAt)>clock)} onApprove={ready?()=>void controller.approve():undefined} onCheck={()=>void controller.refreshReceipt()}/>
     <NftIndexedSyncNotice state={indexedSync} onRetry={indexedSync.retry}/>
@@ -130,8 +132,8 @@ export function NftTransactionRecovery({onRefresh}:{onRefresh?:()=>void} = {}){
     {!wallet.authenticated?<div className="button-row section-gap"><WalletButton/><span className="field-hint">Sign in with the account that submitted the transaction.</span></div>:!wallet.connected?<div className="button-row section-gap"><WalletButton/><span className="field-hint">Connect a wallet to check its saved transactions.</span></div>:<>
       {error&&<ErrorState message={error}/>}
       {!loading&&visibleRecords.length===0&&visibleFallback.length===0&&<p className="data-notice">{checked && dataScope===scope ? "No saved transactions for this wallet." : "Load your saved transactions to check their status."}</p>}
-      {visibleRecords.map(item=>{const local=visibleFallback.find(saved=>saved.reviewId===item.review.id),hash=item.transactionHash||local?.hash;return <div className="nft-recovery-row" key={item.review.id}><div><strong>{actionName[item.review.action]||item.review.action}</strong><span className="indexed-subline">{money(item.review.value)}, last saved status: {{review:"Unsigned",submitted:"Submitted",confirmed:"Confirmed",reverted:"Failed"}[item.outcome]}</span><span className="indexed-hash">{hash||'Unsigned review'}</span></div>{hash?<Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)||wallet.network?.chainId!==31337} onClick={()=>void recover(item.review.id,local?.hash)}>Check confirmation</Button>:<span className="field-hint">Start a new review to approve this action.</span>}</div>;})}
-      {visibleFallback.filter(item=>!serverIds.has(item.reviewId)).map(item=><div className="nft-recovery-row" key={item.reviewId}><div><strong>Transaction saved on this device</strong><span className="indexed-subline">Check the transaction’s latest confirmation.</span><span className="indexed-hash">{item.hash}</span></div><Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)||wallet.network?.chainId!==31337} onClick={()=>void recover(item.reviewId,item.hash)}>Check transaction</Button></div>)}
+      {visibleRecords.map(item=>{const local=visibleFallback.find(saved=>saved.reviewId===item.review.id),hash=item.transactionHash||local?.hash;return <div className="nft-recovery-row" key={item.review.id}><div><strong>{actionName[item.review.action]||item.review.action}</strong><span className="indexed-subline">{money(item.review.value)}, last saved status: {{review:"Unsigned",submitted:"Submitted",confirmed:"Confirmed",reverted:"Failed"}[item.outcome]}</span><span className="indexed-hash">{hash||'Unsigned review'}</span></div>{hash?<Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)||!isSupportedNftChainId(wallet.network?.chainId)} onClick={()=>void recover(item.review.id,local?.hash)}>Check confirmation</Button>:<span className="field-hint">Start a new review to approve this action.</span>}</div>;})}
+      {visibleFallback.filter(item=>!serverIds.has(item.reviewId)).map(item=><div className="nft-recovery-row" key={item.reviewId}><div><strong>Transaction saved on this device</strong><span className="indexed-subline">Check the transaction’s latest confirmation.</span><span className="indexed-hash">{item.hash}</span></div><Button type="button" variant="secondary" disabled={busyPhases.includes(state.phase)||!isSupportedNftChainId(wallet.network?.chainId)} onClick={()=>void recover(item.reviewId,item.hash)}>Check transaction</Button></div>)}
       {dataScope===scope&&cursor&&<Button type="button" variant="ghost" loading={loading} onClick={()=>void load(true)}>Load more transactions</Button>}
       {dataScope===scope&&<><ReviewResult state={state} confirmationChanged={indexedSync.phase==='reorg'} onCheck={()=>void controller.refreshReceipt()}/><NftIndexedSyncNotice state={indexedSync} onRetry={indexedSync.retry}/></>}
       {recoveredCreate && state.receipt?.collection && <div className="section-gap"><InfoRow label="Recovered collection"><Address value={String(state.receipt.collection)} full /></InfoRow><div className="button-row">

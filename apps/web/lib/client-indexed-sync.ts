@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { indexedApi, IndexedReadError } from './client-indexed-api';
 import type { NftLaunchReceipt, NftLaunchReview } from './client-nft-launch';
+import { readNftNetwork, type NftChainId } from './nft-network';
 
-type ReceiptTarget = { scope: string; deploymentId: string; reviewId: string; transactionHash: string; blockNumber: string; blockHash: string };
+type ReceiptTarget = { scope: string; deploymentId: string; reviewId: string; transactionHash: string; blockNumber: string; blockHash: string; chainId?: NftChainId };
 export type IndexedReceiptSyncState = {
   scope: string | null;
   phase: 'idle' | 'syncing' | 'indexed' | 'pending' | 'unavailable' | 'changed' | 'reorg';
@@ -66,7 +67,7 @@ export function createIndexedReceiptSync(options: {
         if (!context.enabled) { finish(ticket, captured, 'unavailable', 'Transaction confirmed. Activity is currently unavailable; you can check again later.', true); return; }
         if (!context.available || context.checkpoint === null) { rateLimited = 0; later(2000); return; }
         if (!object(context.network)) throw new Error('Invalid indexed network');
-        if (context.network.chainId !== 31337 || context.network.mode !== 'local' || context.network.nativeSymbol !== 'ETH' || context.network.nativeDecimals !== 18) {
+        if (readNftNetwork(context.network)?.chainId !== (captured.chainId ?? 31337)) {
           finish(ticket, captured, 'changed', 'The network changed. Refresh this page before checking activity.'); return;
         }
         if (context.deploymentId !== captured.deploymentId || !object(context.checkpoint) || !uint(context.checkpoint.number) || !hash(context.checkpoint.hash) || !uint(context.checkpoint.timestamp)) throw new Error('Invalid indexed checkpoint');
@@ -136,13 +137,13 @@ export function useNftIndexedSync(options: {
   const owner = useRef<{ target: string; scope: string } | null>(null);
   useEffect(() => {
     if (options.enabled && options.scope && reviewId && deploymentId && options.hash && options.receipt?.status === 'confirmed') {
-      const target = JSON.stringify([reviewId,deploymentId,options.hash,blockNumber,blockHash]);
+      const target = JSON.stringify([reviewId,deploymentId,options.review?.chainId,options.hash,blockNumber,blockHash]);
       // A rerender after logout or selection change cannot reassign an old confirmation to the new context.
       if (owner.current?.target === target && owner.current.scope !== options.scope) { controller.cancel(); return; }
       owner.current = { target, scope: options.scope };
-      controller.start({ scope: options.scope, reviewId, deploymentId, transactionHash: options.hash, blockNumber: blockNumber as string, blockHash: blockHash as string });
+      controller.start({ scope: options.scope, reviewId, deploymentId, chainId: options.review!.chainId, transactionHash: options.hash, blockNumber: blockNumber as string, blockHash: blockHash as string });
     } else controller.cancel();
     return () => controller.cancel();
-  }, [controller, options.scope, options.enabled, reviewId, deploymentId, options.hash, options.receipt?.status, blockNumber, blockHash]);
+  }, [controller, options.scope, options.enabled, reviewId, deploymentId, options.review?.chainId, options.hash, options.receipt?.status, blockNumber, blockHash]);
   return { ...(state.scope === options.scope ? state : idle), retry: controller.retry };
 }

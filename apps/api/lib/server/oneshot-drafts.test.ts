@@ -32,6 +32,17 @@ afterEach(async () => {
 });
 
 describe('Privy-owned account drafts', () => {
+  it('requires a new account copy for currency changes and preserves legacy Zero pricing on updates',async()=>{
+    const original=await createOneshotDraft(input(),alice);
+    await expect(updateOneshotDraft(original.id,{...input(),pricingNetwork:'base-sepolia'},original.revision,alice)).rejects.toMatchObject({code:'DRAFT_PRICING_NETWORK_MISMATCH'});
+    expect(await getOneshotDraft(original.id,alice)).toEqual(original);
+    const copy=await createOneshotDraft({...input(),pricingNetwork:'base-sepolia',publicPrice:'0.01'},alice);
+    expect(copy.id).not.toBe(original.id);expect(copy.pricingNetwork).toBe('base-sepolia');
+    await expect(updateOneshotDraft(copy.id,input(),copy.revision,alice)).rejects.toMatchObject({code:'DRAFT_PRICING_NETWORK_MISMATCH'});
+    const edited=await updateOneshotDraft(copy.id,{...input(),pricingNetwork:'base-sepolia',publicPrice:'0.02'},copy.revision,alice);
+    expect(edited).toMatchObject({pricingNetwork:'base-sepolia',publicPrice:'0.02',revision:2});
+    expect((await getOneshotDraft(original.id,alice)).publicPrice).toBe(original.publicPrice);
+  });
   it('preserves native price text and verifies selected creator against the identity', async () => {
     const draft = await createOneshotDraft(input(), alice);
     expect(draft.publicPrice).toBe('0.123456789012345678'); expect(draft.ownerUserId).toBe(alice.userId);

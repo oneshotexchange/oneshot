@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { zeroAddress, zeroHash } from 'viem';
+import { BASE_SEPOLIA_GENESIS_HASH } from '@oneshot/evm';
 import { manifestId, manifestJson, parseManifest } from '../src/manifest';
 import type { Manifest } from '../src/types';
 
@@ -12,6 +13,16 @@ const input = () => ({
 const upperHex = (value: string) => `0x${value.slice(2).toUpperCase()}`;
 
 describe('local deployment manifest', () => {
+  it('accepts only the pinned Base Sepolia pairing and gives it an independent deployment identity', () => {
+    const local=parseManifest(input()), base={...input(),mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH};
+    const parsed=parseManifest(base);
+    expect(parseManifest(manifestJson(parsed))).toEqual(parsed);
+    expect(parsed).toMatchObject({mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH});
+    expect(manifestId(parsed)).not.toBe(manifestId(local));
+    for (const patch of [{chainId:8453},{chainId:31337},{mode:'local'},{mode:'zero'},{genesisHash:input().genesisHash}]) {
+      expect(()=>parseManifest({...base,...patch})).toThrow('MANIFEST_INVALID');
+    }
+  });
   it('normalizes hex fields and losslessly round-trips decimal block numbers', () => {
     const json = input();
     json.startBlock = '18446744073709551615';

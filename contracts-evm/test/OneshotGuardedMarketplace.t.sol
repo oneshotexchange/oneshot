@@ -8,6 +8,7 @@ import {OneshotGuardedMarketplace} from "../src/OneshotGuardedMarketplace.sol";
 interface GuardedVm {
     function addr(uint256) external returns (address);
     function sign(uint256, bytes32) external returns (uint8, bytes32, bytes32);
+    function expectRevert(bytes calldata) external;
 }
 
 contract OneshotGuardedMarketplaceTest is OneshotNFTTestBase {
@@ -178,18 +179,53 @@ contract OneshotGuardedMarketplaceTest is OneshotNFTTestBase {
         _submit(permit, signature);
         signature = _listingSignature(permit, address(market), 31337);
         vm.chainId(1);
-        vm.expectRevert(OneshotGuardedMarketplace.LocalChainOnly.selector);
+        signatures.expectRevert(abi.encodeWithSelector(OneshotGuardedMarketplace.UnsupportedTestChain.selector, uint256(1)));
         _submit(permit, signature);
     }
 
-    function testConstructorRequiresLocalChainNonzeroAuthorityAndSalt() public {
+    function testConstructorRequiresSupportedTestChainNonzeroAuthorityAndSalt() public {
         vm.expectRevert(OneshotGuardedMarketplace.InvalidListingAuthority.selector);
         new OneshotGuardedMarketplace(factory, address(0), SALT);
         vm.expectRevert(OneshotGuardedMarketplace.InvalidDeploymentSalt.selector);
         new OneshotGuardedMarketplace(factory, authority, bytes32(0));
         vm.chainId(1);
-        vm.expectRevert(OneshotGuardedMarketplace.LocalChainOnly.selector);
+        signatures.expectRevert(abi.encodeWithSelector(OneshotGuardedMarketplace.UnsupportedTestChain.selector, uint256(1)));
         new OneshotGuardedMarketplace(factory, authority, SALT);
+        vm.chainId(8453);
+        signatures.expectRevert(abi.encodeWithSelector(OneshotGuardedMarketplace.UnsupportedTestChain.selector, uint256(8453)));
+        new OneshotGuardedMarketplace(factory, authority, SALT);
+    }
+
+    function testBaseSepoliaAdmissionUsesItsOwnDomainAndCannotMoveToAnotherSupportedChain() public {
+        vm.chainId(84532);
+        market = new OneshotGuardedMarketplace(factory, authority, SALT);
+        _eq(market.deploymentChainId(), 84532);
+        vm.prank(ALICE);
+        collection.setApprovalForAll(address(market), true);
+        Permit memory permit = _permit(1, 9 ether);
+        bytes memory localSignature = _listingSignature(permit, address(market), 31337);
+        vm.expectRevert(OneshotGuardedMarketplace.InvalidAuthorization.selector);
+        _submit(permit, localSignature);
+        _eq(_submit(permit, _listingSignature(permit, address(market), 84532)), 1);
+        _eq(collection.ownerOf(1), address(market));
+
+        bytes32 commitment = keccak256("Base policy commitment");
+        bytes memory policySignature = _sign(keccak256(abi.encode(
+            POLICY_TYPEHASH, CREATOR, address(collection), commitment, bytes32(0), uint256(200), SALT
+        )), address(market), 84532);
+        vm.prank(CREATOR);
+        market.setPolicyCommitment(address(collection), commitment, bytes32(0), 200, policySignature);
+        require(market.policyCommitment(address(collection)) == commitment, "Base policy");
+
+        vm.chainId(31337);
+        permit = _permit(2, 1 ether);
+        bytes memory changedChainSignature = _listingSignature(permit, address(market), 31337);
+        signatures.expectRevert(abi.encodeWithSelector(OneshotGuardedMarketplace.UnsupportedTestChain.selector, uint256(31337)));
+        _submit(permit, changedChainSignature);
+        // Seller exits and beneficiary claims remain independent of admission checks.
+        vm.prank(ALICE);
+        market.cancel(1);
+        _eq(collection.ownerOf(1), ALICE);
     }
 
     function testPolicyRequiresCreatorRegisteredCollectionAndAuthoritySignature() public {

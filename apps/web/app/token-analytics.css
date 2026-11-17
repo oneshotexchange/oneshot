@@ -1,0 +1,25 @@
+.token-analytics-panel{padding:24px;min-width:0}
+.token-analytics-checkpoint{font-size:12px;line-height:1.7;color:var(--muted);margin:16px 0}
+.token-analytics-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:20px 0}
+.token-analytics-metrics>div{min-width:0;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.token-analytics-metrics dt{font-size:12px;color:var(--muted);margin-bottom:10px}
+.token-analytics-metrics dd{font-size:20px;margin:0;line-height:1.45;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.token-analytics-metrics dd>span{font-size:12px;color:var(--muted)}
+.token-analytics-metrics p{font-size:11px;line-height:1.7;color:var(--muted);margin-top:8px}
+.token-analytics-scope{margin:12px 0}
+.token-price-ratio{margin:18px 0 24px;line-height:1.7}
+.token-price-ratio>summary{cursor:pointer}
+.token-price-ratio .info-row{flex-wrap:wrap;gap:8px}
+.token-price-ratio .info-row>strong{max-width:100%;min-width:0;overflow-wrap:anywhere;text-align:left;font-variant-numeric:tabular-nums}
+.token-analytics-panel>.tabs{overflow-x:auto;overflow-y:hidden;max-width:100%;margin-top:20px}
+.token-analytics-panel>.tabs>button{white-space:nowrap}
+.token-analytics-table td{font-variant-numeric:tabular-nums}
+.token-chart-canvas{height:300px;width:100%;margin:12px 0}
+.token-chart-selected{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;line-height:1.7;font-size:12px;margin:18px 0;overflow-wrap:anywhere}
+.token-chart-selected>span:last-child{color:var(--muted);font-size:11px}
+.token-portfolio-panel{padding:24px;min-width:0}
+.token-portfolio-panel>.field-hint{margin-top:16px;line-height:1.8}
+.token-portfolio-table td{font-variant-numeric:tabular-nums}
+.token-portfolio-table td:nth-child(2),.token-portfolio-table td:nth-child(3){min-width:180px;max-width:320px;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:650px){.token-portfolio-panel{padding:20px}.token-portfolio-panel>.section-header{flex-wrap:wrap;align-items:flex-start}.token-portfolio-panel>.section-header>.button{width:100%}}
+@media(max-width:650px){.token-analytics-panel{padding:20px}.token-analytics-metrics{grid-template-columns:minmax(0,1fr);gap:16px}.token-analytics-metrics dd{font-size:20px}.token-analytics-panel>.section-header{flex-wrap:wrap;align-items:flex-start}.token-analytics-panel>.section-header>.button{width:100%}.token-chart-canvas{height:280px}}

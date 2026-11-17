@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import type { LocalCollectionDraft } from './client-oneshot-api';
 import { createTokenDraftAutosave } from './token-drafts';
+import { readDraftStorage } from './draft-storage-migration';
 
-export const COLLECTION_WORKING_COPY_KEY = 'oneshot.zero.collectionWorkingCopy.v1';
+export const LEGACY_COLLECTION_WORKING_COPY_KEY = 'oneshot.zero.collectionWorkingCopy.v1';
+export const COLLECTION_WORKING_COPY_KEY = 'oneshot.collectionWorkingCopy.v2';
 const maximumBytes = 1024 * 1024;
 const text = (maximum: number) => z.string().max(maximum);
 
 /** Editing permits incomplete and temporarily invalid values; launch validation remains separate. */
 export const collectionWorkingTermsSchema = z.object({
+  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
   name: text(100), symbol: text(20), description: text(2048),
   supply: text(118), royalty: text(118), price: text(118), limit: text(118),
   metadataMode: z.enum(['upload', 'url']), metadataUrl: text(2048), fileNames: z.array(text(255)).max(1000),
@@ -52,10 +55,12 @@ function serialized(copy: CollectionWorkingCopy) {
   return raw;
 }
 export function readCollectionWorkingCopy(storage: Pick<Storage, 'getItem'>) {
-  let snapshot: string | null;
-  try { snapshot = storage.getItem(COLLECTION_WORKING_COPY_KEY); }
+  let selected: ReturnType<typeof readDraftStorage>;
+  try { selected = readDraftStorage(storage, COLLECTION_WORKING_COPY_KEY, [LEGACY_COLLECTION_WORKING_COPY_KEY]); }
   catch { throw unavailable(); }
-  return { snapshot, copy: snapshot === null ? null : parse(snapshot) };
+  const copy = selected.raw === null ? null : parse(selected.raw);
+  if (copy && selected.sourceKey === LEGACY_COLLECTION_WORKING_COPY_KEY) delete copy.terms.pricingNetwork;
+  return { snapshot: selected.snapshot, copy };
 }
 export function writeCollectionWorkingCopy(storage: Storage, copy: CollectionWorkingCopy, expectedSnapshot: string | null): string {
   const current = readCollectionWorkingCopy(storage);
@@ -149,7 +154,7 @@ export function createCollectionWorkingCopyStore(options: { storage(): Storage; 
     cancel: autosave.cancel,
     checkExternalChange() {
       if (!loaded) return;
-      try { if (options.storage().getItem(COLLECTION_WORKING_COPY_KEY) === snapshot) return; failure(conflict(), true); }
+      try { if (readDraftStorage(options.storage(), COLLECTION_WORKING_COPY_KEY, [LEGACY_COLLECTION_WORKING_COPY_KEY]).snapshot === snapshot) return; failure(conflict(), true); }
       catch { writable = false; failure(unavailable(), true); }
       autosave.cancel();
     },

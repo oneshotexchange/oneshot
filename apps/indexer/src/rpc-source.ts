@@ -1,5 +1,5 @@
 import { keccak256, encodeFunctionData, decodeFunctionResult, parseAbi, zeroAddress, type Address, type Hex } from 'viem';
-import type { RpcReadMethod, RpcVerification } from '@oneshot/evm';
+import { BASE_SEPOLIA_GENESIS_HASH, nftExecutionNetwork, type RpcReadMethod, type RpcVerification } from '@oneshot/evm';
 import { isAddress, isData, isHash } from './manifest';
 import { IndexerError, type Block, type ChainSource, type Manifest, type RawLog } from './types';
 
@@ -13,13 +13,16 @@ function quantity(value: unknown): bigint {
 const tag = (number: bigint) => `0x${number.toString(16)}`;
 const referenceAbi = parseAbi(['function factory() view returns (address)', 'function treasury() view returns (address)']);
 const authorizationAbi = parseAbi(['function listingAuthority() view returns (address)', 'function deploymentSalt() view returns (bytes32)']);
+const chainBindingAbi = parseAbi(['function deploymentChainId() view returns (uint256)',
+  'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)']);
 
 /** Reuses the server-only bounded RPC reader, including its identity check before every read. */
 export class VerifiedRpcSource implements ChainSource {
   constructor(private readonly rpc: VerifiedRpc) {}
   async verify(manifest: Manifest): Promise<void> {
     const observed = this.rpc.verification;
-    if (manifest.mode !== 'local' || manifest.chainId !== 31337 || observed.mode !== 'local' || observed.chainId !== 31337
+    if (!nftExecutionNetwork(manifest) || observed.mode !== manifest.mode || observed.chainId !== manifest.chainId
+      || manifest.mode === 'base-sepolia' && manifest.genesisHash !== BASE_SEPOLIA_GENESIS_HASH
       || observed.genesisHash.toLowerCase() !== manifest.genesisHash.toLowerCase()) throw new IndexerError('CHAIN_IDENTITY_MISMATCH');
     const genesis = await this.block(0n);
     if (genesis.hash !== manifest.genesisHash) throw new IndexerError('CHAIN_IDENTITY_MISMATCH');
@@ -48,6 +51,24 @@ export class VerifiedRpcSource implements ChainSource {
       };
       if (await callAuthorization('listingAuthority') !== manifest.listingAuthorization.authority) throw new IndexerError('LISTING_AUTHORITY_MISMATCH');
       if (await callAuthorization('deploymentSalt') !== manifest.listingAuthorization.salt) throw new IndexerError('DEPLOYMENT_SALT_MISMATCH');
+      // Existing local v2 deployments predate the immutable chain getter. New
+      // Base deployments must prove both admission and EIP-712 replay binding.
+      if (manifest.mode === 'base-sepolia') {
+        const chainData=await this.rpc.readRpc('eth_call',[{to:manifest.marketplace.address,
+          data:encodeFunctionData({abi:chainBindingAbi,functionName:'deploymentChainId'})},'latest']);
+        const domainData=await this.rpc.readRpc('eth_call',[{to:manifest.marketplace.address,
+          data:encodeFunctionData({abi:chainBindingAbi,functionName:'eip712Domain'})},'latest']);
+        if (!isData(chainData) || !isData(domainData)) return invalid();
+        let deploymentChain:bigint,domain:readonly [Hex,string,string,bigint,Address,Hex,readonly bigint[]];
+        try {
+          deploymentChain=decodeFunctionResult({abi:chainBindingAbi,functionName:'deploymentChainId',data:chainData});
+          domain=decodeFunctionResult({abi:chainBindingAbi,functionName:'eip712Domain',data:domainData});
+        } catch {return invalid();}
+        if (deploymentChain!==BigInt(manifest.chainId)) throw new IndexerError('DEPLOYMENT_CHAIN_MISMATCH');
+        if (domain[0]!=='0x0f' || domain[1]!=='OneshotGuardedMarketplace' || domain[2]!=='1'
+          || domain[3]!==BigInt(manifest.chainId) || domain[4].toLowerCase()!==manifest.marketplace.address
+          || domain[5]!==`0x${'0'.repeat(64)}` || domain[6].length!==0) throw new IndexerError('EIP712_DOMAIN_MISMATCH');
+      }
     }
   }
   async height() { return quantity(await this.rpc.readRpc('eth_blockNumber')); }

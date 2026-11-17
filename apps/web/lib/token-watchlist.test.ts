@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { TOKEN_WATCHLIST_STORAGE_KEY, createTokenWatchlistStore, readTokenWatchlist, setTokenWatched, useTokenWatchlist } from './token-watchlist';
+import { TOKEN_WATCHLIST_STORAGE_KEY, createTokenWatchlistStore, readTokenWatchlist, setTokenWatched, tokenIsWatched, useTokenWatchlist } from './token-watchlist';
 
 function memory(initial: string | null = null) {
   const values = new Map(initial === null ? [] : [[TOKEN_WATCHLIST_STORAGE_KEY, initial]]);
@@ -64,6 +64,15 @@ describe('safe token watchlist persistence', () => {
     expect(setTokenWatched(storage, '0xsecond', true)).toEqual({ entries: ['0xfirst', '0xsecond'], snapshot: raw });
     expect(setTokenWatched(storage, '0xmissing', false).snapshot).toBe(raw);
     expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('matches checksum EVM addresses without rewriting their bytes, and removes the matching entry instead of adding a duplicate', () => {
+    const checksum = `0x${'Ab'.repeat(20)}`, lower = checksum.toLowerCase(), raw = JSON.stringify([checksum, 'Legacy-ID'], null, 2), storage = memory(raw);
+    expect(tokenIsWatched(readTokenWatchlist(storage).entries, lower)).toBe(true);
+    expect(setTokenWatched(storage, lower, true).snapshot).toBe(raw); expect(storage.setItem).not.toHaveBeenCalled();
+    expect(setTokenWatched(storage, lower, false).entries).toEqual(['Legacy-ID']);
+    expect(readTokenWatchlist(storage).entries).toEqual(['Legacy-ID']);
+    expect(setTokenWatched(storage, 'legacy-id', true).entries).toEqual(['Legacy-ID', 'legacy-id']);
   });
 
   it('rejects an observed change between reading and writing without losing the other tab’s list', () => {

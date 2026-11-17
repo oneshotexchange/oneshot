@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { assertLocalWatchDatabase, parseIndexerArguments } from '../src/cli-options';
 
 describe('local indexer CLI flags', () => {
+  it('allows an explicit Base command to pin its required environment profile without accepting mainnet', () => {
+    expect(parseIndexerArguments(['--manifest','base.json','--network','base-sepolia'])).toMatchObject({expectedNetwork:'base-sepolia'});
+    expect(()=>parseIndexerArguments(['--manifest','base.json','--network','base'])).toThrow('CLI_ARGUMENTS_INVALID');
+  });
   it('preserves bounded one-pass defaults and opts into watch only explicitly', () => {
     expect(parseIndexerArguments(['--manifest', 'local.json'])).toEqual({ manifest: 'local.json', envFile: undefined, watch: false,
       pollIntervalMs: 2000, maxBlocks: 100, confirmationDepth: 0, maxReorgDepth: 64 });

@@ -98,7 +98,7 @@ export function projectPrivyIdentity(input: {
   if (!wallet) return state;
   state.account = { address: evmAddress(wallet.address)! }; state.connected = true;
   const chainId = privyEvmChainId(wallet.chainId);
-  state.network = chainId === null ? null : { chainId, name: chainId === 31337 ? 'Local test network' : `Chain ${chainId}` };
+  state.network = chainId === null ? null : { chainId, name: chainId === 84532 ? 'Base Sepolia testnet' : chainId === 31337 ? 'Local test network' : `Chain ${chainId}` };
   return state;
 }
 

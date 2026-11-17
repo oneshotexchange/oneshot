@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { readDraftStorage } from './draft-storage-migration';
 
 export const LEGACY_TOKEN_DRAFT_STORAGE_KEY = 'oneshot.zero.tokenDraft.v1';
-export const TOKEN_DRAFTS_STORAGE_KEY = 'oneshot.zero.tokenDrafts.v1';
+export const LEGACY_TOKEN_DRAFTS_STORAGE_KEY = 'oneshot.zero.tokenDrafts.v1';
+export const TOKEN_DRAFTS_STORAGE_KEY = 'oneshot.tokenDrafts.v2';
 export const MAX_SAVED_TOKEN_DRAFTS = 20;
 const maximumBytes = 256 * 1024;
 const plainLine = (maximum: number) => z.string().max(maximum).refine(value => !/[\u0000-\u001f\u007f]/.test(value), 'Use plain text without control characters.');
@@ -9,6 +11,7 @@ const plainLine = (maximum: number) => z.string().max(maximum).refine(value => !
 // A working draft may be incomplete. Publication/readiness validation is separate;
 // in particular, typing an unfinished website must not discard the working copy.
 export const tokenDraftSchema = z.object({
+  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
   name: plainLine(32),
   symbol: z.string().regex(/^[A-Z0-9]{0,10}$/, 'Use up to 10 uppercase letters or numbers.'),
   description: z.string().max(500).refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value), 'Use plain text for the description.'),
@@ -50,9 +53,12 @@ export class TokenDraftStorageError extends Error {
   constructor(public readonly reason: 'unreadable' | 'unavailable' | 'conflict' | 'full' | 'missing' | 'invalid', message: string) { super(message); }
 }
 
-export function emptyTokenDraft(): TokenDraft { return { name: '', symbol: '', description: '', website: '', fee: 1, mode: 'creator', openingValuation: '' }; }
+export function emptyTokenDraft(): TokenDraft { return { pricingNetwork: 'base-sepolia', name: '', symbol: '', description: '', website: '', fee: 1, mode: 'creator', openingValuation: '' }; }
 export function emptyTokenDraftWorkspace(): TokenDraftWorkspace { return { version: 1, working: { draft: emptyTokenDraft(), savedId: null }, saved: [] }; }
-export function tokenDraftHasContent(draft: TokenDraft): boolean { return JSON.stringify(tokenDraftSchema.parse(draft)) !== JSON.stringify(emptyTokenDraft()); }
+export function tokenDraftHasContent(draft: TokenDraft): boolean {
+  const baseline = { ...emptyTokenDraft(), pricingNetwork: draft.pricingNetwork };
+  return JSON.stringify(tokenDraftSchema.parse(draft)) !== JSON.stringify(tokenDraftSchema.parse(baseline));
+}
 export function tokenDraftsEqual(left: TokenDraft, right: TokenDraft): boolean { return JSON.stringify(tokenDraftSchema.parse(left)) === JSON.stringify(tokenDraftSchema.parse(right)); }
 function clone(workspace: TokenDraftWorkspace) { return tokenDraftWorkspaceSchema.parse(workspace); }
 function parsedWorkspace(raw: string): TokenDraftWorkspace {
@@ -68,52 +74,50 @@ function parsedLegacy(raw: string): TokenDraft {
   try {
     if (new TextEncoder().encode(raw).length > maximumBytes) throw new Error();
     const previous = tokenDraftSchema.partial().extend({ name: tokenDraftSchema.shape.name, symbol: tokenDraftSchema.shape.symbol }).strict().parse(JSON.parse(raw));
-    return tokenDraftSchema.parse({ ...emptyTokenDraft(), ...previous });
+    return tokenDraftSchema.parse({ ...emptyTokenDraft(), ...previous, pricingNetwork: undefined });
   } catch { throw new TokenDraftStorageError('unreadable', 'Your previous token draft could not be read. It has not been changed. You can prepare and export a new draft here.'); }
 }
 
 /** Reading and migration are side-effect free. The legacy key is never removed or rewritten. */
-export function readTokenDrafts(storage: Pick<Storage, 'getItem'>, clock: Clock = {}): { workspace: TokenDraftWorkspace; snapshot: string | null; source: 'workspace' | 'legacy' | 'empty' } {
-  let snapshot: string | null, legacy: string | null;
+export function readTokenDrafts(storage: Pick<Storage, 'getItem'>, clock: Clock = {}): { workspace: TokenDraftWorkspace; snapshot: string | null; source: 'workspace' | 'legacy-workspace' | 'legacy' | 'empty' } {
+  let selected: ReturnType<typeof readDraftStorage>;
   try {
-    snapshot = storage.getItem(TOKEN_DRAFTS_STORAGE_KEY);
-    if (snapshot !== null) return { workspace: parsedWorkspace(snapshot), snapshot, source: 'workspace' };
-    legacy = storage.getItem(LEGACY_TOKEN_DRAFT_STORAGE_KEY);
+    selected = readDraftStorage(storage, TOKEN_DRAFTS_STORAGE_KEY, [LEGACY_TOKEN_DRAFTS_STORAGE_KEY, LEGACY_TOKEN_DRAFT_STORAGE_KEY]);
+    if (selected.raw !== null && selected.sourceKey !== LEGACY_TOKEN_DRAFT_STORAGE_KEY) {
+      const workspace = parsedWorkspace(selected.raw);
+      const source = selected.sourceKey === TOKEN_DRAFTS_STORAGE_KEY ? 'workspace' : 'legacy-workspace';
+      if (source === 'legacy-workspace') { delete workspace.working.draft.pricingNetwork; for (const item of workspace.saved) delete item.draft.pricingNetwork; }
+      return { workspace, snapshot: selected.snapshot, source };
+    }
   } catch (error) {
     if (error instanceof TokenDraftStorageError) throw error;
     throw new TokenDraftStorageError('unavailable', 'Browser storage could not be opened. Keep this page open and export your draft before leaving.');
   }
   const workspace = emptyTokenDraftWorkspace();
-  if (legacy === null) return { workspace, snapshot, source: 'empty' };
+  if (selected.raw === null) return { workspace, snapshot: selected.snapshot, source: 'empty' };
   try {
-    workspace.working.draft = parsedLegacy(legacy);
+    workspace.working.draft = parsedLegacy(selected.raw);
     if (tokenDraftHasContent(workspace.working.draft)) {
       const recovered = makeRecord(workspace.working.draft, clock);
       workspace.saved = [recovered]; workspace.working.savedId = recovered.id;
     }
-    return { workspace, snapshot, source: 'legacy' };
+    return { workspace, snapshot: selected.snapshot, source: 'legacy' };
   } catch { throw new TokenDraftStorageError('unreadable', 'Your previous token draft could not be read. It has not been changed. You can prepare and export a new draft here.'); }
 }
 
 /** Compare the exact last-read snapshot before replacing this single atomic storage value. */
 export function writeTokenDrafts(storage: TokenDraftStorage, workspace: TokenDraftWorkspace, expectedSnapshot: string | null): string {
-  let current: string | null;
-  try { current = storage.getItem(TOKEN_DRAFTS_STORAGE_KEY); }
+  let selected: ReturnType<typeof readDraftStorage>;
+  try { selected = readDraftStorage(storage, TOKEN_DRAFTS_STORAGE_KEY, [LEGACY_TOKEN_DRAFTS_STORAGE_KEY, LEGACY_TOKEN_DRAFT_STORAGE_KEY]); }
   catch { throw new TokenDraftStorageError('unavailable', 'Browser storage could not be checked. Your open draft is still here; export a backup before leaving.'); }
-  if (current !== null) parsedWorkspace(current);
-  else {
-    let legacy: string | null;
-    try { legacy = storage.getItem(LEGACY_TOKEN_DRAFT_STORAGE_KEY); }
-    catch { throw new TokenDraftStorageError('unavailable', 'Your previous browser draft could not be checked. Keep an exported backup before leaving.'); }
-    if (legacy !== null) parsedLegacy(legacy);
-  }
-  if (current !== expectedSnapshot) throw new TokenDraftStorageError('conflict', 'Your token drafts changed in another tab. Export your open draft, then reload saved drafts before saving here.');
+  if (selected.raw !== null) selected.sourceKey === LEGACY_TOKEN_DRAFT_STORAGE_KEY ? parsedLegacy(selected.raw) : parsedWorkspace(selected.raw);
+  if (selected.snapshot !== expectedSnapshot) throw new TokenDraftStorageError('conflict', 'Your token drafts changed in another tab. Export your open draft, then reload saved drafts before saving here.');
   let serialized: string;
   try {
     serialized = JSON.stringify(clone(workspace));
     if (new TextEncoder().encode(serialized).length > maximumBytes) throw new Error();
   } catch { throw new TokenDraftStorageError('invalid', 'This draft could not be saved. Check its fields and keep an exported backup.'); }
-  if (serialized === current) return serialized;
+  if (serialized === selected.raw && selected.sourceKey === TOKEN_DRAFTS_STORAGE_KEY) return serialized;
   try { storage.setItem(TOKEN_DRAFTS_STORAGE_KEY, serialized); }
   catch { throw new TokenDraftStorageError('unavailable', 'Browser storage could not save your token drafts. Keep this page open or export a backup.'); }
   return serialized;

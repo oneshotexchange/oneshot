@@ -1,4 +1,5 @@
 export type PendingNftTransaction = {
+  chainId?: 31337 | 84532;
   userId: string; from: string; deploymentId: string; reviewId: string; reviewHash: string; hash: string; createdAt: string;
 };
 export type NftPendingStorage = Pick<Storage,'getItem'|'setItem'>;
@@ -9,6 +10,7 @@ function valid(value: unknown, now: number): value is PendingNftTransaction {
   if (!value || typeof value !== 'object') return false;
   const item = value as PendingNftTransaction;
   return typeof item.userId === 'string' && item.userId.length > 0 && item.userId.length <= 256
+    && (item.chainId === undefined || item.chainId === 31337 || item.chainId === 84532)
     && address.test(item.from) && typeof item.deploymentId === 'string' && item.deploymentId.length > 0 && item.deploymentId.length <= 256
     && typeof item.reviewId === 'string' && item.reviewId.length > 0 && item.reviewId.length <= 128
     && hash.test(item.reviewHash) && hash.test(item.hash) && typeof item.createdAt === 'string'

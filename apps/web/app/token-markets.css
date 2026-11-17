@@ -1,0 +1,27 @@
+.token-market-context{line-height:1.75;overflow-wrap:anywhere}
+.token-discovery-search{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;padding:20px;border-bottom:1px solid var(--line)}
+.token-discovery-search>.field{flex:1 1 260px;min-width:0;margin:0}
+.token-discovery-search input{width:100%;min-width:0}
+.token-table .token-snapshot-amount{white-space:normal;overflow-wrap:anywhere;min-width:180px;max-width:300px;font-variant-numeric:tabular-nums}
+.token-table .star-column>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.token-market-summary{padding:24px}
+.token-market-summary .info-row{align-items:flex-start;gap:18px}
+.token-market-summary .info-row>strong{overflow-wrap:anywhere;min-width:0;text-align:right;font-variant-numeric:tabular-nums}
+.token-market-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+.token-market-detail-grid>.panel{min-width:0}
+.token-market-detail-grid h2{margin-bottom:14px}
+.token-market-detail-header{align-items:flex-start;flex-wrap:wrap}
+.token-market-detail-header .terminal-title{min-width:0;flex:1 1 180px}
+.token-market-detail-header h1{overflow-wrap:anywhere}
+.token-market-unavailable{padding:24px}
+.token-execution-panel{padding:24px;min-width:0}
+.token-execution-panel .info-row{align-items:flex-start;gap:18px}
+.token-execution-panel .info-row>strong{min-width:0;max-width:66%;overflow-wrap:anywhere;text-align:right;font-variant-numeric:tabular-nums}
+.token-execution-panel .field-grid{margin-bottom:18px}
+.token-execution-panel .nft-recovery-row>div{min-width:0;overflow-wrap:anywhere}
+.token-transaction-data{margin:18px 0;line-height:1.6}
+.token-transaction-data>summary{cursor:pointer}
+.token-transaction-data>code{display:block;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;margin-top:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:11px}
+@media(max-width:650px){.token-execution-panel{padding:20px}.token-execution-panel .info-row{flex-wrap:wrap;gap:6px}.token-execution-panel .info-row>strong{width:100%;max-width:none;text-align:left}.token-execution-panel>.section-header{align-items:flex-start}.token-execution-panel .nft-recovery-row{flex-wrap:wrap;gap:12px}}
+@media(max-width:650px){.token-discovery-search{padding:15px}.token-discovery-search>.field{flex-basis:100%}.token-market-detail-grid{grid-template-columns:minmax(0,1fr);gap:16px}.token-market-summary,.token-market-unavailable{padding:20px}.token-market-summary .info-row{flex-wrap:wrap;gap:6px}.token-market-summary .info-row>strong{width:100%;text-align:left}.token-table .token-snapshot-amount{min-width:165px}}
+.token-table .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

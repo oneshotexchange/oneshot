@@ -6,10 +6,13 @@ import Link from './navigation';
 import { useWallet } from '../lib/client-wallet';
 import { NftCheckout, NftTransactionRecovery } from './nft-checkout';
 import { NftEarnings } from './nft-earnings';
+import { TokenPortfolioPanel } from './token-portfolio';
+import { portfolioWalletSelection } from '../lib/portfolio-wallet-selection';
 import { collectionDiscoveryFilters, indexedCollectionsPath, sameIndexedCheckpoint, useIndexedPage, useIndexedResource, type CollectionDiscoveryFilters } from '../lib/client-indexed-api';
 import { indexedPresentation, type IndexedPresentation } from '../lib/client-indexed-presentation';
 import { nftDeploymentLinkIssue } from '../lib/client-nft-deployment-link';
 import { nftCollectionMarketStats } from '../lib/client-nft-collection-stats';
+import { nftExplorerHref, nftNetworkLabel, readNftNetwork } from '../lib/nft-network';
 import { shortAddress } from '../lib/client-api';
 import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, InfoRow, Loading, PageHeading, SafetyNote, Stat, Tabs } from './ui';
 import type { StudioIllustrationKind } from './studio-illustration';
@@ -48,8 +51,9 @@ function PresentationMetadata({ presentation }: { presentation: IndexedPresentat
 }
 
 export function IndexedContextNote({ context }: { context: IndexedNftContext | null | undefined }) {
-  if (context?.network?.mode !== 'local' || context.network.chainId !== 31337) return null;
-  return <div className="indexed-context" role="status"><Badge tone="amber">Test network</Badge><p>Collections, activity and ETH amounts shown here belong to a local test network.</p></div>;
+  const network = readNftNetwork(context?.network);
+  if (!network) return null;
+  return <div className="indexed-context" role="status"><Badge tone="amber">Test network</Badge><p>Collections, activity and ETH amounts shown here belong to {nftNetworkLabel(network)}.</p></div>;
 }
 
 type PagedResult = { loading: boolean; loadingMore: boolean; error: string | null; notice: string | null; data: { context: IndexedNftContext; items: unknown[]; nextCursor: string | null } | null; refresh(): unknown; loadMore(): unknown };
@@ -72,7 +76,7 @@ export function IndexedCollectionHighlights() {
 
 export function IndexedActivityHighlights() {
   const page = useIndexedPage<IndexedActivity>(`${base}/activity`, activityKey);
-  return <><IndexedContextNote context={page.data?.context} /><PageBody page={page} footer={false} illustration="activity" unavailable="Activity is unavailable" empty="No NFT activity yet" description="Confirmed NFT mints, listings, sales and payouts will appear here."><ActivityRows activities={page.data?.items.slice(0, 4) || []} deploymentId={page.data?.context.deploymentId || undefined} /></PageBody></>;
+  return <><IndexedContextNote context={page.data?.context} /><PageBody page={page} footer={false} illustration="activity" unavailable="Activity is unavailable" empty="No NFT activity yet" description="Confirmed NFT mints, listings, sales and payouts will appear here."><ActivityRows activities={page.data?.items.slice(0, 4) || []} deploymentId={page.data?.context.deploymentId || undefined} chainId={page.data?.context.network?.chainId} /></PageBody></>;
 }
 
 export function IndexedItemCards({ items, deploymentId }: { items: IndexedNftItem[]; deploymentId?: string }) {
@@ -176,7 +180,7 @@ export function IndexedNftCollection({ id }: { id: string }) {
     <IndexedCollectionMarketStats response={response.data} collection={id} deploymentId={expectedDeployment} onRefresh={refresh} />
     <NftCheckout collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh} />
     <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'items', label: 'Items' }, { value: 'listings', label: 'Active listings' }, { value: 'activity', label: 'Activity' }]} active={tab} onChange={setTab} /></div>
-      {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <PageBody page={page} empty="No NFTs minted yet" description="Check the mint details above for the schedule and price."><IndexedItemCards items={page.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} /></PageBody>}
+      {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <PageBody page={page} empty="No NFTs minted yet" description="Check the mint details above for the schedule and price."><IndexedItemCards items={page.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} chainId={activity.data?.context.network?.chainId} /></PageBody>}
     </section>
     <section className="panel indexed-details"><h2>Collection details</h2><InfoRow label="Collection address"><Address value={collection.address} full /></InfoRow><InfoRow label="Creator"><Address value={collection.creator} full /></InfoRow><InfoRow label="Artwork preview">{indexedPresentation(collection.presentation, '1') ? 'First NFT' : 'Unavailable'}</InfoRow></section>
     <SafetyNote>Review the current mint terms and total cost before approving a transaction in your wallet.</SafetyNote></>;
@@ -209,22 +213,24 @@ function eventTitle(value: string) {
   return labels[value] || value.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 function eventTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString(); }
-function ActivityRows({ activities, deploymentId }: { activities: IndexedActivity[]; deploymentId?: string }) {
-  return <div className="table-scroll"><table className="data-table indexed-table"><thead><tr><th>Event</th><th>Amount</th><th>Block / transaction</th><th>Time</th></tr></thead><tbody>{activities.map(activity => <tr key={activity.id}><td><strong>{eventTitle(activity.eventName)}</strong>{activity.collection && <Link href={collectionHref(activity.collection, deploymentId)} className="indexed-subline text-link">{shortAddress(activity.collection)}</Link>}{typeof activity.args.tokenId === 'string' && <small className="indexed-subline">NFT #{activity.args.tokenId}</small>}</td><td className="indexed-amount">{activityAmount(activity)}</td><td>Block {activity.blockNumber}<span className="indexed-subline" title={activity.transactionHash}>{shortAddress(activity.transactionHash)}</span></td><td>{eventTime(activity.timestamp)}</td></tr>)}</tbody></table></div>;
+function ActivityRows({ activities, deploymentId, chainId }: { activities: IndexedActivity[]; deploymentId?: string; chainId?: number }) {
+  return <div className="table-scroll"><table className="data-table indexed-table"><thead><tr><th>Event</th><th>Amount</th><th>Block / transaction</th><th>Time</th></tr></thead><tbody>{activities.map(activity => <tr key={activity.id}><td><strong>{eventTitle(activity.eventName)}</strong>{activity.collection && <Link href={collectionHref(activity.collection, deploymentId)} className="indexed-subline text-link">{shortAddress(activity.collection)}</Link>}{typeof activity.args.tokenId === 'string' && <small className="indexed-subline">NFT #{activity.args.tokenId}</small>}</td><td className="indexed-amount">{activityAmount(activity)}</td><td>Block {activity.blockNumber}{nftExplorerHref(chainId, activity.transactionHash, 'tx') ? <a className="indexed-subline text-link" href={nftExplorerHref(chainId, activity.transactionHash, 'tx')!} target="_blank" rel="noreferrer">{shortAddress(activity.transactionHash)}</a> : <span className="indexed-subline" title={activity.transactionHash}>{shortAddress(activity.transactionHash)}</span>}</td><td>{eventTime(activity.timestamp)}</td></tr>)}</tbody></table></div>;
 }
 
 export function IndexedActivityPage() {
   const page = useIndexedPage<IndexedActivity>(`${base}/activity`, activityKey);
-  return <><PageHeading title="NFT activity" description="Mints, listings, sales and payouts across oneshot." action={<Button variant="secondary" loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button>} /><IndexedContextNote context={page.data?.context} /><section className="panel"><PageBody page={page} illustration="activity" unavailable="Activity is unavailable" empty="No activity yet"><ActivityRows activities={page.data?.items || []} deploymentId={page.data?.context.deploymentId || undefined} /></PageBody></section><SafetyNote>Recent transactions may change while the network confirms them.</SafetyNote></>;
+  return <><PageHeading title="NFT activity" description="Mints, listings, sales and payouts across oneshot." action={<Button variant="secondary" loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button>} /><IndexedContextNote context={page.data?.context} /><section className="panel"><PageBody page={page} illustration="activity" unavailable="Activity is unavailable" empty="No activity yet"><ActivityRows activities={page.data?.items || []} deploymentId={page.data?.context.deploymentId || undefined} chainId={page.data?.context.network?.chainId} /></PageBody></section><SafetyNote>Recent transactions may change while the network confirms them.</SafetyNote></>;
 }
 
 export function IndexedPortfolioPage() {
   const { account } = useWallet();
-  const [addressInput, setAddressInput] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const queryWallet = params.get('wallet'), selection = portfolioWalletSelection(params.toString(), account?.address);
+  const [addressInput, setAddressInput] = useState(queryWallet || '');
   const [inputError, setInputError] = useState<string | null>(null);
   const [tab, setTab] = useState('owned');
-  const wallet = selected || account?.address.toLowerCase() || null;
+  const wallet = selection.wallet;
+  useEffect(() => { setAddressInput(queryWallet || ''); setInputError(null); }, [queryWallet]);
   const owned = useIndexedPage<IndexedNftItem>(wallet && tab === 'owned' ? `${base}/wallets/${wallet}/items` : null, itemKey);
   const listed = useIndexedPage<IndexedListing>(wallet && tab === 'listed' ? `${base}/listings?seller=${wallet}&status=active` : null, listingKey);
   const claims = useIndexedPage<IndexedClaim>(wallet && tab === 'claims' ? `${base}/wallets/${wallet}/claims` : null, claimKey);
@@ -233,14 +239,17 @@ export function IndexedPortfolioPage() {
   function inspect(event: React.FormEvent) {
     event.preventDefault();
     const value = addressInput.trim();
-    if (!/^0x[\da-fA-F]{40}$/.test(value)) { setInputError('Enter a complete Ethereum wallet address.'); return; }
-    setInputError(null); setSelected(value.toLowerCase());
+    const next = new URLSearchParams(params); next.set('wallet', value);
+    const checked = portfolioWalletSelection(next.toString());
+    if (checked.error || !checked.wallet) { setInputError(checked.error || 'Enter a complete Ethereum wallet address.'); return; }
+    next.set('wallet', checked.wallet); setInputError(null); setParams(next);
   }
   const refresh = () => { void owned.refresh(); void listed.refresh(); void claims.refresh(); status.refresh(); };
-  return <><PageHeading title="Your portfolio" description="Manage your NFTs, listings and creator earnings." />
+  return <><PageHeading title="Your portfolio" description="Manage your tokens, NFTs, listings and creator earnings." />
     <NftEarnings onRefresh={refresh} />
-    <section className="panel indexed-details"><form onSubmit={inspect} className="indexed-wallet-form"><Field label="Wallet address" hint="Look up any wallet. No sign-in or signature needed."><input value={addressInput} onChange={event => setAddressInput(event.target.value)} placeholder={account?.address || '0x…'} aria-label="Wallet address to inspect" /></Field><Button type="submit" variant="secondary"><Wallet size={13} />View portfolio</Button>{account && <Button type="button" variant="ghost" onClick={() => { setSelected(null); setAddressInput(''); setInputError(null); }}>Use connected wallet</Button>}</form>{inputError && <ErrorState message={inputError} />}{wallet && <p className="indexed-wallet-address">Viewing <Address value={wallet} full /></p>}</section>
+    <section className="panel indexed-details"><form onSubmit={inspect} className="indexed-wallet-form"><Field label="Wallet address" hint="Look up any wallet. No sign-in or signature needed."><input value={addressInput} onChange={event => setAddressInput(event.target.value)} placeholder={account?.address || '0x…'} aria-label="Wallet address to inspect" /></Field><Button type="submit" variant="secondary"><Wallet size={13} />View portfolio</Button>{account && <Button type="button" variant="ghost" onClick={() => { const next = new URLSearchParams(params); next.delete('wallet'); setParams(next); setAddressInput(''); setInputError(null); }}>Use connected wallet</Button>}</form>{(inputError || selection.error) && <ErrorState message={inputError || selection.error!} />}{wallet && <p className="indexed-wallet-address">Viewing <Address value={wallet} full /></p>}</section>
+    <TokenPortfolioPanel wallet={wallet} expectedChainId={active.data?.context.network?.chainId} onRefreshPortfolio={refresh} />
     <IndexedContextNote context={active.data?.context || status.data?.context} />
-    {!wallet ? status.error ? <ErrorState message={status.error} retry={status.refresh} /> : <EmptyState icon={Wallet} illustration="portfolio" title="View your portfolio" description="Connect your wallet or enter an Ethereum address to view its NFTs and activity." /> : <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'owned', label: 'Owned NFTs' }, { value: 'listed', label: 'Listed for sale' }, { value: 'claims', label: 'Completed payouts' }]} active={tab} onChange={setTab} /><Button variant="ghost" onClick={() => { void active.refresh(); }} loading={active.loading}><RefreshCw size={13} />Refresh</Button></div>{tab === 'owned' ? <PageBody page={owned} empty="No NFTs in this wallet" description="Mint or buy an NFT to add it to your wallet." action={<ButtonLink href="/nfts" variant="secondary">Explore collections <ArrowRight size={14} /></ButtonLink>}><IndexedItemCards items={owned.data?.items || []} deploymentId={owned.data?.context.deploymentId || undefined} /></PageBody> : tab === 'listed' ? <PageBody page={listed} empty="No NFTs listed for sale" description="Open an NFT you own to review a listing."><Listings listings={listed.data?.items || []} deploymentId={listed.data?.context.deploymentId || undefined} /></PageBody> : <PageBody page={claims} empty="No completed payouts" description="Payouts will appear here after the wallet claims its NFT proceeds."><div className="table-scroll"><table className="data-table indexed-table"><thead><tr><th>Payout source</th><th>Total received</th><th>Last payout recipient</th></tr></thead><tbody>{claims.data?.items.map(claim => <tr key={claimKey(claim)}><td><Address value={claim.contract} /></td><td className="indexed-amount">{amount(claim.totalClaimedRaw)}</td><td><Address value={claim.recipient} /></td></tr>)}</tbody></table></div></PageBody>}</section>}
-    <NftTransactionRecovery onRefresh={refresh} /><SafetyNote>Available proceeds belong to your connected wallet. NFT records and completed payouts show the address selected above. Token holdings and wallet balances are unavailable.</SafetyNote></>;
+    {!wallet ? status.error ? <ErrorState message={status.error} retry={status.refresh} /> : <EmptyState icon={Wallet} illustration="portfolio" title="View your portfolio" description="Connect your wallet or enter an Ethereum address to view its recorded tokens, NFTs and activity." /> : <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'owned', label: 'Owned NFTs' }, { value: 'listed', label: 'Listed for sale' }, { value: 'claims', label: 'Completed payouts' }]} active={tab} onChange={setTab} /><Button variant="ghost" onClick={() => { void active.refresh(); }} loading={active.loading}><RefreshCw size={13} />Refresh</Button></div>{tab === 'owned' ? <PageBody page={owned} empty="No NFTs in this wallet" description="Mint or buy an NFT to add it to your wallet." action={<ButtonLink href="/nfts" variant="secondary">Explore collections <ArrowRight size={14} /></ButtonLink>}><IndexedItemCards items={owned.data?.items || []} deploymentId={owned.data?.context.deploymentId || undefined} /></PageBody> : tab === 'listed' ? <PageBody page={listed} empty="No NFTs listed for sale" description="Open an NFT you own to review a listing."><Listings listings={listed.data?.items || []} deploymentId={listed.data?.context.deploymentId || undefined} /></PageBody> : <PageBody page={claims} empty="No completed payouts" description="Payouts will appear here after the wallet claims its NFT proceeds."><div className="table-scroll"><table className="data-table indexed-table"><thead><tr><th>Payout source</th><th>Total received</th><th>Last payout recipient</th></tr></thead><tbody>{claims.data?.items.map(claim => <tr key={claimKey(claim)}><td><Address value={claim.contract} /></td><td className="indexed-amount">{amount(claim.totalClaimedRaw)}</td><td><Address value={claim.recipient} /></td></tr>)}</tbody></table></div></PageBody>}</section>}
+    <NftTransactionRecovery onRefresh={refresh} /><SafetyNote>Available proceeds belong to your connected wallet. Token balances, NFT records and completed payouts show the public address selected above. Each section shows its own indexed network and checkpoint. Native wallet balances and profit and loss are unavailable.</SafetyNote></>;
 }

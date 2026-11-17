@@ -8,10 +8,10 @@ const hash=(value:number)=>`0x${value.toString(16).padStart(64,'0')}` as Hex;
 const context:GuardedMarketContext={chainId:31337,verifyingContract:address(1)};
 const listing=():GuardedListingPermit=>({seller:address(2),collection:address(3),tokenId:4n,totalPrice:9_123_456_789_123_456_789n,nonce:0n,policyCommitment:hash(5),deadline:1_900_000_000n,deploymentSalt:hash(6)});
 const policy=():GuardedPolicyPermit=>({creator:address(7),collection:address(3),commitment:hash(8),expectedCommitment:zeroHash,deadline:1_900_000_000n,deploymentSalt:hash(6)});
-const domainHash=()=>keccak256(encodeAbiParameters([
+const domainHash=(chainId=31337n)=>keccak256(encodeAbiParameters([
   {type:'bytes32'},{type:'bytes32'},{type:'bytes32'},{type:'uint256'},{type:'address'},
 ],[keccak256(stringToHex('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')),
-  keccak256(stringToHex('OneshotGuardedMarketplace')),keccak256(stringToHex('1')),31337n,context.verifyingContract]));
+  keccak256(stringToHex('OneshotGuardedMarketplace')),keccak256(stringToHex('1')),chainId,context.verifyingContract]));
 
 describe('guarded marketplace authorization binding',()=>{
   it('matches independent Solidity-style EIP-712 domain and listing struct encoding',()=>{
@@ -60,9 +60,21 @@ describe('guarded marketplace authorization binding',()=>{
     expect(policyData.message.deadline).toBe(UINT256_MAX);
   });
 
-  it.each([1,8453,31338,0,Number.NaN])('refuses non-local chain IDs: %s',chainId=>{
-    expect(()=>guardedListingPermitTypedData({...context,chainId},listing())).toThrow('31337');
-    expect(()=>guardedPolicyPermitTypedData({...context,chainId},policy())).toThrow('31337');
+  it('binds Base Sepolia permits to that testnet and refuses cross-network replay',()=>{
+    const value=listing(),base={...context,chainId:84532};
+    const structHash=keccak256(encodeAbiParameters([
+      {type:'bytes32'},{type:'address'},{type:'address'},{type:'uint256'},{type:'uint256'},{type:'uint256'},{type:'bytes32'},{type:'uint256'},{type:'bytes32'},
+    ],[keccak256(stringToHex('ListingPermit(address seller,address collection,uint256 tokenId,uint256 totalPrice,uint256 nonce,bytes32 policyCommitment,uint256 deadline,bytes32 deploymentSalt)')),
+      value.seller,value.collection,value.tokenId,value.totalPrice,value.nonce,value.policyCommitment,value.deadline,value.deploymentSalt]));
+    expect(guardedListingPermitHash(base,value)).toBe(keccak256(concatHex(['0x1901',domainHash(84532n),structHash])));
+    expect(guardedListingPermitHash(base,value)).not.toBe(guardedListingPermitHash(context,value));
+    expect(guardedPolicyPermitHash(base,policy())).not.toBe(guardedPolicyPermitHash(context,policy()));
+    expect(guardedListingPermitTypedData(base,value).domain.chainId).toBe(84532);
+  });
+
+  it.each([1,8453,31338,0,Number.NaN])('refuses unsupported and mainnet chain IDs: %s',chainId=>{
+    expect(()=>guardedListingPermitTypedData({...context,chainId},listing())).toThrow('supported test network');
+    expect(()=>guardedPolicyPermitTypedData({...context,chainId},policy())).toThrow('supported test network');
   });
 
   it('rejects zero or malformed identity addresses',()=>{

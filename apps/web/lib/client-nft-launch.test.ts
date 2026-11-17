@@ -296,7 +296,7 @@ describe('reviewed EVM provider bridge', () => {
     await expect(h.send()).rejects.toThrow('account or wallet changed'); expect(h.request.mock.calls.some(([input]) => input.method === 'eth_sendTransaction')).toBe(false);
   });
   it('requires the selected sender and refuses to switch or send on another network', async () => {
-    const h = providerHarness(); h.request.mockResolvedValue('0x1'); await expect(h.send()).rejects.toThrow('test network (31337)');
+    const h = providerHarness(); h.request.mockResolvedValue('0x1'); await expect(h.send()).rejects.toThrow('reviewed test network');
     expect(h.request).toHaveBeenCalledOnce();
     const other = providerHarness(); other.request.mockImplementation(async input => input.method === 'eth_chainId' ? '0x7a69' : [to]);
     await expect(other.send()).rejects.toThrow('sender is no longer available'); expect(other.request.mock.calls.some(([input]) => input.method === 'eth_sendTransaction')).toBe(false);
@@ -389,7 +389,7 @@ describe('verified public NFT availability', () => {
   const enabled = { enabled: true, reason: null, network: { chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, name: 'Local Anvil', mode: 'local' }, deploymentId: 'D'.repeat(64) };
   it('retains only supported network/deployment facts and normalizes the deployment fingerprint', () => {
     expect(validateNftLaunchStatus({ ...enabled, privateEndpoint: 'not public', network: { ...enabled.network, internalProvider: 'not public' } }))
-      .toEqual({ enabled: true, reason: null, network: { chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, name: 'Local Anvil' }, deploymentId: 'd'.repeat(64) });
+      .toEqual({ enabled: true, reason: null, network: { mode: 'local', chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, name: 'Local Anvil' }, deploymentId: 'd'.repeat(64) });
   });
   it('returns a customer availability message without retaining operator diagnostics', () => {
     const result = validateNftLaunchStatus({ enabled: false, reason: 'Set ONESHOT_PRIVATE_PROVIDER=secret', network: null, deploymentId: null });

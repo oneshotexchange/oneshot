@@ -1,0 +1,60 @@
+# Base Sepolia build and release boundaries
+
+The owner selected Base Sepolia for the first test release on 16 November 2026. Zero remains a later network integration. Existing Zero draft amounts must never become test ETH amounts by changing a label.
+
+## Phase 1: build and verification
+
+Implemented in the isolated `codex/phase-one` checkout:
+
+- Separate Base Sepolia 84532 and local Anvil 31337 profiles, exact chain/genesis checks, canonical block references and separate NFT/token opt-ins.
+- Base-aware NFT creation, minting, guarded resale permits, proceeds and receipt recovery. NFT fees remain 2% inclusive; creator royalties remain frozen at 0–10%.
+- Independent v2 browser storage and versioned backups preserve legacy Zero records. Creating a Base copy clears NFT prices/token opening valuation. The API rejects currency changes to an existing account draft.
+- Uniswap v4 token-only launches with one billion eight-decimal tokens, no further minting, immutable fee/range, permanently locked principal and locked rounding dust. The fixed launch range targets 1000 times the opening valuation; reviews show the actual tick-aligned bounds.
+- Exact-input buy/sell with full fill or revert, a separate exact token allowance, minimum output, explicit recipient and a wallet approval after server revalidation. Token review lifetime is at most two minutes; permissionless maintenance deadlines remain at most 60 seconds.
+- Immutable oneshot execution fees of 1–5% in 0.1% steps. Buys charge total native input; sells charge actual gross native output. Revenue is split 20/80, with the optional destination split 75/25 liquidity/burn. The token has no transfer tax.
+- A 0.25% LP fee plus the pool's actual directional protocol fee. Reviews read the current combined fee and require a new review when it changes. Gas is separate.
+- Observation-only hook, five-minute TWAP, guarded permissionless LP conversion/reinvestment/true burns, retained unsafe/insufficient budgets and pull-payment claims. The initial Base processing threshold is explicitly 0.01 test ETH.
+- Canonical token contract snapshots and a separate event journal/projector. Pool swaps determine observed prices and pool volume once; oneshot executions have separate payer, recipient and execution-fee totals. Token transfers determine balances, burns and positive-balance address counts. Contracts and PoolManager are included in that count. An external router is not presented as its unknown final trader.
+- Offline unsigned deployment planning, deployed-code size checks and actual ephemeral-chain/API rehearsals. New runtimes fit EIP-170. Market factory creation bytecode is held in immutable inert code chunks; their predicted addresses and hashes are included in the plan.
+
+The snapshot worker is a development reader capped at 25 markets, default 10. The separate event worker avoids that snapshot ceiling but retains explicit source, per-block work and reorg-recovery limits. These limits require production load/cost testing; no unlimited-capacity claim is made.
+
+Public analytics and wallet balances now use the verified event-journal API and its canonical checkpoint. The UI distinguishes missing, failed or stale data from zero activity, labels sampled price history and includes contracts/PoolManager in its holder scope. Wallet balance pages verify the selected markets' ERC-20 balances and require complete wallet-aware journal coverage; old journals require an explicit tested replay. Recent confirmations are never described as finalized.
+
+The November 17 review also added shared UTF-8/name admission for NFT and token issuance, preventing valid direct factory calls from poisoning decoder/indexer input. It preserves normal Unicode and existing byte limits. The current contract bytecode has Foundry verification; the successful November 16 chain/API rehearsals cover earlier bytecode. Windows Application Control now blocks the pinned Anvil executable, including its version preflight, so a fresh actual-node capture has not passed. No bypass was attempted.
+
+Final November 17 checks: clean `npm ci --ignore-scripts`, 2,228 app tests, 59 tests against disposable PostgreSQL, all workspace TypeScript checks, and both Vite/Next production builds passed. The default app suite skips 63 service-dependent tests; 59 of those run in the separate database check. Current contracts pass 87 Foundry tests. Desktop and mobile customer flows were inspected using isolated synthetic data with wallet signing disabled. These visual fixtures are not live-market or Base transaction evidence. The frontend still has large-chunk warnings requiring bundle/performance work.
+
+Compatible dependency patches include Next.js 16.4.6, follow-redirects 1.16.3, Hono 4.13.19 and the official decode-uri-component 0.5.1 algorithm with only a CommonJS export adaptation. See the [Next.js advisory](https://github.com/vercel/next.js/security/advisories/GHSA-mfr8-8qww-v76h) and [decoder source/compatibility evidence](vendor/decode-uri-component/README.md). The production npm audit still reports 22 high-severity package entries, all propagated from older Zod dependencies inside the wallet SDK graph; they are not 22 independent root findings or a demonstrated application exploit. First-party Zod remains pinned at 4.6.7. Reachability and a supported SDK remediation remain unresolved release work; no forced Zod major replacement or suggested Privy downgrade was applied. `npm ls` also reports existing nested abitype/Zod override inconsistencies after clean installation; successful installation/builds do not resolve that dependency-graph debt.
+
+### Dependency and verification status
+
+The clean lockfile install succeeds. Next.js is pinned to 16.4.6, beyond the 16.4.5 fix in [the official Next.js advisory](https://github.com/vercel/next.js/security/advisories/GHSA-mfr8-8qww-v76h). Compatible follow-redirects and Hono patches are included. The private CommonJS decoder adapter now uses the unchanged upstream 0.5.1 algorithm and keeps query-string 7.1.3 compatibility; its source hashes, license and bounded regression checks are recorded in [the adapter reference](vendor/decode-uri-component/README.md).
+
+The production dependency audit still reports 22 high-severity package entries propagated from [the Zod collection-validation advisory](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) through wallet SDK dependencies. First-party validation uses Zod 4.6.7; those SDKs still require older Zod 3 versions. These entries are unresolved, not 22 independently validated application vulnerabilities. No complete reachability assessment or audited SDK migration has been performed. An automatic suggested Privy downgrade or a global Zod major-version override is not an established fix. The dependency tree also retains pre-existing nested abitype/Zod override warnings; successful installation and builds do not establish an entirely warning-free dependency graph. SDK compatibility and dependency remediation remain release work.
+
+The final bounded app run passes 2,228 tests; 63 environment-dependent cases are skipped in that command and require their separate database/chain runners. An initial unbounded run hit a disk-heavy draft test's time limit; it passes with four workers. The API integration test belongs in the API workspace so its NextRequest cannot resolve a different Next.js installation from the indexer. Foundry passes 87 contract tests against the canonical local v4 core, including metadata rejection, fee accounting, maintenance, quote rollback and guarded NFT settlement. Browser review covers the public desktop/mobile pages with isolated fixtures and signing disabled; it is not a live-network attestation.
+
+Remaining Phase 1 work for the broader original product includes NFT item/collection offers, ERC-1155 and external collection policy, creator/collector profiles, durable token account drafts, wallet follows/feeds, alerts, cost-basis/P&L methodology, broader market rankings, Genesis wallet/allocation/claim delivery and operational capacity/recovery exercises. These remain agent build tasks. Current interfaces must not imply those capabilities already exist. Game-specific mechanics need a concrete game design; GMGN/Fomo references inform the trading and social experience, not a fabricated game or copy-trading service.
+
+## Phase 2: owner review
+
+Review each implemented milestone with test assets: create/copy/restore a draft; inspect frozen supply, fee and range; create/open/mint/list/buy/cancel an NFT; launch/buy/approve/sell/claim a token; recover a transaction after leaving the page; and distinguish empty results from unavailable services. Check desktop/mobile layouts, fee rounding, royalties and linked-wallet/network changes. Reviewing a milestone does not mark the entire Phase 1 backlog complete.
+
+## Phase 3: owner-controlled release tasks
+
+1. Select public deployment/treasury/listing-authority addresses, confirm their control, and prepare the unsigned plan with the real deployer nonce. Never provide a seed phrase or private key in chat.
+2. Supply an RPC service that passes chain/genesis, canonical block, hash-selected code/call/log and receipt checks. The default public Base endpoint and a PublicNode fallback were probed, but no successful live Base capability/deployment proof has been recorded in this checkout.
+3. Review and sign the explicit Base Sepolia deployment transactions. Inspect actual receipts, parent/genesis anchors, immutable getters, code-chunk hashes and runtime hashes before creating usable manifests or enabling features.
+4. Apply additive database initialization, start the supervised event/NFT workers, verify replay/reorg/restore behavior and configure only server-side flags/secrets in authenticated operations. Existing hosted services and credentials are preserved until an explicit release.
+5. Conduct independent contract review and release/load/cost testing before exposing funds to a public release. Local tests are engineering evidence, not an external audit or a Base deployment.
+
+## Reference decisions
+
+[Base network documentation](https://docs.base.org/get-started/connect-to-base), [canonical Base Sepolia genesis configuration](https://github.com/base/base/blob/f352323dc1e63f8e467368598f75018891f532dd/crates/common/chains/src/config.rs#L528), [Base 200ms block guidance](https://docs.base.org/upgrades/denim/200ms-blocks), and [Uniswap v4 deployments](https://developers.uniswap.org/docs/protocols/v4/deployments) anchor the network/AMM choices. A provider URL is not proof of the network or deployed code. [PublicNode's Sepolia selector](https://base.publicnode.com/?sepolia) was used to identify the fallback endpoint, not to attest its capabilities.
+
+All supplied repositories and guides were rechecked before the Base build. OpenZeppelin 5.6.1 is pinned; tagged audited primitives are retained. Uniswap core 1.0.2 and periphery 1.0.3 are pinned. Imported math/interfaces retain their licenses; the untouched BUSL core is used only in non-production local tests. The new market implementation does not claim an independent audit.
+
+OpenLaunch was the closest token-only reference, but its supply/precision, range, allocation and fee behavior do not implement oneshot's frozen plan. MemeLauncher/launch-fi and Pump-style clones are economic references rather than a replacement bonding curve. Solana/Metaplex, Stargaze/CosmWasm, old Goerli starters and unlicensed/mixed-license repositories were not copied wholesale into this EVM app. Privy remains wallet/account authority and the frontend remains Vite React; a Next.js starter is not a reason to rewrite it.
+
+Reports and isolated visual-test fixtures live under ignored `.local/qa`. Only genuine canonical receipts and deployed code may supply a live manifest; offline plans intentionally leave runtime/block evidence unset.

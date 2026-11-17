@@ -3,6 +3,7 @@ import { IndexerError } from './types';
 export type IndexerCliOptions = {
   manifest: string; envFile?: string; watch: boolean; pollIntervalMs: number;
   maxBlocks: number; confirmationDepth: number; maxReorgDepth: number;
+  expectedNetwork?: 'local' | 'base-sepolia';
 };
 
 /** A continuous local worker must never follow a libpq host/query override. */
@@ -24,7 +25,7 @@ export function assertLocalWatchDatabase(connectionString: unknown): asserts con
 /** Parse completely before opening RPC/database connections. One pass is the default. */
 export function parseIndexerArguments(args: readonly string[]): IndexerCliOptions {
   const flags = new Map<string, string>();
-  const allowed = new Set(['--env-file', '--manifest', '--max-blocks', '--confirmations', '--max-reorg-depth', '--poll-interval-ms']);
+  const allowed = new Set(['--env-file', '--manifest', '--network', '--max-blocks', '--confirmations', '--max-reorg-depth', '--poll-interval-ms']);
   let watch = false;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -38,6 +39,8 @@ export function parseIndexerArguments(args: readonly string[]): IndexerCliOption
     flags.set(flag, value);
   }
   if (!flags.has('--manifest')) throw new IndexerError('MANIFEST_REQUIRED');
+  const network=flags.get('--network');
+  if (network !== undefined && network !== 'local' && network !== 'base-sepolia') throw new IndexerError('CLI_ARGUMENTS_INVALID');
   if (!watch && flags.has('--poll-interval-ms')) throw new IndexerError('CLI_ARGUMENTS_INVALID');
   const integer = (flag: string, fallback: number, minimum: number, maximum: number) => {
     const raw = flags.get(flag);
@@ -48,6 +51,7 @@ export function parseIndexerArguments(args: readonly string[]): IndexerCliOption
     return value;
   };
   return { manifest: flags.get('--manifest')!, envFile: flags.get('--env-file'), watch,
+    ...(network ? {expectedNetwork:network} : {}),
     pollIntervalMs: integer('--poll-interval-ms', 2_000, 500, 60_000),
     maxBlocks: integer('--max-blocks', 100, 1, 1_000),
     confirmationDepth: integer('--confirmations', 0, 0, 1_000),

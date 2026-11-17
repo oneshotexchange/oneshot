@@ -118,6 +118,14 @@ describe('server-only guarded marketplace signatures', () => {
     expect(await verifyTypedData({ ...guardedPolicyPermitTypedData({ chainId: 31337, verifyingContract: market }, policy), address: authority.address, signature: policySignature })).toBe(true);
     expect(await verifyTypedData({ ...guardedPolicyPermitTypedData({ chainId: 31337, verifyingContract: market }, { ...policy, expectedCommitment: deploymentSalt }), address: authority.address, signature: policySignature })).toBe(false);
   });
+  it('binds Base permits to chain84532 so neither listing nor policy signatures replay on local', async () => {
+    const signature=await create().signListing(market,authority.address,listing,84532);
+    expect(await verifyTypedData({...guardedListingPermitTypedData({chainId:84532,verifyingContract:market},listing),address:authority.address,signature})).toBe(true);
+    expect(await verifyTypedData({...guardedListingPermitTypedData({chainId:31337,verifyingContract:market},listing),address:authority.address,signature})).toBe(false);
+    const policySignature=await create().signPolicy(market,authority.address,policy,84532);
+    expect(await verifyTypedData({...guardedPolicyPermitTypedData({chainId:84532,verifyingContract:market},policy),address:authority.address,signature:policySignature})).toBe(true);
+    expect(await verifyTypedData({...guardedPolicyPermitTypedData({chainId:31337,verifyingContract:market},policy),address:authority.address,signature:policySignature})).toBe(false);
+  });
 
   it('fails safely for missing, malformed or mismatched authority secrets', async () => {
     for (const secret of [undefined, 'invalid-private-value', `0x${'00'.repeat(32)}`, `0x${'34'.repeat(32)}`]) {

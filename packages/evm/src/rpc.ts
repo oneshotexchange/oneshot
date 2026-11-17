@@ -1,4 +1,5 @@
 import type { NetworkConfig } from './config';
+import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_CONFIG_SOURCE_URL, nftExecutionNetwork } from './execution-network';
 
 export type RpcProviderLabel = 'alchemy' | 'official' | 'custom';
 export type RpcReadMethod = 'eth_blockNumber' | 'eth_getBlockByNumber' | 'eth_getBalance' | 'eth_getCode'
@@ -12,7 +13,7 @@ export type RpcOptions = {
   fetch?: typeof globalThis.fetch;
 };
 export type RpcVerification = {
-  mode: 'zero' | 'local';
+  mode: NetworkConfig['mode'];
   chainId: number;
   genesisHash: `0x${string}`;
   latestBlock: bigint;
@@ -78,7 +79,7 @@ const keysOnly = (value: ObjectRecord, keys: string[]) => Object.keys(value).eve
 
 /** Only clear, hash-selected block lookup rejections can satisfy a capability negative control. */
 function remoteRejection(error: ObjectRecord, method: string, params: readonly unknown[]): 'block-not-found' | undefined {
-  const selected = method === 'eth_call' ? params[1] : method === 'eth_getLogs' ? params[0] : null;
+  const selected = method === 'eth_call' || method === 'eth_getCode' ? params[1] : method === 'eth_getLogs' ? params[0] : null;
   if (!object(selected) || !hexHash(selected.blockHash) || ![-32000, -32001].includes(error.code as number)
     || typeof error.message !== 'string' || error.message.length > 256) return;
   const message = error.message.trim();
@@ -96,7 +97,7 @@ function serverOnly() {
 
 type Connection = {
   url: string;
-  mode: 'zero' | 'local';
+  mode: NetworkConfig['mode'];
   chainId: number;
   expectedGenesis: `0x${string}` | null;
   provider: RpcProviderLabel;
@@ -121,8 +122,12 @@ function connectionFor(config: NetworkConfig, options: RpcOptions): Connection {
     if (config.chainId !== 31337 || config.nativeSymbol !== 'ETH' || config.nativeDecimals !== 18
       || url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
       || (config.genesisHash !== null && !hexHash(config.genesisHash))) throw new RpcError('CONFIG_INVALID');
+  } else if (config.mode === 'base-sepolia') {
+    if (config.chainId !== BASE_SEPOLIA_CHAIN_ID || config.nativeSymbol !== 'ETH' || config.nativeDecimals !== 18
+      || url.protocol !== 'https:' || config.genesisHash?.toLowerCase() !== BASE_SEPOLIA_GENESIS_HASH
+      || config.sourceUrl !== BASE_SEPOLIA_CONFIG_SOURCE_URL) throw new RpcError('CONFIG_INVALID');
   } else if (config.mode === 'zero') {
-    if (config.chainId === 31337 || config.nativeSymbol !== 'ZRO' || config.nativeDecimals === null
+    if ([31337,8453,BASE_SEPOLIA_CHAIN_ID].includes(config.chainId) || config.nativeSymbol !== 'ZRO' || config.nativeDecimals === null
       || !Number.isInteger(config.nativeDecimals) || config.nativeDecimals < 0 || config.nativeDecimals > 38
       || url.protocol !== 'https:' || !hexHash(config.genesisHash) || !config.sourceUrl) throw new RpcError('CONFIG_INCOMPLETE');
     try {
@@ -241,8 +246,11 @@ function boundedParams(method: RpcReadMethod, params: readonly unknown[]): reado
     case 'eth_getBlockByNumber':
       if (params.length !== 2 || !blockTag(params[0]) || params[1] !== false) return invalid();
       break;
-    case 'eth_getBalance': case 'eth_getCode': case 'eth_getTransactionCount':
+    case 'eth_getBalance': case 'eth_getTransactionCount':
       if (params.length !== 2 || !hexAddress(params[0]) || !blockTag(params[1])) return invalid();
+      break;
+    case 'eth_getCode':
+      if (params.length !== 2 || !hexAddress(params[0]) || !callBlock(params[1])) return invalid();
       break;
     case 'eth_getTransactionReceipt': case 'eth_getTransactionByHash':
       if (params.length !== 1 || !hexHash(params[0])) return invalid();
@@ -290,7 +298,7 @@ async function boundedRead(connection: Connection, method: RpcReadMethod, params
   return request(connection, method, bounded);
 }
 
-/** Every read rechecks identity. Only the initial local genesis is accepted for this client. */
+/** Every read rechecks chain and the configured or initially pinned genesis. */
 export async function createVerifiedRpc(config: NetworkConfig, options: RpcOptions = {}) {
   const connection = connectionFor(config, options);
   const verification = await verify(connection);
@@ -298,9 +306,9 @@ export async function createVerifiedRpc(config: NetworkConfig, options: RpcOptio
   return {
     verification,
     readRpc: (method: RpcReadMethod, params: readonly unknown[] = []) => boundedRead(connection, method, params, pinnedGenesis),
-    /** Simulation only: never signs or submits. Restricted to the explicit disposable local profile. */
+    /** Bounded simulation only. No signing/submission; only the explicitly supported test profiles. */
     simulateCall: async (input: { from: string; to: string; data: string; value: string }, block: { number: string; hash: string }) => {
-      if (connection.mode !== 'local' || connection.chainId !== 31337) throw new RpcError('RPC_METHOD_FORBIDDEN');
+      if (!nftExecutionNetwork(connection)) throw new RpcError('RPC_METHOD_FORBIDDEN');
       let call: typeof input, anchor: typeof block;
       try { call = structuredClone(input); anchor = structuredClone(block); } catch { throw new RpcError('RPC_PARAMS_INVALID'); }
       if (!object(call) || !object(anchor) || !hexAddress(call.from) || !hexAddress(call.to) || typeof call.data !== 'string' || !DATA.test(call.data) || call.data.length > 32_770

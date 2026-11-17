@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { zeroAddress, zeroHash, type Address, type Hex } from 'viem';
+import { BASE_SEPOLIA_GENESIS_HASH, nftExecutionNetwork } from '@oneshot/evm';
 import { IndexerError, type Manifest } from './types';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -9,15 +10,17 @@ export const isData = (value: unknown): value is Hex => typeof value === 'string
 const fail = (): never => { throw new IndexerError('MANIFEST_INVALID'); };
 const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 
-/** The local phase deliberately cannot turn a guessed Zero configuration into a deployment. */
+/** Only exact supported test-network identities can become an indexed deployment. */
 export function parseManifest(input: unknown): Manifest {
   if (!object(input)) return fail();
   const guarded = input.deploymentVersion === 'oneshot-nft-v2';
   const keys = ['schemaVersion', 'deploymentVersion', 'mode', 'chainId', 'genesisHash', 'startBlock', 'anchorHash', 'factory', 'marketplace'];
   if (!exact(input, guarded ? [...keys, 'listingAuthorization'] : keys)
-    || input.schemaVersion !== 1 || (!guarded && input.deploymentVersion !== 'oneshot-nft-v1') || input.mode !== 'local' || input.chainId !== 31337
+    || input.schemaVersion !== 1 || (!guarded && input.deploymentVersion !== 'oneshot-nft-v1')
     || !isHash(input.genesisHash) || !isHash(input.anchorHash)
     || typeof input.startBlock !== 'string' || !/^[1-9]\d{0,19}$/.test(input.startBlock)) return fail();
+  const network = nftExecutionNetwork(input);
+  if (!network || network.mode === 'base-sepolia' && input.genesisHash.toLowerCase() !== BASE_SEPOLIA_GENESIS_HASH) return fail();
   const contract = (value: unknown): Manifest['factory'] => {
     if (!object(value) || !exact(value, ['address', 'codeHash']) || !isAddress(value.address)
       || value.address.toLowerCase() === zeroAddress || !isHash(value.codeHash)) return fail();
@@ -25,8 +28,9 @@ export function parseManifest(input: unknown): Manifest {
   };
   const factory = contract(input.factory), marketplace = contract(input.marketplace);
   if (factory.address === marketplace.address) return fail();
+  const identity = network.mode === 'local' ? {mode:'local' as const,chainId:31337 as const} : {mode:'base-sepolia' as const,chainId:84532 as const};
   const common = {
-    schemaVersion: 1 as const, mode: 'local' as const, chainId: 31337 as const,
+    schemaVersion: 1 as const, ...identity,
     genesisHash: input.genesisHash.toLowerCase() as Hex, startBlock: BigInt(input.startBlock),
     anchorHash: input.anchorHash.toLowerCase() as Hex, factory, marketplace,
   };

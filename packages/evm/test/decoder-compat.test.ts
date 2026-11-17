@@ -11,7 +11,7 @@ const entry = fileURLToPath(new URL('../../../vendor/decode-uri-component/index.
 const decode = require(entry) as (input: unknown) => string;
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
-// Vectors derived from upstream v0.5.0/test.js, MIT copyright Sam Verschueren.
+// Vectors derived from upstream v0.5.1/test.js, MIT copyright Sam Verschueren.
 // Its original notice is preserved in vendor/decode-uri-component/LICENSE.
 const vectors: [string, string][] = [
   ['', ''], ['test', 'test'], ['a+b', 'a+b'], ['a+b+c+d', 'a+b+c+d'],
@@ -47,14 +47,14 @@ describe('local upstream decoder CommonJS backport', () => {
   it('exports a callable CommonJS function with an honest private package version', () => {
     expect(typeof decode).toBe('function');
     const manifest = JSON.parse(readFileSync(new URL('../../../vendor/decode-uri-component/package.json', import.meta.url), 'utf8'));
-    expect(manifest).toMatchObject({ name: 'decode-uri-component', version: '0.5.0+oneshot.cjs.1', private: true, type: 'commonjs', main: './index.cjs' });
+    expect(manifest).toMatchObject({ name: 'decode-uri-component', version: '0.5.1+oneshot.cjs.1', private: true, type: 'commonjs', main: './index.cjs' });
   });
 
   it('preserves upstream source and license bytes apart from the one export adaptation', () => {
     const source = readFileSync(entry, 'utf8');
-    expect(digest(source)).toBe('684ba79779327ba789733a3a563050370a928a57eb7dd33d19b346f43b32cbb7');
+    expect(digest(source)).toBe('e82696ecdf0ee2c25bd90169cc7915e552d2ccb82a5006c55bc17aecdb55b919');
     const upstream = source.replace('module.exports = function decodeUriComponent(encodedURI) {', 'export default function decodeUriComponent(encodedURI) {');
-    expect(digest(upstream)).toBe('9401353df38f8010ad7035fe8d666bce6a4902bc1cff809afc4ab23fa2e0bdaa');
+    expect(digest(upstream)).toBe('6a86ac891edf15c5efa0841ebb31935e3669d58b98318b57d7b08a4530317cb0');
     expect(digest(readFileSync(new URL('../../../vendor/decode-uri-component/LICENSE', import.meta.url))))
       .toBe('ed7a9a0f74e43951b2520efe1a4349cb9ed5f3dff0b0f268e2e51a4d38df7ea4');
   });
@@ -85,6 +85,20 @@ describe('local upstream decoder CommonJS backport', () => {
     expect(result.elapsed).toBeLessThan(2_500);
   });
 
+  it('decodes many distinct percent runs within a process deadline without rescanning decoded output', () => {
+    const script = [
+      "const decode = require(process.argv[1]);",
+      "const start = performance.now(); let input = '';",
+      "for (let index = 0; index < 30000; index++) { const pair = index.toString(16).padStart(4, '0'); input += '%' + pair.slice(0, 2) + '%' + pair.slice(2) + '!'; }",
+      "const result = decode(input);",
+      "if (typeof result !== 'string' || !result.length) throw new Error('Missing decoded output');",
+      "if (decode('%25C2%zz') !== '%C2%zz' || decode('%25%41%zz') !== '%A%zz') throw new Error('Decoded output was rescanned');",
+      "console.log(JSON.stringify({ elapsed: performance.now() - start }));",
+    ].join('\n');
+    const result = JSON.parse(execFileSync(process.execPath, ['-e', script, entry], { timeout: 3_000, encoding: 'utf8', windowsHide: true }));
+    expect(result.elapsed).toBeLessThan(2_500);
+  });
+
   it('preserves query-string 7 query decoding and documents the upstream literal-plus fragment behavior', () => {
     const queryEntry = require.resolve('query-string');
     const upstreamRequire = createRequire(queryEntry);
@@ -105,7 +119,7 @@ describe('local upstream decoder CommonJS backport', () => {
     expect(query.parseUrl('https://example.com/?name=a+b#a+b', { parseFragmentIdentifier: true }))
       .toMatchObject({ query: { name: 'a b' }, fragmentIdentifier: 'a+b' });
     // An encoded separator causes this consumer to decode a component twice.
-    // Follow upstream 0.5.0: a newly decoded literal plus stays plus on pass two.
+    // Follow upstream 0.5.1: a newly decoded literal plus stays plus on pass two.
     expect(query.parse('items=%2B%2Ca+b', { arrayFormat: 'comma' })).toEqual({ items: ['+', 'a b'] });
   });
 });

@@ -11,11 +11,10 @@ import { getOneshotDraft, verifyPreparedOneshotSnapshot } from './oneshot-drafts
 import { ApiError } from './errors';
 import { stableJson } from './media';
 import { nftLaunchRepository, type StoredNftReview, type NftPublication } from './nft-launch-store';
-import { GUARDED_MARKETPLACE_ABI, applyProtectedFloor } from '@oneshot/evm';
+import { GUARDED_MARKETPLACE_ABI, applyProtectedFloor, nftExecutionNetwork, type NftExecutionNetwork } from '@oneshot/evm';
 import { createNftFloorPolicyService } from './nft-floor-policy';
 import { nftLaunchProgressRepository, type NftLaunchAssociation } from './nft-launch-progress-store';
 
-const network = { mode: 'local', chainId: 31337, name: 'Local Anvil', nativeSymbol: 'ETH', nativeDecimals: 18 } as const;
 const address = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(value => value.toLowerCase() as Address).refine(value => !/^0x0{40}$/.test(value));
 const uint = z.string().regex(/^[1-9]\d{0,77}$/).refine(value => /^[1-9]\d{0,77}$/.test(value) && BigInt(value) < (1n << 256n));
 const actions = ['create','configure','open','mint','approve','list','buy','cancel','claim','policy'] as const;
@@ -24,8 +23,10 @@ export const nftReviewInput = z.object({
   action: z.enum(actions), collection: address.optional(), tokenId: uint.optional(), listingId: uint.optional(),
   quantity: uint.optional(), recipient: address.optional(), price: z.string().max(118).optional(), contract: address.optional(),
   floorEnabled: z.boolean().optional(), floorPrice: z.string().max(118).optional(),
-  localEthAcknowledged: z.literal(true),
+  localEthAcknowledged: z.literal(true).optional(), testEthAcknowledged: z.literal(true).optional(),
+  expectedChainId: z.union([z.literal(31337), z.literal(84532)]).optional(),
 }).strict().superRefine((input,context) => {
+  if (!input.localEthAcknowledged && !input.testEthAcknowledged) context.addIssue({code:'custom',path:['testEthAcknowledged'],message:'Acknowledge the test-network transaction.'});
   if (Boolean(input.draftId) !== Boolean(input.expectedRevision)) context.addIssue({code:'custom',path:['draftId'],message:'Provide the draft and its expected revision together.'});
   if (['create','configure','open'].includes(input.action) && !input.draftId) context.addIssue({code:'custom',path:['draftId'],message:'Creator actions require an owned prepared draft.'});
   if (!input.draftId && !input.collection && !(input.action==='claim' && input.contract)) context.addIssue({code:'custom',path:['collection'],message:'Public checkout requires a collection, or an explicit marketplace claim contract.'});
@@ -34,8 +35,8 @@ export const nftReviewInput = z.object({
 });
 export type NftReviewInput = z.infer<typeof nftReviewInput>;
 export type NftReview = {
-  id: string; reviewHash: string; expiresAt: string; chainId: 31337; from: Address; to: Address; data: Hex; value: string;
-  action: NftReviewInput['action']; network: typeof network; summary: Record<string,string>; deploymentId: string;
+  id: string; reviewHash: string; expiresAt: string; chainId: 31337 | 84532; from: Address; to: Address; data: Hex; value: string;
+  action: NftReviewInput['action']; network: NftExecutionNetwork; summary: Record<string,string>; deploymentId: string;
   scope: 'draft' | 'public'; draftId: string; revision: number; simulation: { blockNumber: string; blockHash: Hex; gasEstimate: string };
 };
 type Rpc = Awaited<ReturnType<typeof createVerifiedRpc>>;
@@ -52,7 +53,7 @@ type Dependencies = {
 const conflict = (code: string, message: string): never => { throw new ApiError(409, code, message); };
 const record = (value: unknown): value is Record<string,unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const rpcQuantity = (value: unknown): bigint => {
-  if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][\da-fA-F]{0,63})$/.test(value)) throw new ApiError(503, 'RPC_DATA_INVALID', 'The local chain returned invalid data.');
+  if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][\da-fA-F]{0,63})$/.test(value)) throw new ApiError(503, 'RPC_DATA_INVALID', 'The test chain returned invalid data.');
   return BigInt(value);
 };
 // PostgreSQL jsonb preserves values, but deliberately does not preserve object-key order.
@@ -75,12 +76,12 @@ function parseEarningsCursor(input:string|undefined):EarningsCursor|null {
   } catch {return invalid();}
 }
 function rpcAmount(value:unknown):bigint {
-  if(typeof value!=='bigint' || value<0n || value>=2n**256n)throw new ApiError(503,'RPC_DATA_INVALID','The local chain returned an invalid amount.');
+  if(typeof value!=='bigint' || value<0n || value>=2n**256n)throw new ApiError(503,'RPC_DATA_INVALID','The test chain returned an invalid amount.');
   return value;
 }
 function rpcAddress(value:unknown):Address {
   const parsed=address.safeParse(value);
-  if(!parsed.success)throw new ApiError(503,'RPC_DATA_INVALID','The local chain returned an invalid contract reference.');
+  if(!parsed.success)throw new ApiError(503,'RPC_DATA_INVALID','The test chain returned an invalid contract reference.');
   return parsed.data;
 }
 async function loadManifest(path: string) {
@@ -93,7 +94,7 @@ async function loadManifest(path: string) {
   } finally { await file.close(); }
 }
 
-/** Derives local wallet calls; the private authority signs permits, never wallet transactions. */
+/** Derives verified test-network wallet calls; the authority signs only scoped permits. */
 export function createNftLaunchService(deps: Dependencies = {}) {
   const env = deps.environment ?? (() => process.env), now = deps.now ?? Date.now;
   const repository = deps.repository ?? nftLaunchRepository;
@@ -101,31 +102,35 @@ export function createNftLaunchService(deps: Dependencies = {}) {
   const policies = createNftFloorPolicyService(env);
   async function connect() {
     const config = env();
-    if (config.ONESHOT_LOCAL_NFT_EXECUTION_ENABLED !== 'true' || config.ONESHOT_NETWORK !== 'local') conflict('EXECUTION_DISABLED', 'Local NFT execution is disabled. Zero transactions remain unavailable.');
+    const optedIn = config.ONESHOT_NETWORK === 'local' ? config.ONESHOT_LOCAL_NFT_EXECUTION_ENABLED === 'true'
+      : config.ONESHOT_NETWORK === 'base-sepolia' && config.ONESHOT_BASE_SEPOLIA_NFT_EXECUTION_ENABLED === 'true';
+    if (!optedIn) conflict('EXECUTION_DISABLED', 'NFT transactions are currently unavailable. You can save a draft and return later.');
     const path = config.ONESHOT_INDEXER_MANIFEST_PATH;
-    if (!path) conflict('DEPLOYMENT_REQUIRED', 'Select a verified local NFT deployment manifest.');
+    if (!path) conflict('DEPLOYMENT_REQUIRED', 'NFT transactions are currently unavailable. Save your draft and check again later.');
     try {
       const manifest = await (deps.loadManifest ?? loadManifest)(path!);
-      const rpc = await (deps.rpc ?? createVerifiedRpc)(networkConfig(config));
+      const selectedConfig = networkConfig(config), network = nftExecutionNetwork(selectedConfig);
+      if (!network || manifest.mode !== network.mode || manifest.chainId !== network.chainId) throw new Error();
+      const rpc = await (deps.rpc ?? createVerifiedRpc)(selectedConfig);
       const source = new VerifiedRpcSource(rpc);
       await source.verify(manifest);
       const block = await source.block(await source.height());
-      return { manifest, rpc, source, block, deploymentId: manifestId(manifest) };
+      return { manifest, network, rpc, source, block, deploymentId: manifestId(manifest) };
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      throw new ApiError(503, 'DEPLOYMENT_UNAVAILABLE', 'The local chain, deployment anchor, and contract code must verify before execution.');
+      throw new ApiError(503, 'DEPLOYMENT_UNAVAILABLE', 'NFT transactions are temporarily unavailable. Please try again later.');
     }
   }
   async function status() {
-    try { const chain = await connect(); return {enabled:true,reason:null,network,deploymentId:chain.deploymentId}; }
-    catch (error) { return {enabled:false,reason:error instanceof ApiError ? error.message : 'Local execution is unavailable.',network:null,deploymentId:null}; }
+    try { const chain = await connect(); return {enabled:true,reason:null,network:chain.network,deploymentId:chain.deploymentId}; }
+    catch { return {enabled:false,reason:'NFT transactions are currently unavailable. You can save a draft and return later.',network:null,deploymentId:null}; }
   }
   type Chain = Awaited<ReturnType<typeof connect>>;
   async function readContract(chain: Chain, to: Address, abi: Abi, functionName: string, args: readonly unknown[] = []) {
     const value = await chain.rpc.readRpc('eth_call',[{to,data:encodeFunctionData({abi,functionName,args})},{blockHash:chain.block.hash,requireCanonical:true}]);
-    if (!isData(value)) throw new ApiError(503,'RPC_DATA_INVALID','The local chain returned invalid contract data.');
+    if (!isData(value)) throw new ApiError(503,'RPC_DATA_INVALID','The test chain returned invalid contract data.');
     try { return decodeFunctionResult({abi,functionName,data:value}); }
-    catch { throw new ApiError(503,'RPC_DATA_INVALID','The local chain returned invalid contract data.'); }
+    catch { throw new ApiError(503,'RPC_DATA_INVALID','The test chain returned invalid contract data.'); }
   }
   async function collectionState(chain: Chain, collection: Address) {
     const {manifest} = chain;
@@ -146,7 +151,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const selected = address.parse(raw), chain = await connect(), state = await collectionState(chain,selected);
     if ((await chain.source.block(chain.block.number)).hash !== chain.block.hash) conflict('CHAIN_MOVED','The collection block changed. Refresh its terms.');
     const stage = (value:NftTerms['publicMint']) => ({start:value.start.toString(),end:value.end.toString(),walletLimitRaw:value.walletLimit.toString(),priceRaw:value.price.toString()});
-    return {network,deploymentId:chain.deploymentId,collection:selected,creator:state.creator,name:state.name,symbol:state.symbol,opened:state.opened,
+    return {network:chain.network,deploymentId:chain.deploymentId,collection:selected,creator:state.creator,name:state.name,symbol:state.symbol,opened:state.opened,
       totalMintedRaw:state.totalMinted.toString(),terms:{maxSupplyRaw:state.terms.maxSupply.toString(),royaltyBps:state.terms.royaltyBps,allowlistRoot:state.terms.allowlistRoot,
         contentHash:state.terms.contentHash,metadataBaseURI:state.terms.metadataBaseURI,collectionURI:state.terms.collectionURI,
         allowlist:stage(state.terms.allowlist),publicMint:stage(state.terms.publicMint)},termsHash:state.termsHash,
@@ -173,7 +178,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const collections:NftEarningsPage['collections']=[],seen=new Set<string>();
     for(let index=offset;index<last;index++) {
       const contract=rpcAddress(await readContract(chain,chain.manifest.factory.address,NFT_FACTORY_ABI,'collections',[index]));
-      if(seen.has(contract) || contract===chain.manifest.factory.address || contract===chain.manifest.marketplace.address)throw new ApiError(503,'RPC_DATA_INVALID','The local registry returned an invalid collection reference.');
+      if(seen.has(contract) || contract===chain.manifest.factory.address || contract===chain.manifest.marketplace.address)throw new ApiError(503,'RPC_DATA_INVALID','The test registry returned an invalid collection reference.');
       seen.add(contract);
       if(await readContract(chain,chain.manifest.factory.address,NFT_FACTORY_ABI,'isCollection',[contract])!==true)conflict('COLLECTION_MISMATCH','The collection is absent from this verified factory.');
       const [collectionFactory,collectionTreasury,name,opened,pending]=await Promise.all([
@@ -182,13 +187,13 @@ export function createNftLaunchService(deps: Dependencies = {}) {
         readContract(chain,contract,NFT_COLLECTION_ABI,'pending',[from]),
       ]);
       if(rpcAddress(collectionFactory)!==chain.manifest.factory.address || rpcAddress(collectionTreasury)!==treasury)conflict('COLLECTION_MISMATCH','The collection references differ from this verified deployment.');
-      if(typeof name!=='string' || typeof opened!=='boolean')throw new ApiError(503,'RPC_DATA_INVALID','The local registry returned invalid collection data.');
+      if(typeof name!=='string' || typeof opened!=='boolean')throw new ApiError(503,'RPC_DATA_INVALID','The test registry returned invalid collection data.');
       collections.push({contract,name:name.slice(0,200),opened,amountRaw:rpcAmount(pending).toString()});
     }
     if((await chain.source.height())<block.number || (await chain.source.block(block.number)).hash!==block.hash)return moved();
     if(session.expiresAt*1000<=now())throw new ApiError(401,'AUTH_REQUIRED','Sign in again to inspect your proceeds.');
     const nextCursor=last<count?Buffer.from(JSON.stringify({v:1,deploymentId:chain.deploymentId,wallet:from,blockNumber:block.number.toString(),blockHash:block.hash,offset:last.toString(),count:count.toString()} satisfies EarningsCursor)).toString('base64url'):null;
-    return {network,deploymentId:chain.deploymentId,wallet:from,blockNumber:block.number.toString(),blockHash:block.hash,blockTimestamp:block.timestamp.toString(),
+    return {network:chain.network,deploymentId:chain.deploymentId,wallet:from,blockNumber:block.number.toString(),blockHash:block.hash,blockTimestamp:block.timestamp.toString(),
       marketplace:{contract:chain.manifest.marketplace.address,amountRaw:marketplaceAmount.toString()},collections,scannedCount:Number(last),totalCollectionsRaw:count.toString(),nextCursor};
   }
   const progressInput = z.object({ expectedRevision:z.number().int().positive(), from:address, launchId:z.string().uuid().optional(), cursor:z.string().min(1).max(2048).optional() }).strict();
@@ -208,7 +213,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const data=encodeFunctionData({abi:NFT_FACTORY_ABI,functionName:'createCollection',args:[draft.name,draft.symbol!]});
     if (!record(tx) || tx.hash!==item.createHash || typeof tx.from!=='string' || tx.from.toLowerCase()!==item.from
       || typeof tx.to!=='string' || tx.to.toLowerCase()!==chain.manifest.factory.address || !isData(tx.input) || tx.input.toLowerCase()!==data
-      || rpcQuantity(tx.value)!==0n || rpcQuantity(tx.chainId)!==31337n
+      || rpcQuantity(tx.value)!==0n || rpcQuantity(tx.chainId)!==BigInt(chain.network.chainId)
       || !record(receipt) || receipt.transactionHash!==item.createHash || receipt.blockHash!==item.blockHash
       || tx.blockHash!==receipt.blockHash || rpcQuantity(receipt.blockNumber)!==creationHeight
       || rpcQuantity(tx.blockNumber)!==creationHeight || rpcQuantity(receipt.status)!==1n || !Array.isArray(receipt.logs)) return state('mismatch');
@@ -227,7 +232,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     try { current=await collectionState(chain,item.collection as Address); }
     catch(error) { if(error instanceof ApiError && ['UNKNOWN_COLLECTION','COLLECTION_MISMATCH'].includes(error.code)) return state('mismatch'); throw error; }
     if(current.creator!==item.from || current.name!==draft.name || current.symbol!==draft.symbol) return state('mismatch');
-    const plan=prepareNftTerms(draft,{chainId:31337,nativeDecimals:18,collection:item.collection as Address,nowSeconds:0n});
+    const plan=prepareNftTerms(draft,{chainId:chain.network.chainId,nativeDecimals:chain.network.nativeDecimals,collection:item.collection as Address,nowSeconds:0n});
     const termsMatch=current.termsHash===plan.termsHash;
     if(current.opened) return state(termsMatch?'opened':'mismatch',termsMatch);
     if(plan.summary.firstStart<chain.block.timestamp) return state('schedule-expired',termsMatch);
@@ -254,7 +259,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       if(!item || !sameLaunchScope(item,scope)) throw new ApiError(404,'LAUNCH_NOT_FOUND','This launch is unavailable in this saved draft.');
       selected=await creatorProgress(chain,item,draft);
     }
-    if((await chain.source.block(chain.block.number)).hash!==chain.block.hash) conflict('CHAIN_MOVED','The local launch checkpoint changed. Refresh launch progress.');
+    if((await chain.source.block(chain.block.number)).hash!==chain.block.hash) conflict('CHAIN_MOVED','The launch checkpoint changed. Refresh launch progress.');
     if(session.expiresAt*1000<=now()) throw new ApiError(401,'AUTH_REQUIRED','Sign in again to continue this launch.');
     return {draftId,revision:draft.revision,from,deploymentId:chain.deploymentId,
       items:page.items.map(item=>({id:item.id,collection:item.collection,createHash:item.createHash,createdAt:new Date(item.createdAt).toISOString()})),
@@ -270,7 +275,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const eligible=policies.eligible(state.creator);
     if(!eligible&&!current.enabled)throw new ApiError(404,'NOT_FOUND','Settings not available.');
     if((await chain.source.block(chain.block.number)).hash!==chain.block.hash)conflict('CHAIN_MOVED','The settings block changed. Refresh settings.');
-    return {eligible,creator:state.creator,collection:selected,deploymentId:chain.deploymentId,enabled:current.enabled,floorRaw:current.floorRaw,policyCommitment:commitment,guarded:true,network};
+    return {eligible,creator:state.creator,collection:selected,deploymentId:chain.deploymentId,enabled:current.enabled,floorRaw:current.floorRaw,policyCommitment:commitment,guarded:true,network:chain.network};
   }
   function quotedCall(previous:NftReview|undefined,functionName:string) {
     if(!previous)return undefined;
@@ -300,7 +305,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if(old&&(old[3]!==nonce||old[4]!==commitment))conflict('REVIEW_CHANGED','Listing settings or the wallet nonce changed. Prepare a fresh review.');
     if(deadline<chain.block.timestamp)conflict('REVIEW_EXPIRED','This listing authorization expired. Prepare a fresh review.');
     const {authority,salt}=chain.manifest.listingAuthorization;
-    const signature=old?old[6] as Hex:await policies.signListing(to,authority,{seller:from,collection,tokenId,totalPrice:price,nonce,policyCommitment:commitment,deadline,deploymentSalt:salt});
+    const signature=old?old[6] as Hex:await policies.signListing(to,authority,{seller:from,collection,tokenId,totalPrice:price,nonce,policyCommitment:commitment,deadline,deploymentSalt:salt},chain.network.chainId);
     return {to,data:encodeFunctionData({abi:GUARDED_MARKETPLACE_ABI,functionName:'listAuthorized',args:[collection,tokenId,price,nonce,commitment,deadline,signature]}),
       summary:{enteredPriceRaw:entered.toString(),floorPriceRaw:policy.floorRaw,priceRaw:price.toString(),policyCommitment:commitment,effect:'Move this NFT into marketplace escrow at the final price shown.'}};
   }
@@ -316,7 +321,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if(!old)policies.assertAuthority(chain.manifest.listingAuthorization.authority);
     const proposed=await policies.stage(context,input.floorEnabled!,input.floorPrice!,old?.[1] as Hex|undefined);
     const {authority,salt}=chain.manifest.listingAuthorization;
-    const signature=old?old[4] as Hex:await policies.signPolicy(to,authority,{creator,collection,commitment:proposed.commitment,expectedCommitment:expected,deadline,deploymentSalt:salt});
+    const signature=old?old[4] as Hex:await policies.signPolicy(to,authority,{creator,collection,commitment:proposed.commitment,expectedCommitment:expected,deadline,deploymentSalt:salt},chain.network.chainId);
     return {to,data:encodeFunctionData({abi:GUARDED_MARKETPLACE_ABI,functionName:'setPolicyCommitment',args:[collection,proposed.commitment,expected,deadline,signature]}),
       summary:{floorEnabled:String(proposed.enabled),floorPriceRaw:proposed.floorRaw,policyCommitment:proposed.commitment,previousCommitment:expected,effect:'Applies to new listings. Existing orders keep their approved prices.'}};
   }
@@ -330,7 +335,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       if(amount===0n)conflict('NOTHING_TO_CLAIM','This wallet has no pending proceeds at the marketplace.');
       const data=encodeFunctionData({abi:NFT_MARKETPLACE_ABI,functionName:'claimTo',args:[recipient]});
       return {scope:'public' as const,draftId:to,revision:0,from,to,data,value:'0',action:input.action,
-        summary:{contract:to,recipient,claimAmountRaw:amount.toString(),nativeAsset:'Local ETH (18 decimals)',effect:'Claim this wallet’s aggregate marketplace proceeds.'}};
+        summary:{contract:to,recipient,claimAmountRaw:amount.toString(),nativeAsset:`${chain.network.name} test ETH (18 decimals)`,effect:'Claim this wallet’s aggregate marketplace proceeds.'}};
     }
     const collection = input.collection!, {manifest,block} = chain, state = await collectionState(chain,collection);
     if (!state.opened && input.action!=='policy') conflict('NOT_OPEN','This collection has not opened its frozen mint terms.');
@@ -341,7 +346,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
       if (input[key] === undefined) throw new ApiError(400,'FIELD_REQUIRED',`Provide ${key} for this action.`);
       return input[key]!;
     };
-    const summary:Record<string,string> = {name:state.name,symbol:state.symbol,creator:state.creator,collection,nativeAsset:'Local ETH (18 decimals)',
+    const summary:Record<string,string> = {name:state.name,symbol:state.symbol,creator:state.creator,collection,nativeAsset:`${chain.network.name} test ETH (18 decimals)`,
       maxSupply:state.terms.maxSupply.toString(),royaltyBps:String(state.terms.royaltyBps),contentHash:state.terms.contentHash,termsHash:state.termsHash};
     let to:Address = collection, data:Hex, value=0n;
     switch(input.action) {
@@ -358,7 +363,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
         if (activeAllowlist) {
           const publication=await repository.publication(`${chain.deploymentId}:${collection}`);
           if (!publication || publication.termsHash !== state.termsHash) conflict('PROOF_UNAVAILABLE','The creator must confirm this collection opening before allowlist checkout is available.');
-          const plan=prepareNftTerms(publication!.draft,{chainId:31337,nativeDecimals:18,collection,nowSeconds:0n});
+          const plan=prepareNftTerms(publication!.draft,{chainId:chain.network.chainId,nativeDecimals:chain.network.nativeDecimals,collection,nowSeconds:0n});
           if (plan.termsHash!==state.termsHash || plan.summary.creator!==state.creator) conflict('PROOF_UNAVAILABLE','The saved allowlist does not match the frozen collection.');
           proof=plan.allowlist.proofs[from];
           if (!proof) conflict('NOT_ALLOWLISTED','The selected wallet is absent from this allowlist.');
@@ -415,17 +420,25 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if (session.expiresAt * 1000 <= now()) throw new ApiError(401,'AUTH_REQUIRED','Sign in again before reviewing a transaction.');
     const from = assertLinkedEvmAddress(session,input.from);
     const chain = await connect();
+    if (input.expectedChainId !== undefined && input.expectedChainId !== chain.network.chainId
+      || chain.network.mode === 'base-sepolia' && (input.localEthAcknowledged === true || input.testEthAcknowledged !== true || input.expectedChainId !== 84532)
+      || chain.network.mode === 'local' && !input.localEthAcknowledged && !(input.testEthAcknowledged && input.expectedChainId === 31337)) {
+      conflict('NETWORK_ACKNOWLEDGMENT_REQUIRED','Review the selected test network and acknowledge its test ETH before continuing.');
+    }
     if (!input.draftId) {
       const call=await publicCall(input,from,chain,previous);
       let simulation:Awaited<ReturnType<Rpc['simulateCall']>>;
       try { simulation=await chain.rpc.simulateCall({from,to:call.to,data:call.data,value:hex(BigInt(call.value))},{number:hex(chain.block.number),hash:chain.block.hash}); }
-      catch { return conflict('SIMULATION_FAILED','The exact transaction could not execute at the reviewed local block. Refresh balances, approvals, listing state and schedule before trying again.'); }
+      catch { return conflict('SIMULATION_FAILED','The exact transaction could not execute at the reviewed block. Refresh balances, approvals, listing state and schedule before trying again.'); }
       if ((await chain.source.block(chain.block.number)).hash!==chain.block.hash) conflict('CHAIN_MOVED','The simulated block changed. Build a fresh review.');
       if (session.expiresAt*1000<=now()) throw new ApiError(401,'AUTH_REQUIRED','Sign in again before reviewing a transaction.');
-      return {...call,chainId:31337 as const,network,deploymentId:chain.deploymentId,
+      return {...call,chainId:chain.network.chainId,network:chain.network,deploymentId:chain.deploymentId,
         simulation:{blockNumber:chain.block.number.toString(),blockHash:chain.block.hash,gasEstimate:simulation.gasEstimate},publicationDraft:undefined as NftLaunchDraft|undefined};
     }
     const draft = await (deps.getDraft ?? getOneshotDraft)(input.draftId,session);
+    if (chain.network.mode === 'base-sepolia' && draft.pricingNetwork !== 'base-sepolia') {
+      conflict('DRAFT_PRICING_NETWORK_MISMATCH','Copy this draft into a new Base Sepolia draft and review its ETH prices before launching.');
+    }
     if (draft.revision !== input.expectedRevision) conflict('DRAFT_CHANGED','Reload the current draft before reviewing another transaction.');
     await (deps.verifySnapshot ?? verifyPreparedOneshotSnapshot)(draft);
     const {manifest,rpc,source,block} = chain;
@@ -433,7 +446,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const read = async (to: Address, abi: Abi, functionName: string, args: readonly unknown[] = []) => {
       const data = encodeFunctionData({abi,functionName,args});
       const value = await rpc.readRpc('eth_call',[{to,data},blockTag]);
-      if (!isData(value)) throw new ApiError(503,'RPC_DATA_INVALID','The local chain returned invalid contract data.');
+      if (!isData(value)) throw new ApiError(503,'RPC_DATA_INVALID','The test chain returned invalid contract data.');
       return decodeFunctionResult({abi,functionName,data:value});
     };
     const creatorAction = ['create','configure','open'].includes(input.action);
@@ -442,11 +455,11 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     // A nonzero placeholder is used only to check pre-creation fields; roots are rebuilt for the actual collection.
     const collection = input.collection ?? manifest.factory.address;
     let plan: ReturnType<typeof prepareNftTerms>;
-    try { plan = prepareNftTerms(draft,{chainId:31337,nativeDecimals:18,collection,nowSeconds:creatorAction ? block.timestamp : 0n}); }
+    try { plan = prepareNftTerms(draft,{chainId:chain.network.chainId,nativeDecimals:chain.network.nativeDecimals,collection,nowSeconds:creatorAction ? block.timestamp : 0n}); }
     catch (error) { if (error instanceof NftLaunchError) conflict(error.code,error.message); throw error; }
     const summary: Record<string,string> = {
       name: draft.name, symbol: plan.summary.symbol, creator,
-      nativeAsset: 'Local ETH (18 decimals)', maxSupply: String(draft.maxSupply), royaltyBps: String(draft.royaltyBps),
+      nativeAsset: `${chain.network.name} test ETH (18 decimals)`, maxSupply: String(draft.maxSupply), royaltyBps: String(draft.royaltyBps),
       contentHash: draft.snapshot!.contentHash,
     };
     let to: Address = collection, data: Hex, value = 0n;
@@ -546,7 +559,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     }
     let simulation: Awaited<ReturnType<Rpc['simulateCall']>>;
     try { simulation = await rpc.simulateCall({from,to,data,value:hex(value)},{number:hex(block.number),hash:block.hash}); }
-    catch { conflict('SIMULATION_FAILED','The exact transaction could not execute at the reviewed local block. Refresh chain state, balances, approvals and schedule before trying again.'); }
+    catch { conflict('SIMULATION_FAILED','The exact transaction could not execute at the reviewed block. Refresh chain state, balances, approvals and schedule before trying again.'); }
     if ((await source.block(block.number)).hash !== block.hash) conflict('CHAIN_MOVED','The simulated block changed. Build a fresh review.');
     // Detect an archive/revision change during RPC awaits, before returning a signable review.
     const latestDraft = await (deps.getDraft ?? getOneshotDraft)(input.draftId,session);
@@ -554,11 +567,12 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     if (session.expiresAt * 1000 <= now()) throw new ApiError(401,'AUTH_REQUIRED','Sign in again before reviewing a transaction.');
     const publicationDraft:NftLaunchDraft|undefined=input.action==='open'?{
       status:'prepared',name:draft.name,symbol:draft.symbol,maxSupply:draft.maxSupply,royaltyBps:draft.royaltyBps,
+      ...(draft.pricingNetwork ? {pricingNetwork:draft.pricingNetwork} : {}),
       publicPrice:draft.publicPrice,allowlistPrice:draft.allowlistPrice,perWalletLimit:draft.perWalletLimit,
       publicStart:draft.publicStart,publicEnd:draft.publicEnd,allowlistStart:draft.allowlistStart,allowlistEnd:draft.allowlistEnd,
       allowlistAddresses:[...draft.allowlistAddresses],creatorWallet:draft.creatorWallet,snapshot:{...draft.snapshot!},
     }:undefined;
-    return {scope:'draft' as const,chainId:31337 as const,from,to,data,value:value.toString(),action:input.action,network,summary,
+    return {scope:'draft' as const,chainId:chain.network.chainId,from,to,data,value:value.toString(),action:input.action,network:chain.network,summary,
       deploymentId:chain.deploymentId,draftId:draft.id,revision:draft.revision,
       simulation:{blockNumber:block.number.toString(),blockHash:block.hash,gasEstimate:simulation!.gasEstimate},publicationDraft};
   }
@@ -621,7 +635,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     const stored = await owned(id,undefined,session,true), reviewed = stored.review;
     if (stored.transactionHash && stored.transactionHash !== hash) conflict('TRANSACTION_CHANGED','This review is already tracking a different transaction.');
     const chain = await connect();
-    if (chain.deploymentId !== reviewed.deploymentId) conflict('DEPLOYMENT_CHANGED','This receipt belongs to another local deployment.');
+    if (chain.deploymentId !== reviewed.deploymentId || chain.network.chainId !== reviewed.chainId) conflict('DEPLOYMENT_CHANGED','This receipt belongs to another test deployment.');
     const tx = await chain.rpc.readRpc('eth_getTransactionByHash',[hash]);
     if (tx === null) {
       await repository.bindHash(id,session.userId,hash,now());
@@ -630,7 +644,7 @@ export function createNftLaunchService(deps: Dependencies = {}) {
     }
     if (!record(tx) || typeof tx.from !== 'string' || typeof tx.to !== 'string' || !isData(tx.input)
       || tx.from.toLowerCase() !== reviewed.from || tx.to.toLowerCase() !== reviewed.to || tx.input.toLowerCase() !== reviewed.data.toLowerCase()
-      || rpcQuantity(tx.value).toString() !== reviewed.value || rpcQuantity(tx.chainId) !== 31337n || tx.hash !== hash) return conflict('TRANSACTION_MISMATCH','This transaction does not match the reviewed sender, destination, data, value and chain.');
+      || rpcQuantity(tx.value).toString() !== reviewed.value || rpcQuantity(tx.chainId) !== BigInt(chain.network.chainId) || tx.hash !== hash) return conflict('TRANSACTION_MISMATCH','This transaction does not match the reviewed sender, destination, data, value and chain.');
     await repository.bindHash(id,session.userId,hash,now());
     const result = await chain.rpc.readRpc('eth_getTransactionReceipt',[hash]);
     if (result === null) { await repository.setOutcome(id,hash,'submitted',now()); return {status:'pending' as const,hash}; }

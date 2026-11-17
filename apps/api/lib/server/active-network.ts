@@ -10,9 +10,9 @@ function statusNetwork(env: Record<string, string | undefined>) {
   catch {
     const mode = env.ONESHOT_NETWORK || 'zero';
     return {
-      mode: mode === 'zero' || mode === 'local' ? mode : 'invalid',
-      name: mode === 'local' ? 'Local Anvil (not Zero)' : mode === 'zero' ? 'Zero' : 'Unknown',
-      chainId: null, nativeSymbol: mode === 'local' ? 'ETH' : mode === 'zero' ? 'ZRO' : null,
+      mode: mode === 'zero' || mode === 'local' || mode === 'base-sepolia' ? mode : 'invalid',
+      name: mode === 'local' ? 'Local Anvil (not Zero)' : mode === 'base-sepolia' ? 'Base Sepolia' : mode === 'zero' ? 'Zero' : 'Unknown',
+      chainId: null, nativeSymbol: mode === 'local' || mode === 'base-sepolia' ? 'ETH' : mode === 'zero' ? 'ZRO' : null,
       nativeDecimals: null, explorerUrl: null, configurationValid: false, configurationReady: false,
       missing: ['Network configuration is invalid. Review the network profile, RPC URL, chain ID, genesis hash and native precision.'],
     };
@@ -28,9 +28,9 @@ export function oneshotStatus(env: Record<string, string | undefined> = process.
     auth,
     accountDrafts: { implemented: true, configured: auth.configured && databaseConfigured },
     metadata: { implemented: true, publicOriginConfigured: publicApiOriginConfigured(env) },
-    networkConfig: config, stage: production ? 'production' : 'development', readonly: true, executionScope: 'Zero',
+    networkConfig: config, stage: production ? 'production' : 'development', readonly: true, executionScope: config.mode === 'base-sepolia' ? 'Base Sepolia' : 'Zero',
     contracts: { nftPackage: null, tokenPackage: null, treasury: null },
-    features: { nftLaunch: { enabled: false, reason: deploymentReason }, marketplace: { enabled: false, reason: deploymentReason }, tokenLaunch: { enabled: false, reason: marketReason }, trading: { enabled: false, reason: 'ATLAS integration is a later release.' } },
+    features: { nftLaunch: { enabled: false, reason: config.mode === 'base-sepolia' ? 'A verified Base Sepolia NFT deployment and receipt path are required.' : deploymentReason }, marketplace: { enabled: false, reason: config.mode === 'base-sepolia' ? 'A verified Base Sepolia NFT deployment and receipt path are required.' : deploymentReason }, tokenLaunch: { enabled: false, reason: config.mode === 'base-sepolia' ? 'A verified Base Sepolia AMM and token launch/custody proof are required.' : marketReason }, trading: { enabled: false, reason: 'Token trading is a later release.' } },
     indexer: { configured: false, lagSeconds: null }, dex: { name: 'Pending verification', defaultFeeBps: 25, verified: false },
     // Configuration flags only; no connection or storage availability is claimed.
     storage: { configured: databaseConfigured && (!production || Boolean(env.S3_BUCKET)), mode: env.S3_BUCKET ? 'object-storage' : production ? 'not-configured' : 'local-development' },

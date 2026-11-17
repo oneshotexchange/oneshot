@@ -145,6 +145,19 @@ contract OneshotTokenFoundationTest {
         vm.chainId(31_337);
     }
 
+    function testLegacyFoundationStillRejectsBaseSepolia() public {
+        vm.chainId(84532);
+        bytes memory expected = abi.encodeWithSelector(OneshotLocalOnly.LocalDevelopmentOnly.selector, uint256(84532));
+        vm.expectRevert(expected);
+        new OneshotTokenFoundationFactory(TREASURY);
+        vm.expectRevert(expected);
+        new OneshotFixedSupplyToken("local allocation only", "LOCAL");
+        vm.expectRevert(expected);
+        new OneshotTokenFoundation(
+            "local allocation only", "LOCAL", CREATOR, TREASURY, 300, OneshotLaunchPolicy.DestinationMode.Creator, 1
+        );
+    }
+
     function testRejectsInvalidMetadataAndPlatformRecipient() public {
         vm.expectRevert(abi.encodeWithSelector(OneshotTokenFoundationFactory.InvalidPlatformRecipient.selector));
         new OneshotTokenFoundationFactory(address(0));

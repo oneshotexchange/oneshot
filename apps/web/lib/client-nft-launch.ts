@@ -2,18 +2,20 @@ import { serviceMessage } from './service-message';
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
 import { createNftPendingStore } from './client-nft-recovery';
-import type { NftCreatorWorkspace, NftEarningsPage } from '@oneshot/evm';
+import { isSupportedNftChainId, type NftCreatorWorkspace, type NftEarningsPage } from '@oneshot/evm';
+import { readNftNetwork, validNftTestAcknowledgement, type NftChainId } from './nft-network';
 
 export type NftLaunchAction = 'create' | 'configure' | 'open' | 'mint' | 'approve' | 'list' | 'buy' | 'cancel' | 'claim' | 'policy';
-export type LocalLaunchNetwork = { chainId: 31337; nativeSymbol: 'ETH'; nativeDecimals: 18; name?: string };
+export type LocalLaunchNetwork = { chainId: NftChainId; nativeSymbol: 'ETH'; nativeDecimals: 18; name?: string; mode?: 'local' | 'base-sepolia' };
 export type NftLaunchStatus = { enabled: boolean; reason: string | null; network: LocalLaunchNetwork | null; deploymentId: string | null };
 export type NftLaunchRequest = {
-  draftId?: string; expectedRevision?: number; from: string; action: NftLaunchAction; localEthAcknowledged: true;
+  draftId?: string; expectedRevision?: number; from: string; action: NftLaunchAction; localEthAcknowledged?: true;
+  testEthAcknowledged?: true; expectedChainId?: NftChainId;
   collection?: string; tokenId?: string; listingId?: string; quantity?: string; recipient?: string; price?: string; contract?: string;
   floorEnabled?: boolean; floorPrice?: string;
 };
 export type NftLaunchReview = {
-  id: string; reviewHash: string; expiresAt: string; chainId: 31337; from: string; to: string; data: string; value: string;
+  id: string; reviewHash: string; expiresAt: string; chainId: NftChainId; from: string; to: string; data: string; value: string;
   action: NftLaunchAction; network: LocalLaunchNetwork; summary: Record<string, string>; deploymentId: string; draftId: string; revision: number;
   simulation: { blockNumber: string; blockHash: string; gasEstimate: string };
   scope?: 'draft' | 'public';
@@ -27,7 +29,7 @@ export type PublicNftCollection = {
 };
 export type NftLaunchReceipt = { status: 'pending' | 'confirmed' | 'reverted'; collection?: string; hash?: string; blockNumber?: string; [key: string]: unknown };
 export type EvmWalletTransaction = {
-  chainId: 31337; from: string; to: string; data: string; value: string; expectedIdentityScope: string; expiresAt: string;
+  chainId: NftChainId; from: string; to: string; data: string; value: string; expectedIdentityScope: string; expiresAt: string;
 };
 export type NftLaunchContext = { identityScope: string | null; address: string | null; chainId: number | null; draftId: string; revision: number; prepared: boolean; deploymentId?: string | null; scope?: 'draft'|'public'; userId?: string | null; selectionKey?: string; termsHash?: string | null };
 export type NftLaunchState = {
@@ -50,13 +52,9 @@ export function validateNftLaunchStatus(input: unknown): NftLaunchStatus {
   }
   if (!value.network || typeof value.network !== 'object' || Array.isArray(value.network)
     || typeof value.deploymentId !== 'string' || !/^[a-f\d]{64}$/i.test(value.deploymentId) || value.reason !== null) return invalid();
-  const network = value.network as Record<string, unknown>;
-  if (network.chainId !== 31337 || network.nativeSymbol !== 'ETH' || network.nativeDecimals !== 18
-    || network.mode !== undefined && network.mode !== 'local'
-    || network.name !== undefined && (typeof network.name !== 'string' || network.name.length > 200)) return invalid();
-  return { enabled: true, reason: null, deploymentId: value.deploymentId.toLowerCase(), network: {
-    chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18, ...(typeof network.name === 'string' ? { name: network.name } : {}),
-  } };
+  const network = readNftNetwork(value.network);
+  if (!network) return invalid();
+  return { enabled: true, reason: null, deploymentId: value.deploymentId.toLowerCase(), network };
 }
 export function createNftLaunchApi(options: { identityScope(): string | null; getAccessToken(): Promise<string | null>; fetcher?: typeof fetch }) {
   const fetcher = options.fetcher || fetch;
@@ -121,7 +119,7 @@ const unsignedPattern = /^(0|[1-9]\d*)$/;
 export function validatePublicNftCollection(value: PublicNftCollection, collection: string): PublicNftCollection {
   const raw = (input: unknown) => typeof input === 'string' && input.length <= 78 && unsignedPattern.test(input) && BigInt(input) < (1n << 256n);
   const stage = (input: PublicNftStage) => input && raw(input.start) && raw(input.end) && raw(input.walletLimitRaw) && raw(input.priceRaw);
-  if (!value || value.network?.chainId !== 31337 || value.network?.nativeSymbol !== 'ETH' || value.network.nativeDecimals !== 18
+  if (!value || !readNftNetwork(value.network)
     || !value.deploymentId || !addressPattern.test(value.collection) || value.collection.toLowerCase() !== collection.toLowerCase() || !addressPattern.test(value.creator)
     || typeof value.name !== 'string' || typeof value.symbol !== 'string' || typeof value.opened !== 'boolean'
     || !raw(value.totalMintedRaw) || !raw(value.blockNumber) || !raw(value.blockTimestamp) || !hashPattern.test(value.blockHash) || !hashPattern.test(value.termsHash)
@@ -137,7 +135,8 @@ function isRejection(error: unknown): boolean {
   return value?.code === 4001 || value?.code === '4001' || value?.code === 'ACTION_REJECTED' || /user (rejected|denied)|request rejected/i.test(value?.message || '') || Boolean(value?.cause && isRejection(value.cause));
 }
 function assertReview(review: NftLaunchReview, context: NftLaunchContext, now: number, recovery = false) {
-  if (!review || !review.id || !hashPattern.test(review.reviewHash) || !review.deploymentId || review.chainId !== 31337 || review.network?.chainId !== 31337 || review.network.nativeSymbol !== 'ETH' || review.network.nativeDecimals !== 18) throw new NftLaunchError('This review is not for a supported test ETH transaction.', 'INVALID_REVIEW');
+  if (!review || !review.id || !hashPattern.test(review.reviewHash) || !review.deploymentId || !isSupportedNftChainId(review.chainId) || !readNftNetwork(review.network) || review.network.chainId !== review.chainId) throw new NftLaunchError('This review is not for a supported test ETH transaction.', 'INVALID_REVIEW');
+  if (review.chainId !== context.chainId) throw new NftLaunchError('The reviewed network does not match your selected wallet. Prepare a new review.', 'IDENTITY_CHANGED');
   if (!review.summary || typeof review.summary !== 'object' || Array.isArray(review.summary) || Object.values(review.summary).some(value => typeof value !== 'string')) throw new NftLaunchError('The transaction summary could not be verified. Prepare a new review.', 'INVALID_REVIEW');
   if (!addressPattern.test(review.from) || review.from.toLowerCase() !== context.address?.toLowerCase() || !addressPattern.test(review.to) || !/^0x(?:[\da-f]{2})*$/i.test(review.data) || !unsignedPattern.test(review.value) || BigInt(review.value) >= 2n ** 256n || !unsignedPattern.test(review.simulation?.gasEstimate || '') || !hashPattern.test(review.simulation?.blockHash || '')) throw new NftLaunchError('The wallet, transaction details or gas estimate could not be verified. Prepare a new review.', 'INVALID_REVIEW');
   if (!recovery && (review.draftId !== context.draftId || review.revision !== context.revision || (review.scope || 'draft') !== (context.scope || 'draft'))) throw new NftLaunchError('This draft or collection changed. Prepare a new review.', 'IDENTITY_CHANGED');
@@ -177,7 +176,7 @@ export function createNftLaunchController(options: {
   }
   function ready() {
     const context = options.context();
-    if (!context.identityScope || !context.address || context.chainId !== 31337 || !context.prepared) throw new NftLaunchError('Check the collection terms and connect your wallet to the test network (31337).', 'IDENTITY_CHANGED');
+    if (!context.identityScope || !context.address || !isSupportedNftChainId(context.chainId) || !context.prepared) throw new NftLaunchError('Check the collection terms and connect your wallet to its test network.', 'IDENTITY_CHANGED');
     return context;
   }
   function unresolvedTransaction() { return state.hash !== null && state.receipt?.status !== 'confirmed' && state.receipt?.status !== 'reverted'; }
@@ -220,7 +219,7 @@ export function createNftLaunchController(options: {
           ? input.draftId === undefined && input.expectedRevision === undefined && (input.collection?.toLowerCase() === context.draftId.toLowerCase()
             || input.action === 'claim' && input.collection === undefined && addressPattern.test(input.contract || '') && input.contract?.toLowerCase() === context.draftId.toLowerCase())
           : input.draftId === context.draftId && input.expectedRevision === context.revision;
-        if (input.localEthAcknowledged !== true || !sameTarget || input.from.toLowerCase() !== context.address?.toLowerCase()) throw new NftLaunchError('Confirm that you are using test ETH and the selected collection and wallet.', 'INVALID_REQUEST');
+        if (!validNftTestAcknowledgement(input, context.chainId) || !sameTarget || input.from.toLowerCase() !== context.address?.toLowerCase()) throw new NftLaunchError('Confirm that you are using test ETH on the reviewed network with the selected collection and wallet.', 'INVALID_REQUEST');
         const review = await options.api.review(input);
         if (!active(ticket, captured)) return;
         assertReview(review, context, now());
@@ -242,7 +241,7 @@ export function createNftLaunchController(options: {
         set({ ...state, review: fresh, phase: 'signing' });
         const hash = await options.sendEvmTransaction({ from: fresh.from, to: fresh.to, data: fresh.data, value: fresh.value, chainId: fresh.chainId, expectedIdentityScope: context.identityScope!, expiresAt: fresh.expiresAt });
         if (!hashPattern.test(hash)) throw new NftLaunchError('The wallet did not return a valid transaction hash.', 'INVALID_HASH');
-        if (context.userId) pending.remember({userId:context.userId,from:fresh.from,deploymentId:fresh.deploymentId,reviewId:fresh.id,reviewHash:fresh.reviewHash,hash,createdAt:new Date(now()).toISOString()});
+        if (context.userId) pending.remember({chainId:fresh.chainId,userId:context.userId,from:fresh.from,deploymentId:fresh.deploymentId,reviewId:fresh.id,reviewHash:fresh.reviewHash,hash,createdAt:new Date(now()).toISOString()});
         if (!active(ticket, captured)) return;
         set({ ...state, hash, phase: 'submitted', message: 'Your transaction was submitted to the test network.' });
         if (options.api.submitted) await options.api.submitted({reviewId:fresh.id,reviewHash:fresh.reviewHash,hash});
@@ -287,16 +286,16 @@ export async function sendReviewedEvmTransaction(options: {
     if (!Number.isFinite(Date.parse(tx.expiresAt)) || Date.parse(tx.expiresAt) <= now()) throw new NftLaunchError('This review expired. Prepare a new review.', 'REVIEW_EXPIRED');
   };
   assertCurrent();
-  if (tx.chainId !== 31337 || !addressPattern.test(tx.from) || !addressPattern.test(tx.to) || !/^0x(?:[\da-f]{2})*$/i.test(tx.data) || !unsignedPattern.test(tx.value) || BigInt(tx.value) >= 2n ** 256n) throw new NftLaunchError('Only reviewed test ETH transactions are supported.', 'INVALID_REVIEW');
+  if (!isSupportedNftChainId(tx.chainId) || !addressPattern.test(tx.from) || !addressPattern.test(tx.to) || !/^0x(?:[\da-f]{2})*$/i.test(tx.data) || !unsignedPattern.test(tx.value) || BigInt(tx.value) >= 2n ** 256n) throw new NftLaunchError('Only reviewed test ETH transactions are supported.', 'INVALID_REVIEW');
   const provider = await options.getProvider(); assertCurrent();
   const chainId = await provider.request({ method: 'eth_chainId' }); assertCurrent();
-  if (typeof chainId !== 'string' || !/^0x[\da-f]+$/i.test(chainId) || BigInt(chainId) !== 31337n) throw new NftLaunchError('Switch your wallet to the test network (31337) and prepare a new review.', 'IDENTITY_CHANGED');
+  if (typeof chainId !== 'string' || !/^0x[\da-f]+$/i.test(chainId) || BigInt(chainId) !== BigInt(tx.chainId)) throw new NftLaunchError('Switch your wallet to the reviewed test network and prepare a new review.', 'IDENTITY_CHANGED');
   const accounts = await provider.request({ method: 'eth_accounts' }); assertCurrent();
   if (!Array.isArray(accounts) || !accounts.some(account => typeof account === 'string' && account.toLowerCase() === tx.from.toLowerCase())) throw new NftLaunchError('The reviewed sender is no longer available in your wallet.', 'IDENTITY_CHANGED');
   // Recheck the network after account discovery before the only signing request.
   const finalChainId = await provider.request({ method: 'eth_chainId' }); assertCurrent();
   if (finalChainId !== chainId) throw new NftLaunchError('Your wallet network changed. Prepare a new review.', 'IDENTITY_CHANGED');
-  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, chainId: '0x7a69' }] });
+  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, chainId: `0x${BigInt(tx.chainId).toString(16)}` }] });
   // Once submitted, retain the hash even if an already-open wallet prompt crossed expiry.
   if (typeof hash !== 'string' || !hashPattern.test(hash)) throw new NftLaunchError('The wallet did not return a valid transaction hash.', 'INVALID_HASH');
   // The controller stores this broadcast under the captured owner before suppressing stale UI.

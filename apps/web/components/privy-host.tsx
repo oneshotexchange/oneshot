@@ -7,10 +7,12 @@ import { sendReviewedEvmTransaction, type EvmWalletTransaction } from '../lib/cl
 import { emptyPrivyIdentity, evmAddress, privyIdentityScope, projectPrivyIdentity, scopedPrivyAccessToken, type PrivyUserIdentity, type PrivyWalletCandidate } from '../lib/privy-wallet-state';
 import { useTheme } from './theme-provider';
 import { OneshotLogo } from './brand';
+import { anvil, baseSepolia } from 'viem/chains';
 
-// Ethereum identities are usable before chain integration; no invented Zero chain
-// or alternative-chain transaction configuration is installed here.
+// Wallet connectivity is limited to explicit test chains; transaction reviews still verify the deployment independently.
 const privyConfig: PrivyClientConfig = {
+  defaultChain: baseSepolia,
+  supportedChains: [baseSepolia, anvil],
   appearance: { theme: 'dark', accentColor: '#E6B85C', logo: <OneshotLogo />, walletChainType: 'ethereum-only', showWalletLoginFirst: true },
   loginMethods: ['wallet', 'email', 'twitter'],
   embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },

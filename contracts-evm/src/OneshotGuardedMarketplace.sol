@@ -10,7 +10,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {OneshotNFTFactory} from "./OneshotNFTFactory.sol";
 import {OneshotCollection} from "./OneshotCollection.sol";
 
-/// @notice Local-only escrow marketplace requiring a server-authorized price for every new listing.
+/// @notice Testnet escrow marketplace requiring a server-authorized price for every new listing.
 /// @dev Authorization controls admission only. Settlement, seller exits and claims never depend on it.
 contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
     uint256 public constant PLATFORM_FEE_BPS = 200;
@@ -18,6 +18,7 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
     address public immutable treasury;
     address public immutable listingAuthority;
     bytes32 public immutable deploymentSalt;
+    uint256 public immutable deploymentChainId;
     mapping(address => uint256) public listingNonces;
     mapping(address => bytes32) public policyCommitment;
     mapping(bytes32 => bool) private _usedPolicyPermits;
@@ -60,7 +61,7 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
     error InvalidRoyalty();
     error NothingToClaim();
     error PaymentFailed();
-    error LocalChainOnly();
+    error UnsupportedTestChain(uint256 chainId);
     error InvalidListingAuthority();
     error InvalidDeploymentSalt();
     error AuthorizationExpired();
@@ -94,7 +95,8 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
     constructor(OneshotNFTFactory factory_, address listingAuthority_, bytes32 deploymentSalt_)
         EIP712("OneshotGuardedMarketplace", "1")
     {
-        if (block.chainid != 31337) revert LocalChainOnly();
+        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+        deploymentChainId = block.chainid;
         if (listingAuthority_ == address(0)) revert InvalidListingAuthority();
         if (deploymentSalt_ == bytes32(0)) revert InvalidDeploymentSalt();
         if (address(factory_).code.length == 0) revert InvalidFactory();
@@ -116,7 +118,7 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
         uint256 deadline,
         bytes calldata signature
     ) external nonReentrant returns (uint256 listingId) {
-        if (block.chainid != 31337) revert LocalChainOnly();
+        if (block.chainid != deploymentChainId) revert UnsupportedTestChain(block.chainid);
         if (!factory.isCollection(collection)) revert UnknownCollection();
         if (totalPrice == 0) revert InvalidPrice();
         if (block.timestamp > deadline) revert AuthorizationExpired();
@@ -151,7 +153,7 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
         uint256 deadline,
         bytes calldata signature
     ) external nonReentrant {
-        if (block.chainid != 31337) revert LocalChainOnly();
+        if (block.chainid != deploymentChainId) revert UnsupportedTestChain(block.chainid);
         if (!factory.isCollection(collection)) revert UnknownCollection();
         if (OneshotCollection(collection).creator() != msg.sender) revert OnlyCreator();
         if (block.timestamp > deadline) revert AuthorizationExpired();

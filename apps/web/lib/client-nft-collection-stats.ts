@@ -1,4 +1,5 @@
 import { formatIndexedAmount } from '@oneshot/evm';
+import { readNftNetwork } from './nft-network';
 
 export type NftCollectionMarketStatsView = {
   activeListings: string;
@@ -20,7 +21,7 @@ export function nftCollectionMarketStats(response: unknown, expectedCollection: 
   if (!address(expectedCollection) || !address(collection?.address) || collection.address.toLowerCase() !== expectedCollection.toLowerCase() || !integer(collection.totalMinted)
     || context?.enabled !== true || context.available !== true || context.readonly !== true || context.finalized !== false
     || !deployment(context.deploymentId) || (expectedDeployment !== undefined && (!deployment(expectedDeployment) || context.deploymentId !== expectedDeployment))
-    || network?.mode !== 'local' || network.chainId !== 31337 || network.nativeSymbol !== 'ETH' || network.nativeDecimals !== 18
+    || !readNftNetwork(network)
     || !integer(checkpoint?.number) || typeof checkpoint.hash !== 'string' || !/^0x[\da-f]{64}$/i.test(checkpoint.hash)
     || !stats || !integer(stats.activeListings) || !integer(stats.completedSales) || !integer(stats.secondaryVolumeRaw)) return null;
 

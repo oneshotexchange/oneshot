@@ -1,5 +1,6 @@
 import type { NftEarningsPage } from '@oneshot/evm';
 import type { NftLaunchStatus } from './client-nft-launch';
+import { readNftNetwork, type NftChainId } from './nft-network';
 
 export type NftEarningsAccess = 'checking' | 'unavailable' | 'sign-in' | 'wallet' | 'network' | 'ready';
 
@@ -11,14 +12,13 @@ export function nftEarningsAccess(input: {
   if (input.failed) return 'unavailable';
   if (!input.status) return 'checking';
   const status = input.status;
-  if (!status.enabled || status.network?.chainId !== 31337 || status.network.nativeSymbol !== 'ETH'
-    || status.network.nativeDecimals !== 18 || !status.deploymentId || !/^[a-f\d]{64}$/i.test(status.deploymentId)) return 'unavailable';
+  if (!status.enabled || !readNftNetwork(status.network) || !status.deploymentId || !/^[a-f\d]{64}$/i.test(status.deploymentId)) return 'unavailable';
   if (!input.authenticated) return 'sign-in';
   if (!input.connected || !input.identity || !input.wallet || !/^0x[a-f\d]{40}$/i.test(input.wallet)) return 'wallet';
-  return input.chainId === status.network.chainId ? 'ready' : 'network';
+  return input.chainId === status.network?.chainId ? 'ready' : 'network';
 }
 
-export type NftEarningsScope = { identityScope: string; wallet: string; deploymentId: string };
+export type NftEarningsScope = { identityScope: string; wallet: string; deploymentId: string; chainId?: NftChainId };
 export type NftEarningsFetcher = (input: { wallet: string; cursor?: string }, signal?: AbortSignal) => Promise<NftEarningsPage>;
 export type NftEarningsState = { key: string | null; data: NftEarningsPage | null; loading: boolean; loadingMore: boolean; error: string | null };
 const address = (value: unknown): value is string => typeof value === 'string' && /^0x[\da-f]{40}$/i.test(value);
@@ -32,13 +32,13 @@ const changed = (): never => { throw new Error('Earnings changed. Refresh to che
 
 export function nftEarningsScopeKey(scope: NftEarningsScope | null): string | null {
   return scope && typeof scope.identityScope === 'string' && scope.identityScope.length > 0 && address(scope.wallet) && deployment(scope.deploymentId)
-    ? JSON.stringify([scope.identityScope, scope.wallet.toLowerCase(), scope.deploymentId.toLowerCase()]) : null;
+    ? JSON.stringify([scope.identityScope, scope.wallet.toLowerCase(), scope.deploymentId.toLowerCase(), ...(scope.chainId ? [scope.chainId] : [])]) : null;
 }
 
 /** Validate one server page, keeping only the public amount and contract fields. */
 export function validateNftEarningsPage(value: NftEarningsPage, scope: NftEarningsScope): NftEarningsPage {
-  if (!nftEarningsScopeKey(scope) || !object(value) || !object(value.network) || value.network.mode !== 'local' || value.network.chainId !== 31337
-    || value.network.nativeSymbol !== 'ETH' || value.network.nativeDecimals !== 18 || typeof value.network.name !== 'string' || value.network.name.length > 100
+  const network = readNftNetwork(value?.network);
+  if (!nftEarningsScopeKey(scope) || !object(value) || !network || network.chainId !== (scope.chainId ?? 31337)
     || !deployment(value.deploymentId) || value.deploymentId.toLowerCase() !== scope.deploymentId.toLowerCase()
     || !address(value.wallet) || value.wallet.toLowerCase() !== scope.wallet.toLowerCase()
     || !uint(value.blockNumber) || !hash(value.blockHash) || !uint(value.blockTimestamp)
@@ -58,7 +58,7 @@ export function validateNftEarningsPage(value: NftEarningsPage, scope: NftEarnin
   if (collections.length > value.scannedCount || value.nextCursor === null && BigInt(value.scannedCount) !== BigInt(value.totalCollectionsRaw)
     || value.nextCursor !== null && (collections.length === 0 || BigInt(value.scannedCount) >= BigInt(value.totalCollectionsRaw))) return invalid();
   return {
-    network: { mode: 'local', chainId: 31337, name: value.network.name, nativeSymbol: 'ETH', nativeDecimals: 18 },
+    network,
     deploymentId: value.deploymentId.toLowerCase(), wallet: value.wallet.toLowerCase(), blockNumber: value.blockNumber,
     blockHash: value.blockHash.toLowerCase(), blockTimestamp: value.blockTimestamp,
     marketplace: { contract: value.marketplace.contract.toLowerCase(), amountRaw: value.marketplace.amountRaw },

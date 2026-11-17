@@ -61,12 +61,12 @@ export function createNftFloorPolicyService(environment:()=>Record<string,string
       return account;
     }catch{throw new ApiError(503,'LISTING_AUTHORITY_UNAVAILABLE','The guarded marketplace listing authority is not configured.');}
   }
-  async function signListing(market:Address,authority:Address,message:GuardedListingPermit){
-    try{return await signer(authority).signTypedData(guardedListingPermitTypedData({chainId:31337,verifyingContract:market},message));}
+  async function signListing(market:Address,authority:Address,message:GuardedListingPermit,chainId:31337|84532 = 31337){
+    try{return await signer(authority).signTypedData(guardedListingPermitTypedData({chainId,verifyingContract:market},message));}
     catch(error){if(error instanceof ApiError)throw error;throw new ApiError(503,'LISTING_AUTHORITY_UNAVAILABLE','The listing authorization could not be prepared.');}
   }
-  async function signPolicy(market:Address,authority:Address,message:GuardedPolicyPermit){
-    try{return await signer(authority).signTypedData(guardedPolicyPermitTypedData({chainId:31337,verifyingContract:market},message));}
+  async function signPolicy(market:Address,authority:Address,message:GuardedPolicyPermit,chainId:31337|84532 = 31337){
+    try{return await signer(authority).signTypedData(guardedPolicyPermitTypedData({chainId,verifyingContract:market},message));}
     catch(error){if(error instanceof ApiError)throw error;throw new ApiError(503,'LISTING_AUTHORITY_UNAVAILABLE','The settings authorization could not be prepared.');}
   }
   function assertAuthority(authority:Address){signer(authority);}

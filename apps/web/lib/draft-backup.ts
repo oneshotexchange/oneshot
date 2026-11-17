@@ -6,14 +6,14 @@ export type DraftKind = 'token' | 'collection';
 const invalidBackup = 'This file is not a supported oneshot draft backup. Your saved drafts have not changed.';
 const envelope = z.object({
   format: z.literal('oneshot.creator-draft'),
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   kind: z.enum(['token', 'collection']),
   draft: z.unknown(),
 }).strict();
 
 /** Portable files contain editable terms only, never account ownership or launch authority. */
 export function serializeDraftBackup(kind: DraftKind, draft: unknown): string {
-  const text = JSON.stringify({ format: 'oneshot.creator-draft', version: 1, kind, draft }, null, 2);
+  const text = JSON.stringify({ format: 'oneshot.creator-draft', version: 2, kind, draft }, null, 2);
   const content = text + '\n';
   if (new TextEncoder().encode(content).byteLength > draftBackupMaxBytes) throw new Error('This draft is too large to back up in one file.');
   return content;
@@ -25,7 +25,12 @@ export function parseDraftBackup<T>(text: string, expectedKind: DraftKind, valid
   try { parsed = envelope.parse(JSON.parse(text)); }
   catch { throw new Error(invalidBackup); }
   if (parsed.kind !== expectedKind) throw new Error(`This is a ${parsed.kind === 'token' ? 'token' : 'collection'} draft. Open the matching creation page to restore it.`);
-  try { return validate(parsed.draft); }
+  try {
+    // A v1 backup was authored before network pricing existed. It remains a Zero plan.
+    const draft = parsed.version === 1 && parsed.draft && typeof parsed.draft === 'object' && !Array.isArray(parsed.draft)
+      ? Object.fromEntries(Object.entries(parsed.draft).filter(([key]) => key !== 'pricingNetwork')) : parsed.draft;
+    return validate(draft);
+  }
   catch { throw new Error(invalidBackup); }
 }
 
@@ -35,6 +40,7 @@ const whole = (max: number) => text(4).refine(value => value === '' || /^\d+$/.t
 // Incomplete dates and empty terms can be backed up while editing. The creator's
 // normal save/review validation still checks schedules, addresses and fee terms.
 export const portableCollectionDraftSchema = z.object({
+  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
   name: text(100), symbol: text(20).default(''), description: text(2048),
   supply: whole(1000), royalty: text(5).refine(value => value === '' || /^\d+(?:\.\d*)?$/.test(value) && Number(value) <= 10),
   price: decimal, limit: whole(1000), metadataMode: z.enum(['upload', 'url']),

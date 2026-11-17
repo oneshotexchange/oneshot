@@ -41,6 +41,16 @@ function verify(root: Hex, leaf: Hex, proof: readonly Hex[]): boolean {
 }
 
 describe('exact NFT contract terms', () => {
+  it('requires deliberate Base pricing and binds its allowlist to Base Sepolia', () => {
+    const base = { ...context, chainId: 84532 };
+    for (const pricingNetwork of [undefined, 'zero'] as const) expectCode(() => prepareNftTerms(draft({ pricingNetwork }), base), 'PRICE_NETWORK_MISMATCH');
+    const source = allowlisted(wallets.slice(0, 2));
+    const planned = prepareNftTerms({ ...source, pricingNetwork: 'base-sepolia' }, base);
+    expect(planned.terms.publicMint.price).toBe(123_456_789_012_345_678n);
+    expect(planned.allowlist.root).not.toBe(prepareNftTerms(source, context).allowlist.root);
+    expect(planned.summary.chainId).toBe(84532);
+    expect(source).not.toHaveProperty('pricingNetwork');
+  });
   it('encodes and hashes Solidity abi.encode(Terms) with its widths and nested stage order', () => {
     const planned = prepareNftTerms(allowlisted(wallets.slice(0, 3)), context);
     const terms = planned.terms;

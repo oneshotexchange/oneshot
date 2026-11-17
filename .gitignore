@@ -18,6 +18,8 @@ coverage/
 contracts/**/build/
 contracts-evm/out/
 contracts-evm/cache/
+contracts-evm/core-out/
+contracts-evm/core-cache/
 contracts-evm/broadcast/
 
 # Private workspace instructions, research and local tooling

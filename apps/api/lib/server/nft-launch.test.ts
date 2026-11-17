@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, zeroHash, type Abi, type Address, type Hex } from 'viem';
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, verifyTypedData, zeroHash, type Abi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { NFT_COLLECTION_ABI, NFT_FACTORY_ABI, NFT_MARKETPLACE_ABI, GUARDED_MARKETPLACE_ABI, prepareNftTerms, type createVerifiedRpc, type RpcReadMethod } from '@oneshot/evm';
+import { NFT_COLLECTION_ABI, NFT_FACTORY_ABI, NFT_MARKETPLACE_ABI, GUARDED_MARKETPLACE_ABI, BASE_SEPOLIA_GENESIS_HASH, guardedListingPermitTypedData, prepareNftTerms, type createVerifiedRpc, type RpcReadMethod } from '@oneshot/evm';
 import { parseManifest, manifestId } from '../../../indexer/src/manifest';
 import { createNftLaunchRepository, NFT_REVIEW_NAMESPACE } from './nft-launch-store';
 import { createNftLaunchProgressRepository } from './nft-launch-progress-store';
@@ -201,9 +201,11 @@ describe('private protected minimum on the guarded marketplace',()=>{
 });
 
 function fixture(environment: Record<string, string | undefined> = {}, guarded=false) {
-  const selectedManifest=guarded?guardedManifest:manifest;
+  const base = environment.ONESHOT_NETWORK === 'base-sepolia';
+  const selectedManifest = base ? parseManifest({...JSON.parse(JSON.stringify({...guarded?guardedManifest:manifest,startBlock:'1'})),
+    mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH,anchorHash:BASE_SEPOLIA_GENESIS_HASH}) : guarded?guardedManifest:manifest;
   const draft: OneshotDraft = { id: draftId, ownerUserId: session.userId, revision: 2, status: 'prepared', createdAt: '2030-01-01T00:00:00Z', updatedAt: '2030-01-01T00:00:00Z',
-    name: 'Originals', symbol: 'SHOT', description: 'A prepared collection', maxSupply: 10, royaltyBps: 500, publicPrice: '0.123456789012345678', allowlistPrice: '0', perWalletLimit: 2,
+    ...(base ? {pricingNetwork:'base-sepolia' as const} : {}), name: 'Originals', symbol: 'SHOT', description: 'A prepared collection', maxSupply: 10, royaltyBps: 500, publicPrice: '0.123456789012345678', allowlistPrice: '0', perWalletLimit: 2,
     publicStart: '2030-01-02T00:00:00Z', publicEnd: '2030-01-03T00:00:00Z', allowlistAddresses: [], creatorWallet: creator, metadataMode: 'upload',
     snapshot: { manifestHash: 'ab'.repeat(32), contentHash: `0x${'ab'.repeat(32)}`, baseUri: `https://media.oneshot.app/api/oneshot/metadata/${'ab'.repeat(32)}/`, collectionUri: `https://media.oneshot.app/api/media/${'cd'.repeat(32)}.json`, itemCount: 10, preparedAt: '2030-01-01T00:00:00Z' } };
   const state = {
@@ -214,7 +216,7 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
     policyCommitment:zeroHash as Hex,listingNonce:0n,
     transaction: null as Record<string, unknown> | null, transactionReceipt: null as Record<string, unknown> | null,
   };
-  const blockHash = (number: bigint) => state.blockHashes.get(number) ?? hash(Number(number) + 100);
+  const blockHash = (number: bigint) => state.blockHashes.get(number) ?? (number === 0n ? selectedManifest.genesisHash : hash(Number(number) + 100));
   const readRpc = vi.fn(async (method: RpcReadMethod, params: readonly unknown[] = []): Promise<unknown> => {
     if (method === 'eth_getBlockByNumber') {
       const number = BigInt(params[0] as string);
@@ -233,6 +235,8 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
       case 'factory': result = factory; break;
       case 'listingAuthority': result = authority; break;
       case 'deploymentSalt': result = hash(333); break;
+      case 'deploymentChainId': result = BigInt(selectedManifest.chainId); break;
+      case 'eip712Domain': result = ['0x0f','OneshotGuardedMarketplace','1',BigInt(selectedManifest.chainId),marketplace,zeroHash,[]]; break;
       case 'policyCommitment': result = state.policyCommitment; break;
       case 'listingNonces': result = state.listingNonce; break;
       case 'treasury': result = treasury; break;
@@ -242,7 +246,7 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
       case 'symbol': result = state.collectionSymbol; break;
       case 'opened': result = state.opened; break;
       case 'totalMinted': result = state.minted; break;
-      case 'terms': result = state.onchainTerms ?? prepareNftTerms(state.draft, { chainId: 31337, nativeDecimals: 18, collection, nowSeconds: 0n }).terms; break;
+      case 'terms': result = state.onchainTerms ?? prepareNftTerms(state.draft, { chainId: selectedManifest.chainId, nativeDecimals: 18, collection, nowSeconds: 0n }).terms; break;
       case 'ownerOf': result = creator; break;
       case 'pending': result = 10n; break;
       case 'listings': result = [collection, state.listingSeller, 1n, state.listingPrice, state.listingActive]; break;
@@ -251,7 +255,7 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
     return encodeFunctionResult({ abi, functionName, result });
   });
   const simulateCall = vi.fn(async (_call: { from: string; to: string; data: string; value: string }, _block: { number: string; hash: string }) => ({ result: '0x', gasEstimate: '140000' }));
-  const verified = { verification: { mode: 'local', chainId: 31337, genesisHash: manifest.genesisHash, latestBlock: 10n, checkedAt: '2030-01-01T00:00:00Z', provider: { label: 'custom', verifiedSupport: false }, genesisMatched: null }, readRpc, simulateCall } as Awaited<ReturnType<typeof createVerifiedRpc>>;
+  const verified = { verification: { mode: selectedManifest.mode, chainId: selectedManifest.chainId, genesisHash: selectedManifest.genesisHash, latestBlock: 10n, checkedAt: '2030-01-01T00:00:00Z', provider: { label: 'custom', verifiedSupport: false }, genesisMatched: base?true:null }, readRpc, simulateCall } as Awaited<ReturnType<typeof createVerifiedRpc>>;
   const rpc = vi.fn(async () => verified);
   const loadManifest = vi.fn(async () => selectedManifest);
   const getDraft = vi.fn(async (_id: string, identity: OneshotSession) => {
@@ -259,21 +263,104 @@ function fixture(environment: Record<string, string | undefined> = {}, guarded=f
     return structuredClone(state.draft);
   });
   const verifySnapshot = vi.fn(async (_draft: OneshotDraft): Promise<void> => undefined);
-  const env:Record<string,string|undefined> = { ONESHOT_LOCAL_NFT_EXECUTION_ENABLED: 'true', ONESHOT_NETWORK: 'local', ONESHOT_LOCAL_RPC_URL: 'http://127.0.0.1:8545', ONESHOT_INDEXER_MANIFEST_PATH: 'test-local-manifest.json',ONESHOT_FLOOR_CREATORS:creator,ONESHOT_LISTING_AUTHORITY_PRIVATE_KEY:authorityKey, ...environment };
+  const env:Record<string,string|undefined> = { ONESHOT_LOCAL_NFT_EXECUTION_ENABLED: 'true', ...(base?{ONESHOT_BASE_SEPOLIA_NFT_EXECUTION_ENABLED:'true'}:{}), ONESHOT_NETWORK: 'local', ONESHOT_LOCAL_RPC_URL: 'http://127.0.0.1:8545', ONESHOT_INDEXER_MANIFEST_PATH: 'test-local-manifest.json',ONESHOT_FLOOR_CREATORS:creator,ONESHOT_LISTING_AUTHORITY_PRIVATE_KEY:authorityKey, ...environment };
   const progressRepository=createNftLaunchProgressRepository();
   const dependencies={ environment: () => env, rpc, loadManifest, getDraft, verifySnapshot, now: () => state.now, progressRepository };
   const service = createNftLaunchService(dependencies);
-  const input = (changes: Partial<NftReviewInput> = {}): NftReviewInput => ({ draftId, expectedRevision: 2, from: creator, action: 'create', localEthAcknowledged: true, ...changes });
+  const input = (changes: Partial<NftReviewInput> = {}): NftReviewInput => ({ draftId, expectedRevision: 2, from: creator, action: 'create', ...(base?{testEthAcknowledged:true,expectedChainId:84532}:{localEthAcknowledged:true}), ...changes });
   function mined(review: NftReview, blockNumber = 11n) {
     const txHash = hash(900);
-    state.transaction = { hash: txHash, from: review.from, to: review.to, input: review.data, value: quantity(BigInt(review.value)), chainId: '0x7a69', blockNumber: quantity(blockNumber), blockHash: blockHash(blockNumber) };
+    state.transaction = { hash: txHash, from: review.from, to: review.to, input: review.data, value: quantity(BigInt(review.value)), chainId: quantity(BigInt(review.chainId)), blockNumber: quantity(blockNumber), blockHash: blockHash(blockNumber) };
     state.transactionReceipt = { transactionHash: txHash, blockNumber: quantity(blockNumber), blockHash: blockHash(blockNumber), status: '0x1', logs: [{ address: factory,
       topics: encodeEventTopics({ abi: NFT_FACTORY_ABI, eventName: 'CollectionCreated', args: { collection, creator } }),
       data: encodeAbiParameters([{ type: 'string' }, { type: 'string' }], [state.draft.name, state.draft.symbol!]) }] };
     return txHash;
   }
-  return { state, env, service, dependencies, progressRepository, rpc, verified, readRpc, simulateCall, loadManifest, getDraft, verifySnapshot, input, mined };
+  return { state, env, service, dependencies, selectedManifest, progressRepository, rpc, verified, readRpc, simulateCall, loadManifest, getDraft, verifySnapshot, input, mined };
 }
+
+describe('strict Base Sepolia NFT execution', () => {
+  const base = () => fixture({ONESHOT_NETWORK:'base-sepolia'});
+  it('requires the separate Base opt-in and rejects mainnet or a cross-profile manifest before simulation', async () => {
+    const test=base(); delete test.env.ONESHOT_BASE_SEPOLIA_NFT_EXECUTION_ENABLED;
+    expect(await test.service.status()).toMatchObject({enabled:false}); expect(test.rpc).not.toHaveBeenCalled();
+    test.env.ONESHOT_BASE_SEPOLIA_NFT_EXECUTION_ENABLED='true'; test.env.ONESHOT_CHAIN_ID='8453';
+    expect(await test.service.status()).toMatchObject({enabled:false}); expect(test.rpc).not.toHaveBeenCalled();
+    delete test.env.ONESHOT_CHAIN_ID; test.loadManifest.mockResolvedValue(manifest);
+    expect(await test.service.status()).toMatchObject({enabled:false}); expect(test.rpc).not.toHaveBeenCalled();
+  });
+  it('returns customer-safe unavailable status for missing deployment and failed verification',async()=>{
+    const test=base();delete test.env.ONESHOT_INDEXER_MANIFEST_PATH;
+    const missing=await test.service.status();
+    expect(missing).toMatchObject({enabled:false,network:null,deploymentId:null});
+    expect(missing.reason).toContain('save a draft');
+    expect(JSON.stringify(missing)).not.toMatch(/manifest|RPC|provider|configure|contract code|anchor|local/i);
+    test.env.ONESHOT_INDEXER_MANIFEST_PATH='private-local-manifest-path';test.rpc.mockRejectedValue(new Error('private-rpc-secret'));
+    expect(await test.service.status()).toEqual(missing);
+  });
+  it.each([
+    {testEthAcknowledged:undefined,expectedChainId:undefined,localEthAcknowledged:true},
+    {testEthAcknowledged:true,expectedChainId:undefined,localEthAcknowledged:true},
+    {testEthAcknowledged:true,expectedChainId:84532,localEthAcknowledged:true},
+    {testEthAcknowledged:true,expectedChainId:31337},
+  ])('rejects insufficient or stale network acknowledgment %j', async patch => {
+    const test=base();
+    await expect(test.service.review(test.input(patch as Partial<NftReviewInput>),session)).rejects.toMatchObject({code:'NETWORK_ACKNOWLEDGMENT_REQUIRED'});
+    expect(test.simulateCall).not.toHaveBeenCalled();
+  });
+  it.each([undefined,'zero'] as const)('never reinterprets a legacy %j priced draft as test ETH', async pricingNetwork => {
+    const test=base(); test.state.draft.pricingNetwork=pricingNetwork;
+    await expect(test.service.review(test.input(),session)).rejects.toMatchObject({code:'DRAFT_PRICING_NETWORK_MISMATCH'});
+    expect(test.verifySnapshot).not.toHaveBeenCalled(); expect(test.simulateCall).not.toHaveBeenCalled();
+  });
+  it('binds exact Base create reviews, recovery and canonical receipts to the deployment and chain', async () => {
+    const test=base();
+    expect(await test.service.status()).toMatchObject({enabled:true,network:{mode:'base-sepolia',chainId:84532,nativeSymbol:'ETH',nativeDecimals:18}});
+    const review=await test.service.review(test.input(),session);
+    expect(review).toMatchObject({chainId:84532,network:{mode:'base-sepolia',chainId:84532},deploymentId:manifestId(test.selectedManifest),value:'0'});
+    const txHash=test.mined(review);test.state.head=11n;
+    expect(await test.service.receipt(review.id,txHash,{...session,sessionId:'renewed'})).toMatchObject({status:'confirmed',collection});
+    expect((await test.service.recover(review.id,{...session,sessionId:'renewed'})).review.chainId).toBe(84532);
+    test.env.ONESHOT_NETWORK='local';test.loadManifest.mockResolvedValue(manifest);test.verified.verification.mode='local';test.verified.verification.chainId=31337;test.verified.verification.genesisHash=manifest.genesisHash;
+    test.state.blockHashes.set(0n,manifest.genesisHash);
+    await expect(test.service.receipt(review.id,txHash,session)).rejects.toMatchObject({code:'DEPLOYMENT_CHANGED'});
+    await expect(test.service.validate(review.id,review.reviewHash,session)).rejects.toMatchObject({code:'ALREADY_SUBMITTED'});
+  });
+  it('rejects a different-chain transaction and a reorged canonical receipt', async () => {
+    const test=base(),review=await test.service.review(test.input(),session),txHash=test.mined(review);test.state.head=11n;
+    test.state.transaction!.chainId='0x2105';
+    await expect(test.service.receipt(review.id,txHash,session)).rejects.toMatchObject({code:'TRANSACTION_MISMATCH'});
+    test.state.transaction!.chainId='0x14a34';test.state.blockHashes.set(11n,hash(999));
+    await expect(test.service.receipt(review.id,txHash,session)).rejects.toMatchObject({code:'RECEIPT_REORGED'});
+  });
+  it('invalidates an unsubmitted Base review when the server profile changes before validation',async()=>{
+    const test=base(),review=await test.service.review(test.input(),session);
+    test.env.ONESHOT_NETWORK='local';test.loadManifest.mockResolvedValue(manifest);
+    Object.assign(test.verified.verification,{mode:'local',chainId:31337,genesisHash:manifest.genesisHash});test.state.blockHashes.set(0n,manifest.genesisHash);
+    await expect(test.service.validate(review.id,review.reviewHash,session)).rejects.toMatchObject({code:'NETWORK_ACKNOWLEDGMENT_REQUIRED'});
+    expect(test.simulateCall).toHaveBeenCalledOnce();
+  });
+  it('builds allowlist commitments from Base chain identity rather than local rehearsal roots', async () => {
+    const test=base();Object.assign(test.state.draft,{allowlistAddresses:[creator,other],allowlistStart:'2030-01-01T01:00:00Z',allowlistEnd:'2030-01-01T02:00:00Z'});
+    const review=await test.service.review(test.input({action:'configure',collection}),session);
+    const decoded=decodeFunctionData({abi:NFT_COLLECTION_ABI,data:review.data});
+    const terms=decoded.args![0] as ReturnType<typeof prepareNftTerms>['terms'];
+    const baseTerms=prepareNftTerms(test.state.draft,{chainId:84532,nativeDecimals:18,collection,nowSeconds:0n}).terms;
+    const localTerms=prepareNftTerms(test.state.draft,{chainId:31337,nativeDecimals:18,collection,nowSeconds:0n}).terms;
+    expect(terms.allowlistRoot).toBe(baseTerms.allowlistRoot);expect(terms.allowlistRoot).not.toBe(localTerms.allowlistRoot);
+    expect(terms.publicMint.price).toBe(123456789012345678n);
+  });
+  it('prepares guarded Base listing permits with exact immutable deployment and chain binding',async()=>{
+    const test=fixture({ONESHOT_NETWORK:'base-sepolia'},true);
+    const reviewed=await test.service.review({from:creator,collection,tokenId:'1',action:'list',price:'4',testEthAcknowledged:true,expectedChainId:84532},session);
+    const decoded=decodeFunctionData({abi:GUARDED_MARKETPLACE_ABI,data:reviewed.data});
+    expect(decoded.functionName).toBe('listAuthorized');
+    const args=decoded.args as readonly [Address,bigint,bigint,bigint,Hex,bigint,Hex];
+    const message={seller:creator,collection,tokenId:args[1],totalPrice:args[2],nonce:args[3],policyCommitment:args[4],deadline:args[5],deploymentSalt:hash(333)};
+    expect(await verifyTypedData({...guardedListingPermitTypedData({chainId:84532,verifyingContract:marketplace},message),address:authority,signature:args[6]})).toBe(true);
+    expect(await verifyTypedData({...guardedListingPermitTypedData({chainId:31337,verifyingContract:marketplace},message),address:authority,signature:args[6]})).toBe(false);
+  });
+});
 
 describe('resumable private creator launch progress',()=>{
   const selection=(launchId?:string)=>({expectedRevision:2,from:creator,...(launchId?{launchId}:{})});

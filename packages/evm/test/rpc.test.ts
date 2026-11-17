@@ -42,6 +42,24 @@ async function safeError(promise: Promise<unknown>, code: string) {
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+describe('hash-selected runtime code reads', () => {
+  it('binds runtime code to an exact canonical hash while preserving identity checks', async () => {
+    const mock=transport(request=>request.method==='eth_getCode'?'0x6000':defaults(request));
+    const client=await createVerifiedRpc(config(),{fetch:mock.fetch});
+    await expect(client.readRpc('eth_getCode',[ADDRESS,{blockHash:OTHER_GENESIS,requireCanonical:true}])).resolves.toBe('0x6000');
+    expect(sent(mock.mock).at(-1)).toMatchObject({method:'eth_getCode',params:[ADDRESS,{blockHash:OTHER_GENESIS,requireCanonical:true}]});
+    expect(sent(mock.mock).slice(-3).map(request=>request.method)).toEqual(['eth_chainId','eth_getBlockByNumber','eth_getCode']);
+  });
+  it('rejects ambiguous or noncanonical code selectors before contacting RPC', async () => {
+    const mock=transport(); const client=await createVerifiedRpc(config(),{fetch:mock.fetch});
+    const previous=sent(mock.mock).length;
+    for (const selected of [{blockHash:OTHER_GENESIS},{blockHash:OTHER_GENESIS,requireCanonical:false},
+      {blockHash:OTHER_GENESIS,requireCanonical:true,blockNumber:'0x1'}, {blockHash:'0xab',requireCanonical:true}, {blockNumber:'0x1'}])
+      await safeError(client.readRpc('eth_getCode',[ADDRESS,selected]),'RPC_PARAMS_INVALID');
+    expect(sent(mock.mock)).toHaveLength(previous);
+  });
+});
+
 describe('RPC network identity', () => {
   it('fails closed without Zero configuration and never contacts a provider', async () => {
     const mock = transport();

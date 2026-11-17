@@ -17,12 +17,13 @@ const clock = (number: number) => ({ createId: () => id(number), now: () => date
 
 describe('token browser drafts', () => {
   it('recovers a legacy single draft as its own saved plan without rewriting the original key', () => {
-    const raw = JSON.stringify(terms());
+    const legacy = { ...terms(), pricingNetwork: undefined };
+    const raw = JSON.stringify(legacy);
     const storage = memory({ [LEGACY_TOKEN_DRAFT_STORAGE_KEY]: raw });
     const loaded = readTokenDrafts(storage, clock(1));
-    expect(loaded.source).toBe('legacy'); expect(loaded.snapshot).toBeNull();
-    expect(loaded.workspace.working).toEqual({ draft: terms(), savedId: id(1) });
-    expect(loaded.workspace.saved).toEqual([{ id: id(1), savedAt: date, draft: terms() }]);
+    expect(loaded.source).toBe('legacy'); expect(loaded.snapshot).toContain('oneshot:draft-migration:');
+    expect(loaded.workspace.working).toEqual({ draft: legacy, savedId: id(1) });
+    expect(loaded.workspace.saved).toEqual([{ id: id(1), savedAt: date, draft: legacy }]);
     expect(storage.setItem).not.toHaveBeenCalled();
     const snapshot = writeTokenDrafts(storage, loaded.workspace, loaded.snapshot);
     expect(storage.values.get(LEGACY_TOKEN_DRAFT_STORAGE_KEY)).toBe(raw);
@@ -32,7 +33,7 @@ describe('token browser drafts', () => {
 
   it('retains older partial legacy fields with the original defaults, but does not save an empty default plan', () => {
     const older = memory({ [LEGACY_TOKEN_DRAFT_STORAGE_KEY]: JSON.stringify({ name: 'Older plan', symbol: 'OLD' }) });
-    expect(readTokenDrafts(older, clock(1)).workspace.working.draft).toEqual({ ...emptyTokenDraft(), name: 'Older plan', symbol: 'OLD' });
+    expect(readTokenDrafts(older, clock(1)).workspace.working.draft).toEqual({ ...emptyTokenDraft(), pricingNetwork: undefined, name: 'Older plan', symbol: 'OLD' });
     const empty = memory({ [LEGACY_TOKEN_DRAFT_STORAGE_KEY]: JSON.stringify(emptyTokenDraft()) });
     expect(readTokenDrafts(empty).workspace.saved).toEqual([]);
   });

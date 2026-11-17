@@ -35,7 +35,7 @@ describe('portable creator drafts', () => {
   it('rejects a different kind and unsupported versions instead of guessing the file contents', () => {
     expect(() => parseCollectionDraftBackup(serializeDraftBackup('token', {}))).toThrow('token draft');
     const envelope = JSON.parse(collectionDraftBackup(draft));
-    expect(() => parseCollectionDraftBackup(JSON.stringify({ ...envelope, version: 2 }))).toThrow('not a supported');
+    expect(() => parseCollectionDraftBackup(JSON.stringify({ ...envelope, version: 3 }))).toThrow('not a supported');
     expect(() => parseCollectionDraftBackup(JSON.stringify(draft))).toThrow('not a supported');
   });
 

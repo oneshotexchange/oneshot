@@ -3,7 +3,9 @@ import { ArrowUpRight, LockKeyhole, LogOut, RefreshCw } from 'lucide-react';
 import { useWallet } from '../lib/client-wallet';
 import { apiUrl } from '../lib/api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from '../lib/customer-http';
-import { featureEnabled, useApi, type SystemStatus } from '../lib/client-api';
+import { useApi, type SystemStatus } from '../lib/client-api';
+import { customerNetwork } from '../lib/customer-network';
+import Link from './navigation';
 import { Badge, Button, ErrorState, Field, InfoRow, PageHeading } from './ui';
 import { ThemePicker } from './theme-picker';
 import { WalletButton } from './wallet-button';
@@ -22,8 +24,6 @@ type AdminReadiness = { ready: boolean; checks: { originsConfigured: boolean; da
 export function SettingsPage() {
   const wallet = useWallet();
   const availability = useApi<SystemStatus>('/api/status');
-  const status = availability.data;
-  const featureStatus = (key: string) => availability.loading ? 'Checking…' : availability.error ? 'Status unavailable' : featureEnabled(status, key) ? 'Available' : 'Currently unavailable';
   return <>
     <PageHeading title="Settings" />
     <div className="settings-layout">
@@ -32,15 +32,20 @@ export function SettingsPage() {
         <section className="panel settings-panel"><h2>Genesis application</h2><p>Sign in with X on the Genesis page to apply and return to your saved progress. No wallet is needed.</p><a className="text-link" href="/whitelist">View Genesis whitelist <ArrowUpRight size={14}/></a></section>
         <section className="panel settings-panel"><h2>Appearance</h2><ThemePicker /></section>
       </div>
-      <section className="panel settings-panel"><h2>Network</h2>
-        <InfoRow label="Network">Zero</InfoRow>
-        <InfoRow label="Token trading">{featureStatus('trading')}</InfoRow>
-        <InfoRow label="NFT minting">{featureStatus('nftLaunch')}</InfoRow>
-        {availability.error && <ErrorState message="Network availability could not be checked." retry={availability.refresh} />}
-        <a href="https://layerzero.network/zero" target="_blank" rel="noreferrer" className="external-row">About Zero <ArrowUpRight size={14} /></a>
-      </section>
+      <SettingsNetwork data={availability.data} loading={availability.loading} failed={Boolean(availability.error)} onRefresh={availability.refresh} />
     </div>
   </>;
+}
+
+export function SettingsNetwork({ data, loading, failed, onRefresh }: { data: unknown; loading: boolean; failed: boolean; onRefresh(): void }) {
+  const network = customerNetwork(data);
+  return <section className="panel settings-panel"><h2>Network</h2>
+    <InfoRow label="Network">{loading ? 'Loading network details…' : failed ? 'Network details unavailable' : network.label}</InfoRow>
+    {failed ? <ErrorState message="Network details could not be loaded." retry={onRefresh} /> : !loading && <p>{network.assetNote}</p>}
+    <p>Check launch and trading availability with each token or collection.</p>
+    <div className="button-row"><Link href="/tokens" className="text-link">Explore token markets <ArrowUpRight size={14} /></Link><Link href="/nfts" className="text-link">Explore NFT collections <ArrowUpRight size={14} /></Link></div>
+    {!loading && !failed && network.kind === 'base-sepolia' && <a href="https://docs.base.org/get-started/connect-to-base" target="_blank" rel="noreferrer" className="external-row">About Base Sepolia <ArrowUpRight size={14} /></a>}
+  </section>;
 }
 
 class AdminRequestError extends Error {

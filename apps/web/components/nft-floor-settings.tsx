@@ -7,6 +7,7 @@ import { createNftFloorApi, nftFloorPolicyRequest, type PrivateNftFloorStatus } 
 import { createNftLaunchApi, createNftLaunchController, type NftLaunchContext } from '../lib/client-nft-launch';
 import { Address, Badge, Button, ErrorState, Field, InfoRow } from './ui';
 import { NftReviewSummary, NftTransactionData, nftTransactionPhase } from './nft-review-summary';
+import { nftNetworkLabel, readNftNetwork } from '../lib/nft-network';
 
 const busyPhases = ['reviewing', 'validating', 'signing', 'confirming'];
 
@@ -30,7 +31,8 @@ function CreatorFloorControls({ collection }: { collection: string }) {
   const controller = useMemo(() => createNftLaunchController({ api, context: () => context.current, sendEvmTransaction: transaction => latestWallet.current.sendEvmTransaction(transaction) }), [api]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const busy = busyPhases.includes(state.phase), submitted = Boolean(state.hash && !['confirmed', 'reverted'].includes(state.receipt?.status || ''));
-  const ready = Boolean(status && !error && scope && wallet.connected && wallet.authenticated && wallet.network?.chainId === 31337);
+  const executionNetwork = readNftNetwork(status?.network);
+  const ready = Boolean(status && !error && executionNetwork && scope && wallet.connected && wallet.authenticated && wallet.network?.chainId === executionNetwork.chainId);
   const expiresIn = state.review ? Math.max(0, Math.ceil((Date.parse(state.review.expiresAt) - clock) / 1000)) : 0;
 
   async function refresh() {
@@ -60,7 +62,7 @@ function CreatorFloorControls({ collection }: { collection: string }) {
   function prepare() {
     if (!ready || !acknowledged || !status || !wallet.account) return;
     try {
-      const input = nftFloorPolicyRequest({ from: wallet.account.address, collection, enabled, price, eligible: status.eligible });
+      const input = nftFloorPolicyRequest({ from: wallet.account.address, collection, enabled, price, eligible: status.eligible, chainId: executionNetwork!.chainId });
       setClock(Date.now()); void controller.prepare(input);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Check the floor amount before reviewing.'); }
   }
@@ -71,18 +73,18 @@ function CreatorFloorControls({ collection }: { collection: string }) {
     <div className="review-rows"><InfoRow label="Current floor">{formatIndexedAmount(status.floorRaw, 18)} ETH</InfoRow><InfoRow label="Collection"><Address value={collection} full /></InfoRow></div>
     <p className="field-hint">If a seller enters less than the floor, the floor is added to their amount. Amounts at or above the floor stay unchanged. Sellers review the final price before approving. Existing listings keep their prices and can still be canceled.</p>
     {!status.eligible && <p className="data-notice">This creator wallet can disable its existing policy. Enabling or changing the floor requires current eligibility.</p>}
-    {wallet.network?.chainId !== 31337 && <p className="data-notice">Switch to the test network (31337) to review this change.</p>}
+    {executionNetwork && wallet.network?.chainId !== executionNetwork.chainId && <p className="data-notice">Switch to {nftNetworkLabel(executionNetwork)} to review this change.</p>}
     <div className="field-grid section-gap">
       <Field label="Protected floor"><select value={enabled ? 'enabled' : 'disabled'} disabled={busy || submitted || loading} onChange={event => change(() => setEnabled(event.target.value === 'enabled'))}><option value="disabled">Disabled</option><option value="enabled" disabled={!status.eligible}>Enabled</option></select></Field>
       {enabled && <Field label="Floor amount (test ETH)" required hint="Up to 18 decimal places."><input inputMode="decimal" value={price} disabled={!status.eligible || busy || submitted || loading} onChange={event => change(() => setPrice(event.target.value))} placeholder="0.01" /></Field>}
     </div>
-    <label className="checkbox-field"><input type="checkbox" checked={acknowledged} disabled={busy || submitted || loading} onChange={event => { if (!event.target.checked) controller.invalidate('Local ETH acknowledgement was removed.'); setAcknowledged(event.target.checked); }} /><span>I understand this changes new listing prices on test chain 31337 and requires test ETH for gas.</span></label>
+    <label className="checkbox-field"><input type="checkbox" checked={acknowledged} disabled={busy || submitted || loading} onChange={event => { if (!event.target.checked) controller.invalidate('Test ETH acknowledgement was removed.'); setAcknowledged(event.target.checked); }} /><span>I understand this changes new listing prices on {nftNetworkLabel(executionNetwork)} and requires test ETH for gas.</span></label>
     {error && <ErrorState message={error} />}
     <div className="button-row section-gap"><Button type="button" variant="secondary" disabled={!ready || !acknowledged || busy || submitted || loading || (enabled && !status.eligible)} loading={state.phase === 'reviewing'} onClick={prepare}>Review floor change</Button><Button type="button" variant="ghost" disabled={busy || submitted} loading={loading} onClick={() => void refresh()}>Refresh settings</Button></div>
     {state.review && <div className="nft-launch-review section-gap">
       <div className="section-header"><h3>Review floor change</h3><Badge tone={state.phase === 'success' ? 'mint' : 'amber'}>{nftTransactionPhase(state.phase)}</Badge></div>
       <div className="review-rows">
-        <InfoRow label="Network">Test network (31337), ETH</InfoRow><InfoRow label="From"><Address value={state.review.from} full /></InfoRow><InfoRow label="To"><Address value={state.review.to} full /></InfoRow>
+        <InfoRow label="Network">{nftNetworkLabel(readNftNetwork(state.review.network))}, ETH</InfoRow><InfoRow label="From"><Address value={state.review.from} full /></InfoRow><InfoRow label="To"><Address value={state.review.to} full /></InfoRow>
         <InfoRow label="Transaction value">{formatIndexedAmount(state.review.value, 18)} ETH<small className="indexed-subline">{state.review.value} wei</small></InfoRow><InfoRow label="Estimated gas">{state.review.simulation.gasEstimate} gas units, paid separately</InfoRow>
         <NftReviewSummary summary={state.review.summary} action={state.review.action} />
         <InfoRow label="Review expiry">{new Date(state.review.expiresAt).toLocaleString()}{state.phase === 'review' ? `, ${expiresIn}s remaining` : ''}</InfoRow>

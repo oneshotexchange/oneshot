@@ -1,4 +1,5 @@
 import type { PublicNftCollection } from './client-nft-launch';
+import { readNftNetwork } from './nft-network';
 
 export type NftCheckoutAccess = {
   matchingDeployment: boolean;
@@ -23,10 +24,10 @@ export function nftCheckoutAccess(input: {
   const { details } = input;
   const matchingDeployment = Boolean(details && details.collection.toLowerCase() === input.collection.toLowerCase()
     && (!input.indexedDeploymentId || details.deploymentId === input.indexedDeploymentId));
-  const available = Boolean(details?.opened && matchingDeployment && !input.loading && !input.error
-    && details.network.chainId === 31337 && details.network.nativeSymbol === 'ETH' && details.network.nativeDecimals === 18);
+  const network = readNftNetwork(details?.network);
+  const available = Boolean(details?.opened && matchingDeployment && !input.loading && !input.error && network);
   const needsWallet = available && (!input.authenticated || !input.connected);
-  const needsNetwork = available && input.authenticated && input.connected && input.chainId !== 31337;
-  const ready = available && input.authenticated && input.connected && Boolean(input.identityScope) && input.chainId === 31337;
+  const needsNetwork = available && input.authenticated && input.connected && input.chainId !== network?.chainId;
+  const ready = available && input.authenticated && input.connected && Boolean(input.identityScope) && input.chainId === network?.chainId;
   return { matchingDeployment, available, needsWallet, needsNetwork, ready };
 }

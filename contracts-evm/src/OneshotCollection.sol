@@ -6,6 +6,7 @@ import {ERC2981} from "@openzeppelin/contracts/token/common/ERC2981.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {OneshotMetadata} from "./OneshotMetadata.sol";
 
 /// @notice A draft collection whose issuance and content commitments freeze permanently at open.
 /// @dev Native amounts are base units; this contract assumes no particular native-asset decimals.
@@ -77,8 +78,8 @@ contract OneshotCollection is ERC721, ERC2981, ReentrancyGuard {
         ERC721(name_, symbol_)
     {
         if (
-            creator_ == address(0) || treasury_ == address(0) || bytes(name_).length == 0 || bytes(name_).length > 100
-                || bytes(symbol_).length == 0 || bytes(symbol_).length > 20
+            creator_ == address(0) || treasury_ == address(0) || !OneshotMetadata.valid(bytes(name_), 100)
+                || !OneshotMetadata.valid(bytes(symbol_), 20)
         ) {
             revert InvalidTerms();
         }

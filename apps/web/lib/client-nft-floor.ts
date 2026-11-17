@@ -3,6 +3,7 @@ import { apiUrl } from './api-url';
 import { NftLaunchError, type LocalLaunchNetwork, type NftLaunchRequest } from './client-nft-launch';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
 import { serviceMessage } from './service-message';
+import { nftTestAcknowledgement, readNftNetwork, type NftChainId } from './nft-network';
 
 export type PrivateNftFloorStatus = {
   eligible: boolean; creator: string; collection: string; deploymentId: string;
@@ -20,7 +21,7 @@ export function validatePrivateNftFloorStatus(value: unknown, collection: string
     || !address(status.collection) || status.collection.toLowerCase() !== collection.toLowerCase()
     || typeof status.eligible !== 'boolean' || typeof status.enabled !== 'boolean' || (!status.eligible && !status.enabled)
     || status.guarded !== true || typeof status.deploymentId !== 'string' || !status.deploymentId || status.deploymentId.length > 200
-    || status.network?.chainId !== 31337 || status.network.nativeSymbol !== 'ETH' || status.network.nativeDecimals !== 18
+    || !readNftNetwork(status.network)
     || typeof status.policyCommitment !== 'string' || !/^0x[\da-f]{64}$/i.test(status.policyCommitment)
     || typeof floor !== 'string' || !/^(0|[1-9]\d{0,77})$/.test(floor) || BigInt(floor) > UINT256_MAX
     || (status.enabled ? floor === '0' : floor !== '0')) {
@@ -59,7 +60,7 @@ export function createNftFloorApi(options: { identityScope(): string | null; get
 }
 
 /** Exact native ETH only; disabling explicitly clears the minimum. */
-export function nftFloorPolicyRequest(input: { from: string; collection: string; enabled: boolean; price: string; eligible: boolean }): NftLaunchRequest {
+export function nftFloorPolicyRequest(input: { from: string; collection: string; enabled: boolean; price: string; eligible: boolean; chainId?: NftChainId }): NftLaunchRequest {
   if (!address(input.from) || !address(input.collection)) throw new NftLaunchError('Choose a valid collection and linked creator wallet.', 'INVALID_REQUEST');
   if (input.enabled && !input.eligible) throw new NftLaunchError('This creator wallet can only disable its existing floor policy.', 'FLOOR_INELIGIBLE');
   let floor = 0n;
@@ -68,6 +69,6 @@ export function nftFloorPolicyRequest(input: { from: string; collection: string;
     catch { throw new NftLaunchError('Enter an exact ETH amount with at most 18 decimal places.', 'INVALID_FLOOR_PRICE'); }
     if (floor === 0n) throw new NftLaunchError('Enter a floor greater than zero ETH.', 'INVALID_FLOOR_PRICE');
   }
-  return { action: 'policy', from: input.from.toLowerCase(), collection: input.collection.toLowerCase(), localEthAcknowledged: true,
+  return { action: 'policy', from: input.from.toLowerCase(), collection: input.collection.toLowerCase(), ...nftTestAcknowledgement(input.chainId ?? 31337),
     floorEnabled: input.enabled, floorPrice: formatAssetAmount(floor, 18) };
 }

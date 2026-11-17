@@ -8,6 +8,8 @@ import { WalletButton } from "./wallet-button";
 import { ThemePicker } from "./theme-picker";
 import { OneshotLogo } from "./brand";
 import { usePageMotion } from "./motion";
+import { useApi, type SystemStatus } from '../lib/client-api';
+import { customerNetwork, customerNetworkBanner } from '../lib/customer-network';
 
 const navigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
@@ -20,6 +22,9 @@ const navigation = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const availability = useApi<SystemStatus>('/api/status');
+  const network = customerNetwork(availability.data);
+  const networkMessage = customerNetworkBanner(availability.data, availability.loading, Boolean(availability.error));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -56,9 +61,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <form className="global-search" onSubmit={event => { event.preventDefault(); if (search.trim()) navigate('/tokens?q=' + encodeURIComponent(search.trim())); }}><Search size={15} /><input ref={searchRef} aria-keyshortcuts="/" aria-label="Search tokens or addresses" placeholder="Search tokens or addresses" value={search} onChange={event => setSearch(event.target.value)} /><kbd>/</kbd></form>
         <div className="topbar-actions"><ThemePicker /><WalletButton /></div>
       </header>
-      <div className="network-banner"><span>Zero launches and trading are currently unavailable.</span></div>
+      <div className="network-banner"><span>{networkMessage}</span></div>
       <main id="main-content" className="main-content" key={pathname} ref={mainRef}>{children}</main>
-      <footer className="workspace-footer"><Link href="/" className="footer-brand" aria-label="oneshot home"><OneshotLogo /></Link><div><a href="https://layerzero.network/zero" target="_blank" rel="noreferrer">About Zero <ArrowUpRight size={12} /></a><Link href="/settings">Settings</Link></div></footer>
+      <footer className="workspace-footer"><Link href="/" className="footer-brand" aria-label="oneshot home"><OneshotLogo /></Link><div>{network.kind === 'base-sepolia' && <a href="https://docs.base.org/get-started/connect-to-base" target="_blank" rel="noreferrer">About Base Sepolia <ArrowUpRight size={12} /></a>}<Link href="/settings">Settings</Link></div></footer>
     </div>
   </div>;
 }

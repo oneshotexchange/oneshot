@@ -19,7 +19,7 @@ export type RpcCapabilityReport = {
   code: string | null;
   checkedAt: string;
   readOnly: true;
-  mode: 'zero' | 'local' | null;
+  mode: NetworkConfig['mode'] | null;
   chainId: number | null;
   genesisHash: Hex | null;
   checkpoint: { number: string; hash: Hex } | null;

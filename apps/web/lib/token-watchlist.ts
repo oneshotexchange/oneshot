@@ -10,6 +10,9 @@ export class TokenWatchlistError extends Error {
   constructor(public readonly reason: 'unreadable' | 'unavailable' | 'conflict' | 'invalid', message: string) { super(message); }
 }
 const unavailable = () => new TokenWatchlistError('unavailable', 'Your watchlist could not be opened. Check that browser storage is allowed, then try again.');
+const evmAddress = /^0x[\da-f]{40}$/i;
+export function sameTokenWatchlistEntry(left: string, right: string) { return evmAddress.test(left) && evmAddress.test(right) ? left.toLowerCase() === right.toLowerCase() : left === right; }
+export function tokenIsWatched(entries: readonly string[], token: string) { return entries.some(entry => sameTokenWatchlistEntry(entry, token)); }
 
 /** Retain the existing string-array format, including legacy token identifiers. Reading never repairs or rewrites it. */
 export function readTokenWatchlist(storage: Pick<Storage, 'getItem'>): SavedWatchlist {
@@ -28,8 +31,8 @@ export function readTokenWatchlist(storage: Pick<Storage, 'getItem'>): SavedWatc
 export function setTokenWatched(storage: WatchlistStorage, address: string, watched: boolean): SavedWatchlist {
   if (typeof address !== 'string' || !address.trim()) throw new TokenWatchlistError('invalid', 'This token could not be saved to your watchlist. Refresh the market and try again.');
   const current = readTokenWatchlist(storage);
-  if (current.entries.includes(address) === watched) return current;
-  const entries = watched ? [...current.entries, address] : current.entries.filter(entry => entry !== address);
+  if (tokenIsWatched(current.entries, address) === watched) return current;
+  const entries = watched ? [...current.entries, address] : current.entries.filter(entry => !sameTokenWatchlistEntry(entry, address));
   let latest: string | null;
   try { latest = storage.getItem(TOKEN_WATCHLIST_STORAGE_KEY); }
   catch { throw unavailable(); }
@@ -86,7 +89,7 @@ export function useTokenWatchlist() {
     };
   }, [store]);
   const toggle = useCallback((address: string) => {
-    const saved = store.setWatched(address, !store.snapshot().entries.includes(address));
+    const saved = store.setWatched(address, !tokenIsWatched(store.snapshot().entries, address));
     if (saved && typeof window !== 'undefined') window.dispatchEvent(new Event(changedEvent));
     return saved;
   }, [store]);

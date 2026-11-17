@@ -8,6 +8,7 @@ const wallet = z.string().regex(/^0x[\da-fA-F]{40}$/, 'Enter an EVM address.').r
 const art = z.union([source, z.string().regex(/^\/api\/media\/[a-f0-9]{64}\.webp$/)]);
 export const metadataItemSchema = z.object({ name: z.string().trim().min(1).max(100), description: z.string().max(2048).optional(), image: art, attributes: z.array(z.object({ trait_type: z.string().max(100), value: z.union([z.string().max(200), z.number().finite()]) }).strict()).max(100).optional() }).strict();
 export const oneshotDraftSchema = z.object({
+  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
   name: z.string().trim().min(1).max(100).refine(value => new TextEncoder().encode(value).length <= 100, 'Collection names must fit 100 UTF-8 bytes.'), description: z.string().max(2048).default(''),
   symbol: z.string().trim().min(1, 'Enter a collection symbol.').refine(value => new TextEncoder().encode(value).length <= 20, 'Collection symbols must fit 20 UTF-8 bytes.').optional(),
   maxSupply: z.number().int().min(1).max(1000), royaltyBps: z.number().int().min(0).max(1000),

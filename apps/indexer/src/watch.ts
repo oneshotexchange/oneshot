@@ -1,4 +1,4 @@
-import { RpcError } from '@oneshot/evm';
+import { RpcError, nftExecutionNetwork } from '@oneshot/evm';
 import { syncIndexer, type SyncOptions } from './engine';
 import { IndexerError, type ChainSource, type IndexerStore, type Manifest } from './types';
 
@@ -45,11 +45,11 @@ export function pauseIndexerWatch(milliseconds: number, signal?: AbortSignal): P
 }
 
 /**
- * Explicit local watcher. Each bounded pass commits through the existing engine;
+ * Explicit supported-testnet watcher. Each bounded pass commits through the existing engine;
  * stop drains the in-flight pass, and the caller owns lease/store cleanup.
  */
 export async function watchIndexer(source: ChainSource, store: IndexerStore, manifest: Manifest, options: WatchOptions = {}) {
-  if (manifest.mode !== 'local' || manifest.chainId !== 31337) throw new IndexerError('LOCAL_PROFILE_REQUIRED');
+  if (!nftExecutionNetwork(manifest)) throw new IndexerError('TEST_PROFILE_REQUIRED');
   const poll = options.pollIntervalMs ?? 2_000;
   if (!Number.isSafeInteger(poll) || poll < 500 || poll > 60_000) throw new IndexerError('WATCH_OPTIONS_INVALID');
   const pause = options.pause ?? pauseIndexerWatch, sync = options.sync ?? syncIndexer;

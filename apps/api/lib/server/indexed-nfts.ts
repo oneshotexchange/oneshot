@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { NextRequest } from 'next/server';
-import { createVerifiedRpc, networkConfig, type IndexedNftContext, type IndexedCollection, type IndexedCollectionMarketStats, type IndexedListing, type IndexedNftItem, type IndexedActivity, type IndexedClaim, type IndexedNftPresentation } from '@oneshot/evm';
+import { createVerifiedRpc, networkConfig, nftExecutionNetwork, type NftExecutionNetwork, type IndexedNftContext, type IndexedCollection, type IndexedCollectionMarketStats, type IndexedListing, type IndexedNftItem, type IndexedActivity, type IndexedClaim, type IndexedNftPresentation } from '@oneshot/evm';
 import { manifestId, parseManifest, isAddress, isHash } from '../../../indexer/src/manifest';
 import { VerifiedRpcSource } from '../../../indexer/src/rpc-source';
 import type { ChainSource, Manifest } from '../../../indexer/src/types';
@@ -108,8 +108,8 @@ function parseCursor(input: string | undefined, select: Selection): Cursor | nul
   } catch (error) { if (error instanceof ApiError) throw error; return badInput(); }
 }
 const encodeCursor = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
-const disabledContext = (enabled: boolean, reason: string, deploymentId: string | null = null): IndexedNftContext => ({
-  enabled, available: false, reason, deploymentId, network: deploymentId ? { mode: 'local', name: 'Local Anvil', chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18 } : null,
+const disabledContext = (enabled: boolean, reason: string, deploymentId: string | null = null, network: NftExecutionNetwork | null = null): IndexedNftContext => ({
+  enabled, available: false, reason, deploymentId, network,
   checkpoint: null, sync: null, readonly: true, finalized: false,
 });
 function emptyResult(context: IndexedNftContext, select: Selection) {
@@ -340,11 +340,12 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
     const enabled = env.ONESHOT_INDEXER_READS_ENABLED;
     if (enabled === undefined || enabled === '' || enabled === 'false') return json(emptyResult(disabledContext(false, 'NFT records are currently unavailable. You can still create and save collection drafts.'), select));
     if (enabled !== 'true') throw new ApiError(503, 'INDEXER_CONFIG_INVALID', 'Indexed NFT browsing is not configured correctly.');
-    if (env.ONESHOT_NETWORK !== 'local') throw new ApiError(503, 'INDEXER_PROFILE_UNSUPPORTED', 'Indexed browsing currently supports the local test chain only.');
+    if (env.ONESHOT_NETWORK !== 'local' && env.ONESHOT_NETWORK !== 'base-sepolia') throw new ApiError(503, 'INDEXER_PROFILE_UNSUPPORTED', 'Indexed browsing is unavailable for this network.');
     if (!env.DATABASE_URL || !env.ONESHOT_INDEXER_MANIFEST_PATH) throw new ApiError(503, 'INDEXER_CONFIG_INCOMPLETE', 'Indexed NFT browsing needs a database and deployment manifest.');
     let manifest: Manifest, identity: string;
-    try { manifest = await deps.loadManifest(env); identity = manifestId(manifest); }
+    try { manifest = await deps.loadManifest(env); identity = manifestId(manifest); if (manifest.mode !== env.ONESHOT_NETWORK) throw new Error(); }
     catch { throw new ApiError(503, 'INDEXER_MANIFEST_INVALID', 'The indexed NFT deployment manifest is unavailable or invalid.'); }
+    const network = nftExecutionNetwork(manifest)!;
     let source: ChainSource;
     try { source = await deps.source(env); await source.verify(manifest); }
     catch { throw new ApiError(503, 'INDEXER_CHAIN_UNAVAILABLE', 'The configured indexed chain or deployment could not be verified.'); }
@@ -362,13 +363,13 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
       if (!deployment.rows.length || !head) {
         if (cursor) throw new ApiError(409, 'CURSOR_STALE', 'The indexed checkpoint changed. Refresh this list from the beginning.');
         await client.query('COMMIT'); began = false;
-        return json(emptyResult(disabledContext(true, 'NFT records are being updated. Please try again shortly.', identity), select));
+        return json(emptyResult(disabledContext(true, 'NFT records are being updated. Please try again shortly.', identity, network), select));
       }
       const block = numberText(head.block_number, 78), blockHash = hash(head.block_hash), timestamp = numberText(head.block_timestamp, 78);
       if (BigInt(block) < manifest.startBlock) return invalidData();
       if (cursor && (cursor.manifest !== identity || cursor.block !== block || cursor.hash !== blockHash)) throw new ApiError(409, 'CURSOR_STALE', 'The indexed checkpoint changed. Refresh this list from the beginning.');
       const context: IndexedNftContext = { enabled: true, available: true, reason: null, deploymentId: identity,
-        network: { mode: 'local', name: 'Local Anvil', chainId: 31337, nativeSymbol: 'ETH', nativeDecimals: 18 },
+        network,
         checkpoint: { number: block, hash: blockHash, timestamp }, sync: null, readonly: true, finalized: false };
       const resultRows = await readRows(client, select, identity, cursor);
       // Read only the SQL snapshot above; do not attach data from a later journal state.

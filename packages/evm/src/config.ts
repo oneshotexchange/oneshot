@@ -1,5 +1,7 @@
+import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_RPC_URL, BASE_SEPOLIA_EXPLORER_URL, BASE_SEPOLIA_CONFIG_SOURCE_URL } from './execution-network';
+
 export type NetworkConfig = {
-  mode: 'zero' | 'local';
+  mode: 'zero' | 'local' | 'base-sepolia';
   name: string;
   chainId: number | null;
   rpcUrl: string | null;
@@ -29,7 +31,7 @@ function optionalUrl(input: string | undefined, name: string, local = false): st
 /** Missing Zero facts remain null. EVM compatibility never supplies chain precision. */
 export function networkConfig(env: Record<string, string | undefined>): NetworkConfig {
   const mode = env.ONESHOT_NETWORK || 'zero';
-  if (mode !== 'zero' && mode !== 'local') throw new Error('ONESHOT_NETWORK must be zero or local');
+  if (mode !== 'zero' && mode !== 'local' && mode !== 'base-sepolia') throw new Error('ONESHOT_NETWORK must be zero, local or base-sepolia');
   if (mode === 'local') {
     const chainId = optionalInteger(env.ONESHOT_CHAIN_ID, 'ONESHOT_CHAIN_ID', Number.MAX_SAFE_INTEGER) ?? 31337;
     if (chainId !== 31337) throw new Error('Local development requires chain ID 31337');
@@ -37,8 +39,19 @@ export function networkConfig(env: Record<string, string | undefined>): NetworkC
     if (decimals !== 18) throw new Error('Local Anvil ETH has 18 decimals');
     return { mode, name: 'Local Anvil (not Zero)', chainId, rpcUrl: optionalUrl(env.ONESHOT_RPC_URL || 'http://127.0.0.1:8545', 'ONESHOT_RPC_URL', true), genesisHash: null, explorerUrl: null, nativeSymbol: 'ETH', nativeDecimals: decimals, sourceUrl: null, configurationReady: true, missing: [] };
   }
+  if (mode === 'base-sepolia') {
+    const chainId = optionalInteger(env.ONESHOT_CHAIN_ID, 'ONESHOT_CHAIN_ID', Number.MAX_SAFE_INTEGER) ?? BASE_SEPOLIA_CHAIN_ID;
+    const nativeDecimals = optionalInteger(env.ONESHOT_NATIVE_DECIMALS, 'ONESHOT_NATIVE_DECIMALS', 38) ?? 18;
+    if (chainId !== BASE_SEPOLIA_CHAIN_ID || nativeDecimals !== 18) throw new Error('Base Sepolia requires chain ID 84532 and ETH precision 18.');
+    if (env.ONESHOT_GENESIS_HASH && env.ONESHOT_GENESIS_HASH.toLowerCase() !== BASE_SEPOLIA_GENESIS_HASH) throw new Error('Base Sepolia genesis must match the pinned official network identity.');
+    if (env.ONESHOT_CONFIG_SOURCE_URL && env.ONESHOT_CONFIG_SOURCE_URL !== BASE_SEPOLIA_CONFIG_SOURCE_URL) throw new Error('Base Sepolia uses its pinned official configuration reference.');
+    if (env.ONESHOT_EXPLORER_URL && env.ONESHOT_EXPLORER_URL !== BASE_SEPOLIA_EXPLORER_URL) throw new Error('Base Sepolia uses its official testnet explorer.');
+    return { mode, name: 'Base Sepolia testnet', chainId, nativeSymbol: 'ETH', nativeDecimals: 18,
+      rpcUrl: optionalUrl(env.ONESHOT_RPC_URL || BASE_SEPOLIA_RPC_URL, 'ONESHOT_RPC_URL'), genesisHash: BASE_SEPOLIA_GENESIS_HASH,
+      explorerUrl: BASE_SEPOLIA_EXPLORER_URL, sourceUrl: BASE_SEPOLIA_CONFIG_SOURCE_URL, configurationReady: true, missing: [] };
+  }
   const chainId = optionalInteger(env.ONESHOT_CHAIN_ID, 'ONESHOT_CHAIN_ID', Number.MAX_SAFE_INTEGER);
-  if (chainId === 0 || chainId === 31337) throw new Error('Zero requires its official chain ID; local Anvil is a separate profile');
+  if (chainId === 0 || chainId === 31337 || chainId === 8453 || chainId === BASE_SEPOLIA_CHAIN_ID) throw new Error('Zero requires its official chain identity; other EVM networks use separate profiles.');
   const rpcUrl = optionalUrl(env.ONESHOT_RPC_URL, 'ONESHOT_RPC_URL');
   const nativeDecimals = optionalInteger(env.ONESHOT_NATIVE_DECIMALS, 'ONESHOT_NATIVE_DECIMALS', 38);
   const genesisHash = env.ONESHOT_GENESIS_HASH || null;

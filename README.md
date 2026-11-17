@@ -1,6 +1,6 @@
 # oneshot
 
-Token and NFT creation tools for Zero, with wallet authentication, saved NFT drafts, artwork uploads and a marketplace interface.
+Token and NFT creation, launch and marketplace tools. Base Sepolia is the current test-network target; Zero remains a future integration after its network and AMM references are available.
 
 ## Project structure
 
@@ -8,7 +8,7 @@ Token and NFT creation tools for Zero, with wallet authentication, saved NFT dra
 | --- | --- |
 | `apps/web` | Vite and React frontend |
 | `apps/api` | Next.js API, authentication and storage |
-| `apps/indexer` | NFT event indexing |
+| `apps/indexer` | Canonical NFT/token event indexing and bounded token contract snapshots |
 | `packages` | Shared types and client libraries |
 | `contracts-evm` | Solidity contracts and Foundry tests |
 | `db` | PostgreSQL schema |
@@ -42,6 +42,7 @@ Contract checks also require Foundry:
 ```sh
 npm run contracts:test
 npm run contracts:smoke
+npm run contracts:smoke:v4
 ```
 
 Database and contract integration tests use isolated local services. They must not target production data.
@@ -54,7 +55,19 @@ For a Git-connected Pages project, use Node.js 22, build command `npm run build:
 
 ## Network availability
 
-Zero network configuration and contract deployment remain unverified. Live minting, trading and chain indexing stay disabled until the network and deployments are verified. NFT transaction and marketplace flows currently support a verified local Anvil deployment only. Hosting the application does not enable production blockchain transactions.
+Base Sepolia (chain 84532, test ETH with 18 decimals) and local Anvil (31337) have explicit, separate execution profiles. NFT reviews, guarded listing permits, receipts and indexing use the verified deployment's chain. Token launch, exact-input trading and fee claims use the immutable v4 market engine described in [the contract reference](contracts-evm/README.md). The November 16 v4 local rehearsal covers contract execution and authenticated application reviews and receipt recovery for that earlier bytecode. The subsequent metadata admission changes have Foundry coverage; Windows Application Control currently prevents a fresh Anvil run. These local results do not establish a Base deployment. Hosting the application alone never enables transactions. See [the build status and three-phase release plan](BASE-SEPOLIA.md).
+
+Base execution requires independently verified RPC identity, canonical deployment manifests and separate NFT/token opt-ins. The public RPC identity probe is `npm run verify:base-sepolia -- --env-file PATH`; it never signs or submits a transaction. The offline unsigned deployment planner, `npm run contracts:plan:base -- --help`, prepares six explicit wallet transactions and size/hash evidence without publishing them. Zero remains disabled until its own network, deployment and AMM have been verified.
+
+Token discovery uses `/api/oneshot/token-indexed/markets`, independently of the legacy token API. `npm run indexer:token-snapshot -- --manifest PATH` verifies and atomically stores a complete canonical contract snapshot in a dedicated local PostgreSQL database. This development discovery worker is bounded to at most 25 markets (default 10); a larger registry fails without committing a partial result.
+
+`npm run indexer:token-events -- --help` describes the separate resumable event journal. Hash-selected factory, pool, market and token logs drive exact prices, volume, balances and burns with atomic rollback. It avoids the snapshot ceiling, but retains explicit limits: 1,024 registered markets, four new markets and 10,000 logs per block, 768 logical reads/45 seconds per capture and 16 blocks of reorg recovery. Its current address/topic batches scan known registrations per block; this is not an unlimited-scale ingestion design. Production capacity work and broader discovery pagination remain release requirements.
+
+The separately enabled `/api/oneshot/token-analytics/markets/:market` API provides prices, trades and holders at a held canonical checkpoint. Pool volume includes all routes; oneshot executions and fees are separate totals. External pool-event traders remain unknown. Wallet reads at `/api/oneshot/token-analytics/wallets/:wallet` verify exact token balances at the same hash and require complete wallet-aware journal coverage. Older journals return unavailable until an explicit tested replay; public reads never reset or backfill them. The UI shows sampled loaded-swap price history, exact ratio values, lag, holder scope and paginated balances without inventing cash values or P&L.
+
+Authenticated `/api/oneshot/token-execution/` routes prepare and revalidate exact calls before the customer's wallet signs. Sell approval is a separate exact allowance; buy fees come from the total native input and sell fees from actual gross output. Reviews disclose the current directional protocol/LP fee and require a new review after a fee change. Receipt tracking checks the complete wallet call, chain and canonical inclusion; confirmations remain explicitly unfinalized. No signing keys are used by this token service.
+
+NFT and token issuance reject malformed UTF-8, control-only/blank metadata and a leading BOM before registering a launch. Normal Unicode and emoji remain supported within the existing name/symbol byte limits. This prevents permissionless direct launches from creating records that the decoders cannot safely index.
 
 For separately scoped, read-only RPC evidence, use an independently prepared deployment plan:
 
@@ -66,7 +79,7 @@ See [the capability plan and report reference](packages/evm/RPC-CAPABILITIES.md)
 
 Browser drafts remain local to the device. Account drafts require authentication and durable database storage; uploaded media requires configured object storage.
 
-Token creators can keep up to 20 named browser drafts alongside an autosaved working copy. Existing single-draft storage is recovered without changing its original bytes. Both creation pages support versioned JSON backups that restore editable terms as a new draft. Backups do not include image bytes, account credentials, prepared metadata snapshots or transaction authority. Collection imports require the original images again before uploading. Unreadable storage and stale-tab writes are blocked; saving a new draft at capacity does not evict existing work.
+Token creators can keep up to 20 named browser drafts alongside an autosaved working copy. Legacy Zero storage remains unchanged; new storage has separate versioned keys with optimistic migration snapshots. A Base copy clears prices or opening valuation and requires deliberate test ETH amounts. Account drafts cannot change their currency tag in place. Both creation pages support versioned JSON backups that restore editable terms as a new draft. Backups do not include image bytes, account credentials, prepared metadata snapshots or transaction authority. Collection imports require the original images again before uploading. Unreadable storage and stale-tab writes are blocked; saving a new draft at capacity does not evict existing work.
 
 NFT creation also preserves incomplete browser working terms separately from named drafts. Account edits remain in memory until explicitly saved to the account; only Copy to new draft creates a browser copy. Navigation warns before losing selected artwork bytes, unsaved account edits or browser terms that could not be saved. Selected image bytes are never stored in the browser working copy.
 

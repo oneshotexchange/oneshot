@@ -4,6 +4,7 @@ import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
 
 export type LocalCollectionDraft = {
+  pricingNetwork?: 'zero' | 'base-sepolia';
   id: string; name: string; symbol?: string; description: string; supply: string; royalty: string; price: string; limit: string;
   metadataMode: 'upload' | 'url'; metadataUrl: string; fileNames: string[]; publicStart: string; publicEnd?: string;
   allowlist: boolean; allowlistStart: string; allowlistEnd?: string; allowlistPrice: string; addresses: string; savedAt: string;
@@ -38,6 +39,7 @@ export function accountCollectionLocalDraft(record: OneshotDraft): LocalCollecti
   const localTime = (value?: string) => value ? new Date(Date.parse(value) - new Date(value).getTimezoneOffset() * 60_000).toISOString().slice(0, 19) + (value.match(/\.\d+/)?.[0] || '') : '';
   const artNames = record.manifest?.items.map(item => `Saved art: ${item.name}`) || (record.imageUrl ? ['Saved artwork'] : record.snapshot ? ['Saved collection metadata'] : []);
   return {
+    ...(record.pricingNetwork !== undefined ? { pricingNetwork: record.pricingNetwork } : {}),
     id: `account:${record.id}`, name: record.name, symbol: record.symbol ?? '', description: record.description,
     supply: String(record.maxSupply), royalty: String(record.royaltyBps / 100), price: record.publicPrice, limit: String(record.perWalletLimit),
     metadataMode: record.metadataMode, metadataUrl: record.metadataUrl || '', fileNames: artNames,
@@ -69,6 +71,7 @@ export function collectionAccountInput(draft: LocalCollectionDraft, creatorWalle
   const publicStart = scheduleIso(draft.publicStart, 'public mint start');
   const image = (art: UploadedArt) => art.reference || art.url;
   const fields = {
+    ...(draft.pricingNetwork !== undefined ? { pricingNetwork: draft.pricingNetwork } : {}),
     name: draft.name, description: draft.description, maxSupply: Number(draft.supply), royaltyBps: Math.round(Number(draft.royalty) * 100),
     ...(draft.symbol !== undefined ? { symbol: draft.symbol } : {}),
     publicPrice: draft.price, allowlistPrice: draft.allowlist ? draft.allowlistPrice : '0', perWalletLimit: Number(draft.limit),

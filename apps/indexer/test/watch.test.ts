@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RpcError } from '@oneshot/evm';
+import { RpcError, BASE_SEPOLIA_GENESIS_HASH } from '@oneshot/evm';
 import { watchIndexer, indexerRetryReason, pauseIndexerWatch, type WatchEvent } from '../src/watch';
 import { IndexerError, type Block, type ChainSource, type Manifest } from '../src/types';
 import { MemoryIndexerStore } from '../src/store';
@@ -98,10 +98,18 @@ describe('local continuous indexer lifecycle', () => {
     expect(sync).not.toHaveBeenCalled();
   });
 
-  it('refuses a nonlocal profile before starting work', async () => {
+  it('supports an explicit Base Sepolia bounded watcher with repeated whole-second timestamps', async () => {
+    const base:Manifest={...manifest,mode:'base-sepolia',chainId:84532,genesisHash:BASE_SEPOLIA_GENESIS_HASH};
+    const controller=new AbortController(),chain=source(2n),store=new MemoryIndexerStore();
+    chain.block=async number=>({...block(number),parentHash:number===1n?base.anchorHash:block(number).parentHash,timestamp:1n});
+    const result=await watchIndexer(chain,store,base,{signal:controller.signal,pause:async()=>controller.abort()});
+    expect(result.passes).toBe(1);
+    expect((await store.snapshot()).blocks.map(entry=>entry.block.timestamp)).toEqual([1n,1n]);
+  });
+  it('refuses an unsupported profile before starting work', async () => {
     const sync = vi.fn();
     await expect(watchIndexer(source(), new MemoryIndexerStore(), { ...manifest, chainId: 1 } as unknown as Manifest, { sync }))
-      .rejects.toMatchObject({ code: 'LOCAL_PROFILE_REQUIRED' });
+      .rejects.toMatchObject({ code: 'TEST_PROFILE_REQUIRED' });
     expect(sync).not.toHaveBeenCalled();
   });
 });

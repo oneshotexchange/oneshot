@@ -40,7 +40,7 @@ Remaining Phase 1 work for the broader original product includes NFT item/collec
 
 ## Phase 2: owner review
 
-Started at the owner's request on 17 November 2026 for milestone `bd848b8`. The [owner review guide and pending decisions](PHASE-2-REVIEW.md) distinguish sample-preview acceptance from the later deployed test-network review. Owner product approval has not yet been recorded.
+Started at the owner's request on 17 November 2026 for milestone `bd848b8`. Home/navigation and token creation received positive owner feedback and delegated agent approval for the sample-preview UI. The [owner review guide and decision log](PHASE-2-REVIEW.md) record this limited acceptance. Approval of the remaining screens, real accounts, live Base transactions and release remains pending.
 
 Review each implemented milestone with test assets: create/copy/restore a draft; save/resume/update/archive token account copies; inspect frozen supply, fee and range; create/open/mint/list/buy/cancel an NFT; launch/buy/approve/sell/claim a token; recover a transaction after leaving the page; and distinguish empty results from unavailable services. Check desktop/mobile layouts, fee rounding, royalties and linked-wallet/network changes. Reviewing a milestone does not mark the entire Phase 1 backlog complete.
 

@@ -6,6 +6,8 @@ The subsequent [NFT V3 build](NFT-MARKETPLACE-V3.md) adds item/collection offers
 
 ## Open the review preview
 
+The 18 November [collection search build](NFT-DISCOVERY.md) has a separate signing-disabled [collection preview](http://127.0.0.1:19404/nfts/0x0000000000000000000000000000000000000004?deployment=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd&q=Nebula). Agent desktop/mobile inspection checked full-collection search, typed traits, owner/price filters, ordering, pagination, empty/unavailable responses and scroll preservation. It uses 40 synthetic NFTs and no real wallet. Owner acceptance of these new NFT screens remains pending; earlier home/token approval is unchanged. Its ignored configuration is in `.local/qa/nft-discovery-preview` and proof images/logs are in `.local/qa/nft-discovery`.
+
 [Local review preview](http://127.0.0.1:18390/)
 
 This separate loopback preview uses sample collections, markets, balances, accounts and quotes. Its review controls can select a sample signed-in account, an account without a wallet, and unavailable/error responses. Signing is disabled. It neither deploys contracts nor connects to the hosted API. Account copies in the preview are temporary in-memory fixtures; real PostgreSQL persistence was checked separately. Browser drafts stay in this preview origin on the current device. Use sample terms, not credentials or valuable content.

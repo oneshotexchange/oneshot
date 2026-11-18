@@ -1,0 +1,28 @@
+.nft-explorer-form{padding:20px;border-bottom:1px solid var(--line)}
+.nft-explorer-main-controls{display:grid;grid-template-columns:minmax(240px,1.5fr) minmax(140px,.7fr) minmax(200px,1fr);gap:14px;align-items:start}
+.nft-explorer-form .field{margin:0;min-width:0;display:flex;flex-direction:column}
+.nft-explorer-form input,.nft-explorer-form select{width:100%;min-width:0;min-height:42px}
+.nft-explorer-form .field-hint{line-height:1.7}
+.nft-explorer-more{margin-top:16px;border-top:1px solid var(--line);padding-top:16px}
+.nft-explorer-more>summary,.nft-explorer-manual-trait>summary{cursor:pointer;font-size:12px;line-height:1.6;width:fit-content}
+.nft-explorer-secondary-controls{display:grid;grid-template-columns:1fr 1fr minmax(200px,1.3fr);gap:14px;margin:18px 0 10px}
+.nft-explorer-traits{margin:20px 0 0;padding:16px;border:1px solid var(--line);border-radius:7px;min-width:0}
+.nft-explorer-traits:disabled{opacity:.65}
+.nft-explorer-traits legend{padding:0 6px;font-size:12px}
+.nft-explorer-traits>p{font-size:11px;line-height:1.8;color:var(--theme-muted)}
+.nft-explorer-trait-picker{display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,1.5fr) auto;gap:12px;align-items:end;margin:14px 0 10px}
+.nft-explorer-manual-trait{margin-top:15px;padding-top:15px;border-top:1px solid var(--line)}
+.nft-explorer-manual-controls{display:grid;grid-template-columns:minmax(130px,1fr) minmax(100px,.65fr) minmax(150px,1fr) auto;align-items:end;gap:12px;margin:14px 0 10px}
+.nft-explorer-selected-traits{list-style:none;margin:15px 0 0;padding:0;display:flex;gap:8px;flex-wrap:wrap}
+.nft-explorer-selected-traits li{display:flex;align-items:center;max-width:100%;border:1px solid var(--line);border-radius:5px;background:var(--theme-surface-raised);font-size:11px;line-height:1.6}
+.nft-explorer-selected-traits li>span{padding:6px 8px;overflow-wrap:anywhere;min-width:0}
+.nft-explorer-selected-traits button{display:flex;align-items:center;justify-content:center;align-self:stretch;min-width:34px;background:transparent;color:var(--theme-muted);border-left:1px solid var(--line)}
+.nft-explorer-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:17px}
+.nft-explorer-actions>.button:last-child{margin-left:auto}
+.nft-explorer-form>.inline-message{margin-top:14px}
+.nft-explorer-result-heading{padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:1px solid var(--line);font-size:11px;line-height:1.8;flex-wrap:wrap}
+.nft-explorer-result-heading>span:last-child{color:var(--theme-muted);font-size:10px}
+.nft-explorer-metadata-note{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 20px;font-size:11px;line-height:1.8;background:var(--theme-surface-raised);color:var(--theme-muted)}
+.nft-explorer-feedback{padding:20px}.nft-explorer-feedback>.button-row{margin-top:10px}
+@media(max-width:950px){.nft-explorer-main-controls{grid-template-columns:1fr 1fr}.nft-explorer-main-controls>.field:first-child{grid-column:1/-1}.nft-explorer-secondary-controls{grid-template-columns:1fr 1fr}.nft-explorer-secondary-controls>.field:last-child{grid-column:1/-1}.nft-explorer-manual-controls{grid-template-columns:1fr 1fr}.nft-explorer-manual-controls>.field:last-of-type{grid-column:1/-1}.nft-explorer-manual-controls>.button{justify-self:start}}
+@media(max-width:600px){.nft-explorer-form{padding:15px}.nft-explorer-main-controls,.nft-explorer-secondary-controls,.nft-explorer-trait-picker,.nft-explorer-manual-controls{grid-template-columns:minmax(0,1fr)}.nft-explorer-main-controls>.field,.nft-explorer-secondary-controls>.field,.nft-explorer-manual-controls>.field{grid-column:auto!important}.nft-explorer-traits{padding:12px}.nft-explorer-trait-picker>.button,.nft-explorer-manual-controls>.button{justify-self:start}.nft-explorer-actions>.button:last-child{margin-left:0}.nft-explorer-metadata-note{align-items:flex-start;flex-direction:column;padding:14px 15px}.nft-explorer-result-heading{padding:15px}.nft-explorer-feedback{padding:15px}.nft-explorer-actions>.button{min-height:42px}}

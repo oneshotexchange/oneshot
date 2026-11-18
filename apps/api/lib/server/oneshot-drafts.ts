@@ -9,6 +9,7 @@ import { canonicalPublicUrl, fetchPublicResource } from './public-fetch';
 import { assertLinkedEvmAddress, type OneshotSession } from './oneshot-auth';
 import { isPublicIpv4Address, isPublicMetadataOrigin } from '../../../web/lib/oneshot-origin';
 import { verifiedNftSnapshot as verifiedSnapshot } from './nft-snapshot';
+import {buildNftMetadataCatalog,writeNftMetadataCatalog,type NftMetadataCatalog} from './nft-metadata-catalog';
 
 const namespace = 'oneshot_drafts';
 const safeId = z.string().uuid();
@@ -128,6 +129,7 @@ async function prepareSnapshot(id: string, revision: number, session: OneshotSes
   if (uniqueImages.size > 100) throw new ApiError(400, 'SNAPSHOT_BATCH_LIMIT', 'Prepare at most 100 distinct images per snapshot. Shared-art editions can contain up to 1,000 NFTs.');
   const images = new Map<string, {url:string;hash:string}>();
   const items: { serial: number; metadataId: string; metadataHash: string; imageHash: string }[] = [];
+  const catalogItems:NftMetadataCatalog['items']=[];
   for (const [index, item] of manifest.items.entries()) {
     assertSnapshotActive(signal);
     let image = images.get(item.image);
@@ -138,6 +140,7 @@ async function prepareSnapshot(id: string, revision: number, session: OneshotSes
     const blob = await storeBlob(bytes, 'json', session.userId, origin);
     assertSnapshotActive(signal);
     items.push({ serial: index + 1, metadataId: `${blob.hash}.json`, metadataHash: blob.hash, imageHash: image.hash });
+    catalogItems.push({serial:index+1,metadataJson:bytes.toString('utf8')});
   }
   const manifestHash = createHash('sha256').update(stableJson({ items })).digest('hex');
   const collectionBytes = Buffer.from(stableJson({ name: previous.name, description: previous.description, image: images.values().next().value!.url, manifest_hash: manifestHash }));
@@ -145,7 +148,8 @@ async function prepareSnapshot(id: string, revision: number, session: OneshotSes
   const collection = await storeBlob(collectionBytes, 'json', session.userId, origin);
   assertSnapshotActive(signal);
   const committed = await putIfAbsent('oneshot_snapshots', manifestHash, { manifestHash, items, createdAt: new Date().toISOString() });
-  verifiedSnapshot(committed, manifestHash);
+  const verified=verifiedSnapshot(committed, manifestHash);
+  await writeNftMetadataCatalog(buildNftMetadataCatalog(manifestHash,verified,catalogItems,signal),signal);
   assertSnapshotActive(signal);
   const updated: OneshotDraft = { ...previous, manifest: undefined, revision: revision + 1, status: 'prepared', updatedAt: new Date().toISOString(), snapshot: { manifestHash, contentHash: `0x${manifestHash}`, baseUri: `${origin}/api/oneshot/metadata/${manifestHash}/`, collectionUri: collection.url, itemCount: items.length, preparedAt: new Date().toISOString() } };
   if (!await compareAndSetRecord(namespace, id, previous, updated)) throw new ApiError(409, 'DRAFT_CHANGED', 'The draft changed during preparation. Reload it before preparing again.');

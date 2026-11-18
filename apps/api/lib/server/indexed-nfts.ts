@@ -9,6 +9,8 @@ import type { SqlClient, SqlPool } from '../../../indexer/src/store';
 import { database } from './store';
 import { ApiError } from './errors';
 import { createNftPublicContentResolver } from './nft-public-content';
+import { parseNftExplorerSelection, readNftExplorer, type NftExplorerSelection } from './nft-item-discovery';
+import {acquireNftExplorerSql} from './nft-explorer-sql';
 
 type Env = Record<string, string | undefined>;
 type ContentResolver = (contentHash: string, tokenId: string) => Promise<IndexedNftPresentation | null>;
@@ -20,8 +22,8 @@ export type IndexedReaderDependencies = {
   /** A new cache belongs to each indexed request, never to a collection address across checkpoints. */
   contentResolver: (client: SqlClient) => ContentResolver;
 };
-type Resource = 'status' | 'collections' | 'collection' | 'items' | 'item' | 'listings' | 'activity' | 'wallet-items' | 'claims';
-type Selection = { resource: Resource; collection?: string; wallet?: string; tokenId?: string; seller?: string; status?: string; query?: string; sort?: 'newest' | 'oldest'; limit: number; cursor?: string; scope: string };
+type Resource = 'status' | 'collections' | 'collection' | 'items' | 'item' | 'listings' | 'activity' | 'wallet-items' | 'claims' | 'explore';
+type Selection = { resource: Resource; collection?: string; wallet?: string; tokenId?: string; seller?: string; status?: string; query?: string; sort?: 'newest' | 'oldest'; limit: number; cursor?: string; scope: string; explorer?: NftExplorerSelection };
 type Cursor = { v: 1; manifest: string; block: string; hash: string; scope: string; limit: number; after: string[] };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const json = (body: unknown) => Response.json(body, { headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -56,12 +58,17 @@ function selection(request: NextRequest): Selection {
   else if (kind === 'collections' && parts.length >= 2 && parts.length <= 4) {
     collection = inputAddress(id);
     if (parts.length === 2) resource = 'collection';
+    else if (child === 'explore' && parts.length === 3) resource = 'explore';
     else if (child === 'items' && parts.length === 3) resource = 'items';
     else if (child === 'items' && parts.length === 4 && /^[1-9]\d{0,77}$/.test(serial) && BigInt(serial) < (1n << 256n)) { resource = 'item'; tokenId = serial; }
     else return badInput();
   } else if (kind === 'wallets' && parts.length === 3 && ['items', 'claims'].includes(child)) {
     wallet = inputAddress(id); resource = child === 'items' ? 'wallet-items' : 'claims';
   } else throw new ApiError(404, 'NOT_FOUND', 'Indexed resource not found.');
+  if(resource==='explore'){
+    const explorer=parseNftExplorerSelection(request,collection!);
+    return {resource,collection,limit:explorer.limit,cursor:explorer.cursor??undefined,scope:explorer.scope,explorer};
+  }
   const query = request.nextUrl.searchParams;
   const paged = !['status', 'collection', 'item'].includes(resource);
   const allowed = new Set(paged ? ['cursor', 'limit'] : []);
@@ -113,6 +120,7 @@ const disabledContext = (enabled: boolean, reason: string, deploymentId: string 
   checkpoint: null, sync: null, readonly: true, finalized: false,
 });
 function emptyResult(context: IndexedNftContext, select: Selection) {
+  if (select.resource === 'explore') return { context, collection: select.collection, items: [], nextCursor: null, discovery: null };
   if (select.resource === 'status') return { context };
   if (select.resource === 'collection') return { context, collection: null, marketStats: null };
   if (select.resource === 'item') return { context, item: null };
@@ -349,7 +357,7 @@ const defaults: IndexedReaderDependencies = {
 export function createIndexedNftReader(overrides: Partial<IndexedReaderDependencies> = {}) {
   const deps = { ...defaults, ...overrides };
   return async (request: NextRequest): Promise<Response> => {
-    const select = selection(request), cursor = parseCursor(select.cursor, select), env = { ...deps.env() };
+    const select = selection(request), cursor = select.resource==='explore'?null:parseCursor(select.cursor, select), env = { ...deps.env() };
     const enabled = env.ONESHOT_INDEXER_READS_ENABLED;
     if (enabled === undefined || enabled === '' || enabled === 'false') return json(emptyResult(disabledContext(false, 'NFT records are currently unavailable. You can still create and save collection drafts.'), select));
     if (enabled !== 'true') throw new ApiError(503, 'INDEXER_CONFIG_INVALID', 'Indexed NFT browsing is not configured correctly.');
@@ -366,7 +374,7 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
     if (!pool) throw new ApiError(503, 'DATABASE_REQUIRED', 'Indexed NFT browsing requires its configured database.');
     let client: SqlClient | undefined, began = false;
     try {
-      client = await pool.connect();
+      client = select.resource==='explore'?await acquireNftExplorerSql(pool,request.signal):await pool.connect();
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'); began = true;
       await client.query("SET LOCAL statement_timeout='5000ms'");
       await client.query("SET LOCAL lock_timeout='2000ms'");
@@ -374,7 +382,7 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
       const rows = await client.query('SELECT j.block_number::text,j.block_hash,j.parent_hash,j.block_timestamp::text FROM oneshot_evm_journal j WHERE j.manifest_id=$1 ORDER BY j.block_number DESC LIMIT 1', [identity]);
       const head = rows.rows[0];
       if (!deployment.rows.length || !head) {
-        if (cursor) throw new ApiError(409, 'CURSOR_STALE', 'The indexed checkpoint changed. Refresh this list from the beginning.');
+        if (cursor || select.explorer?.cursor) throw new ApiError(409, 'CURSOR_STALE', 'The indexed checkpoint changed. Refresh this list from the beginning.');
         await client.query('COMMIT'); began = false;
         return json(emptyResult(disabledContext(true, 'NFT records are being updated. Please try again shortly.', identity, network), select));
       }
@@ -391,7 +399,7 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
         const value=accounting.rows.length?valueRecord(accounting.rows[0].value):null;
         if(actual.escrow!==(value?.escrow??'0')||actual.pending!==(value?.pending??'0'))return invalidData();
       }
-      const resultRows = await readRows(client, select, identity, cursor, manifest.deploymentVersion==='oneshot-nft-v3');
+      const resultRows = select.resource==='explore'?[]:await readRows(client, select, identity, cursor, manifest.deploymentVersion==='oneshot-nft-v3');
       // Read only the SQL snapshot above; do not attach data from a later journal state.
       const resolveContent = deps.contentResolver(client);
       const convert = async (row: Record<string, unknown>) => {
@@ -407,7 +415,8 @@ export function createIndexedNftReader(overrides: Partial<IndexedReaderDependenc
         return select.resource === 'listings' ? listingDto(row.value) : select.resource === 'claims' ? claimDto(row.value) : activityDto(row);
       };
       let result: unknown;
-      if (select.resource === 'status') result = { context };
+      if (select.resource === 'explore') result = await readNftExplorer(client,select.explorer!,manifest,context,resolveContent);
+      else if (select.resource === 'status') result = { context };
       else if (select.resource === 'collection' || select.resource === 'item') {
         if (!resultRows.length) throw new ApiError(404, 'INDEXED_RECORD_NOT_FOUND', 'This NFT record is not present at the indexed checkpoint.');
         if (select.resource === 'collection') {

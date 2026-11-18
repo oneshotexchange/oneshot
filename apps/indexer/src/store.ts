@@ -7,7 +7,7 @@ import {
 export interface QueryResult { rows: Record<string, unknown>[]; rowCount: number | null; }
 export interface SqlClient {
   query(sql: string, values?: unknown[]): Promise<QueryResult>;
-  release(): void;
+  release(destroy?: boolean | Error): void;
 }
 export interface SqlPool { connect(): Promise<SqlClient>; end?(): Promise<void>; }
 

@@ -41,6 +41,7 @@
     "indexer:token-snapshot": "tsx scripts/index-token-markets.ts",
     "indexer:token-events": "tsx scripts/index-token-events.ts",
     "indexer:watch": "tsx apps/indexer/src/cli.ts --watch",
+    "nft:catalog:backfill": "tsx scripts/backfill-nft-catalog.ts",
     "preview:indexed": "tsx scripts/local-indexed-fixture.ts",
     "legacy:worker": "npm run start --workspace @b20/worker",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit --project scripts/tsconfig.json",

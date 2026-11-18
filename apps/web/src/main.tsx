@@ -16,6 +16,7 @@ import { GenesisWhitelist } from '../components/genesis-whitelist';
 import { GenesisAuthProvider } from '../components/genesis-auth';
 import WorkspaceError from '../app/error';
 import NotFound from '../app/not-found';
+import { workspaceNavigationKey } from '../lib/workspace-navigation';
 import '../app/globals.css';
 import '../app/themes.css';
 import '../app/theme-picker.css';
@@ -40,8 +41,9 @@ function ItemPage() { const { id = '', item = '' } = useParams(); return <Indexe
 
 function Workspace() {
   const location = useLocation();
-  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname, location.search]);
-  const content = <PageBoundary key={location.pathname + location.search}><Routes>
+  const navigationKey = workspaceNavigationKey(location.pathname, location.search);
+  useEffect(() => { window.scrollTo(0, 0); }, [navigationKey]);
+  const content = <PageBoundary key={navigationKey}><Routes>
     <Route path="/whitelist" element={<GenesisWhitelist />} />
     <Route path="/" element={<Overview />} />
     <Route path="/tokens" element={<TokenDiscovery />} />

@@ -39,6 +39,9 @@ export const oneshotApi = api(async request => {
     return json(await nftLaunch.offers(Object.fromEntries(query)));
   }
   if (resource === 'indexed') {
+    let decoded:string[];
+    try{decoded=segments.map(decodeURIComponent);}catch{throw new ApiError(400,'INVALID_INPUT','Check the collection address and item filters.');}
+    if(decoded.length===4&&decoded[1]==='collections'&&decoded[3]==='explore')rateLimit('oneshot:indexed:explore',20);
     // Public reads still have a process-wide budget before manifest/RPC/database work.
     rateLimit('oneshot:indexed:public', 240);
     return indexedNftRead(request);

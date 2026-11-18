@@ -6,6 +6,7 @@ import Link from './navigation';
 import { useWallet } from '../lib/client-wallet';
 import { NftCheckout, NftTransactionRecovery } from './nft-checkout';
 import { NftOffers } from './nft-offers';
+import { NftCollectionExplorer } from './nft-collection-explorer';
 import { NftEarnings } from './nft-earnings';
 import { TokenPortfolioPanel } from './token-portfolio';
 import { portfolioWalletSelection } from '../lib/portfolio-wallet-selection';
@@ -161,10 +162,9 @@ export function IndexedNftCollection({ id }: { id: string }) {
   const location = useLocation();
   const response = useIndexedResource<IndexedCollectionResponse>(collectionPath(id));
   const [tab, setTab] = useState('items');
-  const page = useIndexedPage<IndexedNftItem>(tab === 'items' ? `${collectionPath(id)}/items` : null, itemKey);
   const listings = useIndexedPage<IndexedListing>(tab === 'listings' ? `${base}/listings?collection=${encodeURIComponent(id)}&status=active` : null, listingKey);
   const activity = useIndexedPage<IndexedActivity>(tab === 'activity' ? `${base}/activity?collection=${encodeURIComponent(id)}` : null, activityKey);
-  const refresh = () => { response.refresh(); void page.refresh(); void listings.refresh(); void activity.refresh(); };
+  const refresh = () => { response.refresh(); void listings.refresh(); void activity.refresh(); };
   if (response.loading) return <Loading rows={5} />;
   if (response.error) return <><ButtonLink href="/nfts" variant="ghost"><ArrowLeft size={13} />All collections</ButtonLink><ErrorState message={response.error} retry={response.refresh} /></>;
   const expectedDeployment = new URLSearchParams(location.search).get('deployment') || response.data?.context.deploymentId || undefined;
@@ -172,8 +172,8 @@ export function IndexedNftCollection({ id }: { id: string }) {
   if (deploymentIssue) return <><ButtonLink href="/nfts" variant="ghost"><ArrowLeft size={13} />All collections</ButtonLink><EmptyState title="Collection network changed" description={deploymentIssue} /></>;
   const collection = response.data?.collection;
   if (!collection) return <><ButtonLink href="/nfts" variant="ghost"><ArrowLeft size={13} />All collections</ButtonLink><IndexedContextNote context={response.data?.context} /><EmptyState title="Collection unavailable" description="This collection could not be found. Check the address or browse other collections." /></>;
-  const active = tab === 'items' ? page : tab === 'listings' ? listings : activity;
-  const changed = Boolean(active.data && response.data && !sameIndexedCheckpoint(active.data.context, response.data.context));
+  const active = tab === 'listings' ? listings : activity;
+  const changed = tab !== 'items' && Boolean(active.data && response.data && !sameIndexedCheckpoint(active.data.context, response.data.context));
   return <><Link className="back-link" href="/nfts"><ArrowLeft size={13} />All collections</Link><PageHeading title={collection.name} description="Artwork, mint terms and collection history." action={<Button variant="secondary" onClick={refresh}><RefreshCw size={13} />Refresh collection</Button>} />
     <IndexedContextNote context={response.data?.context} />
     <IndexedCollectionPreview collection={collection} />
@@ -182,7 +182,7 @@ export function IndexedNftCollection({ id }: { id: string }) {
     <NftCheckout collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh} />
     <NftOffers collection={collection.address} indexedDeploymentId={response.data?.context.deploymentId} onRefresh={refresh}/>
     <section className="panel"><div className="panel-toolbar"><Tabs tabs={[{ value: 'items', label: 'Items' }, { value: 'listings', label: 'Active listings' }, { value: 'activity', label: 'Activity' }]} active={tab} onChange={setTab} /></div>
-      {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <PageBody page={page} empty="No NFTs minted yet" description="Check the mint details above for the schedule and price."><IndexedItemCards items={page.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} chainId={activity.data?.context.network?.chainId} /></PageBody>}
+      {changed ? <div className="indexed-snapshot-change"><p>The collection has changed. Refresh to see its latest activity.</p><Button onClick={refresh} variant="secondary">Refresh collection</Button></div> : tab === 'items' ? <NftCollectionExplorer collection={collection.address} context={response.data!.context} onRefreshCollection={refresh} renderItems={items => <IndexedItemCards items={items} deploymentId={expectedDeployment} />} /> : tab === 'listings' ? <PageBody page={listings} empty="No active listings" description="Open an NFT you own to list it for sale."><Listings listings={listings.data?.items || []} deploymentId={expectedDeployment} /></PageBody> : <PageBody page={activity} empty="No activity yet" description="Mints, listings, sales and payouts appear after confirmation."><ActivityRows activities={activity.data?.items || []} deploymentId={expectedDeployment} chainId={activity.data?.context.network?.chainId} /></PageBody>}
     </section>
     <section className="panel indexed-details"><h2>Collection details</h2><InfoRow label="Collection address"><Address value={collection.address} full /></InfoRow><InfoRow label="Creator"><Address value={collection.creator} full /></InfoRow><InfoRow label="Artwork preview">{indexedPresentation(collection.presentation, '1') ? 'First NFT' : 'Unavailable'}</InfoRow></section>
     <SafetyNote>Review the current mint terms and total cost before approving a transaction in your wallet.</SafetyNote></>;

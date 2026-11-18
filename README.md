@@ -4,6 +4,8 @@ Token and NFT creation, launch and marketplace tools. Base Sepolia is the curren
 
 The [NFT V3 milestone](NFT-MARKETPLACE-V3.md) adds funded item/collection offers, partial fills and refunds, atomic multi-item checkout, exact transaction reviews and canonical offer accounting. New offline deployment plans target V3; existing deployed v1/v2 marketplaces retain their existing features. Base deployment and real wallet evidence remain pending.
 
+The subsequent [NFT collection search milestone](NFT-DISCOVERY.md) adds complete name/serial search, typed traits, owner and exact asking-price filters, sorting and checkpoint-bound pagination for collections up to 1,000 items. Verified metadata catalogs and an explicit stored-source backfill keep private drafts and failed metadata reads out of public search results.
+
 ## Project structure
 
 | Path | Purpose |

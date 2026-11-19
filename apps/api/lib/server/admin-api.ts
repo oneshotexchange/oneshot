@@ -7,6 +7,7 @@ import { api, boundedBody, json, rateLimit, ApiError } from './http';
 import { genesis } from './genesis-service';
 import { genesisAuth } from './genesis-auth';
 import { genesisCampaignSchema, genesisReviewSchema } from '../../../web/lib/genesis-schema';
+import { externalNftAdminApi } from './external-nft-admin-api';
 
 const credentials = z.object({ password: z.string().max(1024) }).strict();
 
@@ -22,6 +23,7 @@ export const adminApi = api(async request => {
   }
   adminAuthenticator.requireSession(request);
   rateLimit('oneshot:admin:read', 120);
+  if (path.startsWith('/api/admin/external-nfts')) return externalNftAdminApi(request);
   if (path.startsWith('/api/admin/genesis')) {
     const actor = 'admin:' + (await import('node:crypto')).createHash('sha256').update(request.headers.get('authorization') || '').digest('hex').slice(0,16);
     if (path === '/api/admin/genesis' && request.method === 'GET') {

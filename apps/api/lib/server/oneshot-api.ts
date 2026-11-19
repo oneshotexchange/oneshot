@@ -11,17 +11,32 @@ import { tokenAnalyticsRead } from './token-analytics';
 import { nftLaunch } from './nft-launch';
 import { genesisApi } from './genesis-api';
 import { tokenExecutionApi } from './token-execution-api';
+import { walletProfilesApi } from './wallet-profiles';
+import { walletFollowingApi } from './wallet-following';
+import { createExternalNftImportsApi } from './external-nft-imports';
+import { reviewedNftImports } from './external-nft-admission';
+import { reviewedNftGateway } from './reviewed-nft-gateway';
 import { archiveTokenAccountDraft, createTokenAccountDraft, getTokenAccountDraft, listTokenAccountDrafts, updateTokenAccountDraft } from './token-account-drafts';
 
 const revision = z.number().int().positive();
 const change = z.object({ expectedRevision: revision, draft: z.unknown() }).strict();
 const expected = z.object({ expectedRevision: revision }).strict();
+const externalNftImportsApi = createExternalNftImportsApi(reviewedNftImports);
 export const oneshotApi = api(async request => {
   const prefix = '/api/oneshot/';
   if (!request.nextUrl.pathname.startsWith(prefix)) throw new ApiError(404, 'NOT_FOUND', 'API resource not found.');
   const segments = request.nextUrl.pathname.slice(prefix.length).replace(/\/$/,'').split('/');
   const [resource, id, operation, extra] = segments;
+  if (resource === 'external-nfts') {
+    if (segments.length === 2 && id === 'config' && request.method === 'GET' && !request.nextUrl.search) {
+      rateLimit('oneshot:external-nfts:config', 20);
+      return json(await reviewedNftGateway.configuration());
+    }
+    return externalNftImportsApi(request);
+  }
   if (resource === 'genesis') return genesisApi(request);
+  if (resource === 'profiles') return walletProfilesApi(request);
+  if (resource === 'following') return walletFollowingApi(request);
   if (resource === 'token-execution') return tokenExecutionApi(request);
   if (resource === 'launch' && segments.length === 2 && id === 'status' && request.method === 'GET') {
     rateLimit('oneshot:launch:status', 60);

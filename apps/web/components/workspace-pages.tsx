@@ -10,6 +10,7 @@ import { Badge, Button, ErrorState, Field, InfoRow, PageHeading } from './ui';
 import { ThemePicker } from './theme-picker';
 import { WalletButton } from './wallet-button';
 import { GenesisAdmin } from './genesis-admin';
+import { ExternalNftAdmin } from './external-nft-admin';
 
 type AdminStatus = SystemStatus & {
   nativeSymbol?: string;
@@ -29,6 +30,7 @@ export function SettingsPage() {
     <div className="settings-layout">
       <div>
         <section className="panel settings-panel"><h2>Account</h2><p>{wallet.authenticated ? wallet.connected ? 'Switch wallets, copy your address or sign out.' : 'You’re signed in. Add a wallet to collect NFTs and manage your assets.' : !wallet.configured || wallet.unavailableReason ? 'Sign-in isn’t available right now. You can still save drafts on this device.' : 'Sign in to save collections to your account and manage your assets.'}</p><WalletButton /></section>
+        <section className="panel settings-panel"><h2>Public profile</h2><p>Save a name, bio and images for your linked wallet. Publish only the details you want to share.</p><Link href="/settings/profile" className="text-link">Edit your profile <ArrowUpRight size={14} /></Link></section>
         <section className="panel settings-panel"><h2>Genesis application</h2><p>Sign in with X on the Genesis page to apply and return to your saved progress. No wallet is needed.</p><a className="text-link" href="/whitelist">View Genesis whitelist <ArrowUpRight size={14}/></a></section>
         <section className="panel settings-panel"><h2>Appearance</h2><ThemePicker /></section>
       </div>
@@ -108,7 +110,7 @@ export function AdminPage() {
       <LockKeyhole size={24} /><h2>Admin sign in</h2><p>Enter your administrator password to view platform configuration.</p>
       <Field label="Admin password" required><input type="password" name="admin-password" autoComplete="current-password" required maxLength={1024} value={password} onChange={event => setPassword(event.target.value)} /></Field>
       <Button type="submit" loading={busy}>Sign in</Button>
-    </form> : status ? <><GenesisAdmin token={session.token}/><AdminDiagnostics status={status} readiness={readiness} /></> : <p>Loading platform configuration…</p>}
+    </form> : status ? <><ExternalNftAdmin token={session.token}/><GenesisAdmin token={session.token}/><AdminDiagnostics status={status} readiness={readiness} /></> : <p>Loading platform configuration…</p>}
   </>;
 }
 

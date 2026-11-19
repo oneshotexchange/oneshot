@@ -6,6 +6,10 @@ The [NFT V3 milestone](NFT-MARKETPLACE-V3.md) adds funded item/collection offers
 
 The subsequent [NFT collection search milestone](NFT-DISCOVERY.md) adds complete name/serial search, typed traits, owner and exact asking-price filters, sorting and checkpoint-bound pagination for collections up to 1,000 items. Verified metadata catalogs and an explicit stored-source backfill keep private drafts and failed metadata reads out of public search results.
 
+[Wallet profiles and private following](WALLET-PROFILES.md) add creator/collector pages, saved edits with explicit publication, private account follows and a canonical NFT activity feed for up to 50 followed wallets. Profile details are self-reported; these pages do not verify identity or copy trades.
+
+[Reviewed external NFT imports](REVIEWED-EXTERNAL-NFTS.md) add private collection requests, authenticated review, a separate ERC-721 registry/market contract foundation and unsigned admission permits. External trading, canonical admission confirmation and ERC-1155 remain separate work; review approval does not enable trading.
+
 ## Project structure
 
 | Path | Purpose |

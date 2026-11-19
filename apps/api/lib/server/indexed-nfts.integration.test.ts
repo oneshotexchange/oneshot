@@ -8,6 +8,7 @@ import { manifestId, parseManifest } from '../../../indexer/src/manifest';
 import { PostgresIndexerStore, type SqlPool } from '../../../indexer/src/store';
 import type { Block, ChainSource, IndexerTransaction, Manifest, ProjectionValue } from '../../../indexer/src/types';
 import { BASE_SEPOLIA_GENESIS_HASH } from '@oneshot/evm';
+import { encodeFollowedWallets } from '../../../web/lib/wallet-following';
 
 // This suite can never fall back to an ambient application/production database.
 const databaseUrl = process.env.ONESHOT_API_TEST_DATABASE_URL;
@@ -127,6 +128,39 @@ async function seed(fixture: Fixture) {
 const payload = async (response: Response) => { expect(response.status).toBe(200); return response.json(); };
 
 describe.skipIf(!databaseUrl)('real PostgreSQL indexed NFT public reads', () => {
+  it('queries a canonical union of followed-wallet actors once and binds pagination to the exact set', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      const all = await payload(await fixture.read('/activity?limit=50'));
+      const encoded = encodeFollowedWallets([alice, bob]);
+      const expected = all.items.filter((event: any) => Object.entries(event.args).some(([key, value]) => ['creator','payer','recipient','from','to','account','owner','approved','operator','buyer','seller','bidder','caller'].includes(key) && [alice, bob].includes(value as `0x${string}`)));
+      const whole = await payload(await fixture.read(`/activity?wallets=${encoded}&limit=50`));
+      expect(whole.items.map((event: any) => event.id)).toEqual(expected.map((event: any) => event.id));
+      expect(new Set(whole.items.map((event: any) => event.id)).size).toBe(whole.items.length);
+      const first = await payload(await fixture.read(`/activity?wallets=${encoded}&limit=1`));
+      expect(first.nextCursor).toBeTypeOf('string');
+      const second = await payload(await fixture.read(`/activity?wallets=${encoded}&limit=1&cursor=${first.nextCursor}`));
+      expect(second.items[0].id).not.toBe(first.items[0].id);
+      expect((await fixture.read(`/activity?wallets=${encodeFollowedWallets([alice])}&limit=1&cursor=${first.nextCursor}`)).status).toBe(400);
+      expect((await fixture.read(`/activity?wallets=${encoded}&wallet=${alice}`)).status).toBe(400);
+      const maximum = encodeFollowedWallets([alice, bob, ...Array.from({ length: 48 }, (_, index) => address(index + 100))]);
+      const bounded = await payload(await fixture.read(`/activity?wallets=${maximum}&limit=1`));
+      expect((await fixture.read(`/activity?wallets=${maximum}&limit=1&cursor=${bounded.nextCursor}`)).status).toBe(200);
+    });
+  });
+  it('filters complete creator collections before pagination and binds continuations to that creator', async () => {
+    await withDatabase(async fixture => {
+      await seed(fixture);
+      const first = await payload(await fixture.read(`/collections?creator=${alice}&limit=1`));
+      expect(first.items).toHaveLength(1); expect(first.items[0].creator).toBe(alice); expect(first.nextCursor).toBeTypeOf('string');
+      const next = await payload(await fixture.read(`/collections?creator=${alice}&limit=1&cursor=${first.nextCursor}`));
+      expect(next.items).toHaveLength(1); expect(next.items[0].address).not.toBe(first.items[0].address); expect(next.nextCursor).toBeNull();
+      expect((await payload(await fixture.read(`/collections?creator=${bob}`))).items).toEqual([]);
+      expect((await fixture.read(`/collections?creator=${bob}&limit=1&cursor=${first.nextCursor}`)).status).toBe(400);
+      expect((await fixture.read(`/collections?creator=${alice}&creator=${bob}`)).status).toBe(400);
+      expect((await fixture.read(`/collections?creator=${address(0)}`)).status).toBe(400);
+    });
+  });
   it('reads exact statistics in a simulated pinned Base deployment on PostgreSQL and rejects a replaced canonical branch',async()=>{
     await withDatabase(async fixture=>{
       await seed(fixture);

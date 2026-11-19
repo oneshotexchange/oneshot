@@ -7,6 +7,8 @@ import { shortAddress } from '../lib/client-api';
 import { Button, Modal } from './ui';
 import { useToast } from './providers';
 import { OneshotLogo } from './brand';
+import Link from './navigation';
+import { walletProfileHref } from '../lib/wallet-profile';
 
 export function WalletButton({ full = false }: { full?: boolean }) {
   const wallet = useWallet(); const { account, connected, network, configured, authenticated, connect, disconnect, isLoading } = wallet;
@@ -26,6 +28,7 @@ export function WalletButton({ full = false }: { full?: boolean }) {
         {authenticated && <><Button variant="secondary" className="full-width" onClick={() => void openPrivy(wallet.linkWallet, 'Could not link a wallet. Try linking it again from your account.')}><Link2 size={16} />Link another wallet</Button><Button variant="ghost" className="full-width" onClick={async () => { try { await disconnect(); close(); } catch { showError('Sign-out could not be completed. Try signing out again.'); } }}><LogOut size={16} />Sign out</Button></>}
       </div>}
       <p className="wallet-footnote">Connecting a wallet does not send a transaction. Review each transaction before signing.</p>
+      {connected && account && <Link href={walletProfileHref(account.address)} className="button button-secondary full-width" onClick={close}>View public profile</Link>}
     </Modal>}
   </>;
 }

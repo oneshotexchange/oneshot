@@ -1,0 +1,49 @@
+# Wallet profiles and private following
+
+19 November 2026. Creator/collector wallet pages, saved profile edits, explicit publication and private follows extend the [NFT search milestone](NFT-DISCOVERY.md). This build changes no settlement contract, deployment or fee. Base Sepolia is still the test-network target.
+
+## Customer experience
+
+`/profile/:wallet` is a public page for a nonzero Ethereum address. Published name, bio, avatar, cover and website sit beside the wallet address. Names are neither unique handles nor verified identities. Websites are explicitly self-reported and open with no referrer. There are no follower counts, identity badges or invented trading statistics.
+
+Created collections, Collected NFTs, For sale and Activity use the existing canonical NFT reader. Collected NFTs means direct custody in the selected wallet. Marketplace-held listings appear separately under For sale; the interface explains that distinction. Each result section shows its own network and checkpoint. Profile details themselves are account records, not onchain identity evidence. Missing profile details do not hide public blockchain records, and a failed profile request is not interpreted as an unpublished profile.
+
+Collection creator, NFT owner, listing seller, portfolio and wallet-dialog links lead to wallet pages. Links originating from NFT data preserve the source deployment identifier. Profile asset links and pagination keep that network context; mismatched or malformed deployment references cannot silently retarget the assets.
+
+`/settings/profile` edits the selected linked wallet. Saving updates a private account draft. Publish creates a separate public snapshot after an explicit review; later private edits leave that snapshot unchanged. Unpublish removes the snapshot while retaining both saved terms and unsaved open edits. Neither action deletes uploaded images or public chain history. Profile edits and in-flight requests have navigation warnings. Unsaved wallet-switch edits stay only in memory for the same signed-in account while the editor remains open; changing account clears that cache. Their original saved revision is retained. A newer account version blocks ordinary save/publication until the user explicitly compares and replaces a version, or discards the open edits. A further change after comparison still rejects the reviewed save. Existing collection/token drafts are unchanged.
+
+Image selection uploads immediately through the existing sanitized media service; the form says so before selection. Removing an image reference does not delete the uploaded object. Only retained local WebP references are accepted, and their published media records are checked at save/publication. Arbitrary image URLs are never fetched by profile reads or writes. Shared public uploads may be reused; accepting a reference is not copyright verification.
+
+Following is private to the signed-in account, supports accounts without linked wallets and has a limit of 50 distinct wallets. The Activity page separates All activity from Following. An empty, unavailable or unreadable following list cannot fall back to the global feed. Account switches discard stale results. Users can reload the list and unfollow from the feed. Following sends no transaction, copies no trades, notifies no owner and creates no public social graph.
+
+## API and storage
+
+| Route | Access and behavior |
+| --- | --- |
+| `GET /api/oneshot/profiles/:wallet` | Public allowlisted snapshot or `profile: null`; no account ID, linked-wallet list, draft or revision |
+| `GET /api/oneshot/profiles/me?wallet=…` | Fresh authenticated identity, currently linked wallet and owning account; returns saved draft/publication/revision |
+| `PUT /api/oneshot/profiles/me` | Saves `{wallet,expectedRevision,profile}` privately |
+| `POST /api/oneshot/profiles/me/publish` | Publishes saved details with `{wallet,expectedRevision}`; nonblank saved name required |
+| `DELETE /api/oneshot/profiles/me/publish` | Unpublishes details with the same revision requirement |
+| `GET /api/oneshot/following` | Authenticated account's private wallet list and revision; linked wallet not required |
+| `PUT /api/oneshot/following` | Applies `{wallet,following,expectedRevision}` to that account's list |
+| `GET /api/oneshot/indexed/collections?creator=…` | Canonical creation-event and projection creator agree; filter precedes pagination |
+| `GET /api/oneshot/indexed/activity?wallets=…` | Public actor query for a canonical encoded set of 1–50 wallets; cannot combine with `wallet` |
+
+Profile details allow 60 characters for a display name and 500 for a plain-text bio. Control/bidirectional override characters are rejected. Websites require a public-style HTTPS hostname without credentials, explicit ports or fragments. Avatar/cover references have exact local content-hash paths. Mutations reject unknown fields, ambiguous query values and oversized bodies. Every account request obtains a fresh bearer token and checks identity again before dispatch and after the response; no tokens or private profile edits enter browser storage.
+
+`oneshot_wallet_profiles` uses the existing application-record table, keyed by normalized wallet. The original owning account is private. The account limit of 20 wallet profiles and initial insertion share a database transaction; subsequent changes compare the exact previous record and revision. A fresh server-verified linked wallet is required for every profile edit. A wallet profile cannot be reassigned merely by submitting another user ID or relinking it to a different account.
+
+`oneshot_wallet_following` holds one bounded record per account, with a derived key and sorted unique addresses. Concurrent additions/removals use revision and exact-record comparisons, including initial insertion. The 50-wallet limit is enforced on the committed candidate, and removal remains available at capacity. Hosted storage requires PostgreSQL; neither resource silently uses local files in production. Existing record indexes suffice; no schema migration is added.
+
+Multi-wallet activity uses one actor predicate in the held canonical SQL snapshot. An event involving two selected wallets appears once. Wallet sets are canonical ASCII JSON encoded as unpadded base64url; the decoder accepts at most 3,100 characters. Cursor scope includes a SHA-256 of the complete normalized set, keeping a 50-wallet continuation within the existing URL/cursor limits. Deployment, block hash, page size and ordering remain bound by the existing cursor. A changed set or reorg cannot merge unrelated pages. No per-wallet RPC fan-out or pagination merge is used.
+
+## Verification and boundaries
+
+The final combined profile/import check passed 2,545 app tests, including the Windows junction fixture and six editor-recovery regressions, plus 90 tests against disposable PostgreSQL. The default app run skips 94 environment-dependent cases; 90 are covered by the database runner. Workspace/script TypeScript checks and both production builds pass. New profile coverage includes private/public snapshot isolation, fresh linked-wallet/account checks, stale/concurrent mutations, durable restart recovery, capacity, malformed records, exact wallet attribution, actor-union deduplication and 50-wallet continuation boundaries. Existing native settlement contracts are unchanged. The [separate external-contract foundation](REVIEWED-EXTERNAL-NFTS.md) has its own verification; none of these results establish an actual-node or Base deployment.
+
+Agent browser inspection covered desktop and 390px mobile profiles/editor/feed, published versus saved edits, unsaved navigation, dirty unpublishing, two linked wallets with an intervening saved update, a second update after comparison, explicit replacement, anonymous and unlinked accounts, follows, account changes, true empty lists, failed/unreadable responses, retry and related public pages/wallet dialogs. The [sample profile preview](http://127.0.0.1:19405/profile/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) uses isolated synthetic accounts/data with signing disabled. Its in-memory account state resets on process restart, and the sample wallet selection resets on full reload. Proof images/logs live in ignored `.local/qa/wallet-profiles`; preview configuration is in `.local/qa/wallet-profiles-preview`. This is agent QA, not owner approval or live Base evidence. The earlier scoped profile patch is retained as a historical artifact; the combined milestone includes the separately documented external import workflow.
+
+Remaining lifecycle/operations work includes profile abuse reporting/moderation, wallet-profile account handoff/recovery, account deletion policy and production capacity/retention testing. The first account association stays fixed, and unlinking a wallet does not automatically unpublish its old details. These constraints need support/release policy before public rollout.
+
+ERC-1155 issuance/trading, reviewed external collection admission, larger NFT catalogs and genuine Base deployment/wallet evidence remain separate work. The owner selected **reviewed collections first** on 19 November. Existing v1/v2/v3 markets accept their immutable oneshot factory's ERC-721 collections; an administrative review must not be presented as enabling external settlement. ERC-1155 needs balances per token ID and quantity-aware minting, custody, royalties, approvals, offers, cart reviews, indexing and receipts. See [OpenZeppelin's ERC-1155 reference](https://docs.openzeppelin.com/contracts/5.x/erc1155). External royalty handling must also account for the fact that [ERC-2981 permits royalty results to change](https://eips.ethereum.org/EIPS/eip-2981), rather than silently treating external terms as oneshot's frozen collection terms. Independent review, current-bytecode chain rehearsal, wallet SDK dependency remediation and existing bundle warnings remain release work.

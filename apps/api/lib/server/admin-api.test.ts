@@ -26,7 +26,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('admin diagnostic API access boundary', () => {
   it('protects direct status/session reads and logout without disclosing diagnostic payloads', async () => {
-    for (const [path, method] of [['/api/admin/network', 'GET'], ['/api/admin/status', 'GET'], ['/api/admin/readiness', 'GET'], ['/api/admin/session', 'GET'], ['/api/admin/session', 'DELETE']]) {
+    for (const [path, method] of [['/api/admin/network', 'GET'], ['/api/admin/status', 'GET'], ['/api/admin/readiness', 'GET'], ['/api/admin/external-nfts/imports', 'GET'], ['/api/admin/session', 'GET'], ['/api/admin/session', 'DELETE']]) {
       const response = await call(path, method);
       expect(response.status).toBe(401); expect(response.headers.get('cache-control')).toBe('no-store');
       const body = await response.json(); expect(body.error.code).toBe('ADMIN_AUTH_REQUIRED'); expect(body.networkConfig).toBeUndefined();

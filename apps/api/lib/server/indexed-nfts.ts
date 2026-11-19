@@ -11,6 +11,8 @@ import { ApiError } from './errors';
 import { createNftPublicContentResolver } from './nft-public-content';
 import { parseNftExplorerSelection, readNftExplorer, type NftExplorerSelection } from './nft-item-discovery';
 import {acquireNftExplorerSql} from './nft-explorer-sql';
+import { createHash } from 'node:crypto';
+import { decodeFollowedWallets } from '../../../web/lib/wallet-following';
 
 type Env = Record<string, string | undefined>;
 type ContentResolver = (contentHash: string, tokenId: string) => Promise<IndexedNftPresentation | null>;
@@ -23,7 +25,7 @@ export type IndexedReaderDependencies = {
   contentResolver: (client: SqlClient) => ContentResolver;
 };
 type Resource = 'status' | 'collections' | 'collection' | 'items' | 'item' | 'listings' | 'activity' | 'wallet-items' | 'claims' | 'explore';
-type Selection = { resource: Resource; collection?: string; wallet?: string; tokenId?: string; seller?: string; status?: string; query?: string; sort?: 'newest' | 'oldest'; limit: number; cursor?: string; scope: string; explorer?: NftExplorerSelection };
+type Selection = { resource: Resource; collection?: string; creator?: string; wallet?: string; wallets?: string[]; tokenId?: string; seller?: string; status?: string; query?: string; sort?: 'newest' | 'oldest'; limit: number; cursor?: string; scope: string; explorer?: NftExplorerSelection };
 type Cursor = { v: 1; manifest: string; block: string; hash: string; scope: string; limit: number; after: string[] };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const json = (body: unknown) => Response.json(body, { headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -72,14 +74,18 @@ function selection(request: NextRequest): Selection {
   const query = request.nextUrl.searchParams;
   const paged = !['status', 'collection', 'item'].includes(resource);
   const allowed = new Set(paged ? ['cursor', 'limit'] : []);
-  if (resource === 'collections') for (const key of ['q', 'sort']) allowed.add(key);
+  if (resource === 'collections') for (const key of ['q', 'sort', 'creator']) allowed.add(key);
   if (resource === 'listings') for (const key of ['collection', 'seller', 'status']) allowed.add(key);
-  if (resource === 'activity') for (const key of ['collection', 'wallet']) allowed.add(key);
+  if (resource === 'activity') for (const key of ['collection', 'wallet', 'wallets']) allowed.add(key);
   for (const key of query.keys()) if (!allowed.has(key) || query.getAll(key).length !== 1) return badInput();
   const limitText = query.get('limit') ?? '20';
   if (!/^[1-9]\d?$/.test(limitText) || Number(limitText) > 50) return badInput();
   if (query.has('collection')) collection = inputAddress(query.get('collection')!);
   if (query.has('wallet')) wallet = inputAddress(query.get('wallet')!);
+  let wallets: string[] | undefined;
+  if (query.has('wallets')) { if (wallet) return badInput(); try { wallets = decodeFollowedWallets(query.get('wallets')!); } catch { return badInput(); } }
+  const creator = query.has('creator') ? inputAddress(query.get('creator')!) : undefined;
+  if (creator && /^0x0{40}$/.test(creator)) return badInput();
   const seller = query.has('seller') ? inputAddress(query.get('seller')!) : undefined;
   const status = query.get('status') ?? undefined;
   if (status !== undefined && !['active', 'sold', 'cancelled', 'offer-filled'].includes(status)) return badInput();
@@ -90,8 +96,8 @@ function selection(request: NextRequest): Selection {
   const collectionQuery = search?.trim();
   const sort = resource === 'collections' ? query.get('sort') ?? 'newest' : undefined;
   if (sort !== undefined && sort !== 'newest' && sort !== 'oldest') return badInput();
-  const scope = JSON.stringify([resource, collection ?? '', wallet ?? '', tokenId ?? '', seller ?? '', status ?? '', ...(resource === 'collections' ? [collectionQuery, sort] : [])]);
-  return { resource, collection, wallet, tokenId, seller, status, query: collectionQuery, sort, limit: Number(limitText), cursor, scope };
+  const scope = JSON.stringify([resource, collection ?? '', wallet ?? '', tokenId ?? '', seller ?? '', status ?? '', ...(resource === 'collections' ? [collectionQuery, sort] : []), ...(creator ? ['creator', creator] : []), ...(wallets ? ['wallets', createHash('sha256').update(JSON.stringify(wallets)).digest('hex')] : [])]);
+  return { resource, collection, creator, wallet, wallets, tokenId, seller, status, query: collectionQuery, sort, limit: Number(limitText), cursor, scope };
 }
 
 function parseCursor(input: string | undefined, select: Selection): Cursor | null {
@@ -199,6 +205,10 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
       // Creation events survive later mint/claim updates and already share the canonical projection snapshot.
       joins = "JOIN oneshot_evm_projections created ON created.manifest_id=p.manifest_id AND created.kind='activity' AND created.value->>'eventName'='CollectionCreated' AND created.value->>'source'=p.value->>'factory' AND created.value->'args'->>'collection'=p.entity_id JOIN oneshot_evm_journal created_journal ON created_journal.manifest_id=p.manifest_id AND created_journal.block_number=(created.value->>'blockNumber')::numeric AND created_journal.block_hash=created.value->>'blockHash'";
       columns += ",created.value->>'blockNumber' AS created_block_number,created.value->>'logIndex' AS created_log_index";
+      if (select.creator) {
+        const creator = bind(select.creator);
+        where.push(`p.value->>'creator'=${creator}`, `created.value->'args'->>'creator'=${creator}`);
+      }
       if (select.query) {
         const search = bind(select.query);
         // strpos treats %, _ and backslash as ordinary text; all user input remains a bound value.
@@ -235,6 +245,7 @@ async function readRows(client: SqlClient, select: Selection, manifest: string, 
     columns += `,j.block_timestamp::text AS event_timestamp,${collection} AS collection_address`;
     if (select.collection) where.push(`${collection}=${bind(select.collection)}`);
     if (select.wallet) where.push(`EXISTS(SELECT 1 FROM jsonb_each_text(p.value->'args') field WHERE field.key IN ('creator','payer','recipient','from','to','account','owner','approved','operator','buyer','seller','bidder','caller') AND field.value=${bind(select.wallet)})`);
+    if (select.wallets) where.push(`EXISTS(SELECT 1 FROM jsonb_each_text(p.value->'args') field WHERE field.key IN ('creator','payer','recipient','from','to','account','owner','approved','operator','buyer','seller','bidder','caller') AND field.value=ANY(${bind(select.wallets)}::text[]))`);
     order = "(p.value->>'blockNumber')::numeric DESC,(p.value->>'logIndex')::integer DESC";
     if (cursor) where.push(`((p.value->>'blockNumber')::numeric,(p.value->>'logIndex')::integer) < (${bind(cursor.after[0])}::numeric,${bind(cursor.after[1])}::integer)`);
   }

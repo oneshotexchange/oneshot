@@ -6,6 +6,8 @@ The subsequent [NFT V3 build](NFT-MARKETPLACE-V3.md) adds item/collection offers
 
 ## Open the review preview
 
+The 19 November [profiles and following build](WALLET-PROFILES.md) has a signing-disabled [sample public profile](http://127.0.0.1:19405/profile/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa). Agent checks cover desktop/mobile publishing, private edits, unpublishing, wallet-free follows, the Following feed, account switches, recovery states and related screens. Owner acceptance of these new interfaces remains pending. The owner chose reviewed external collections first; that product policy is separate from UI approval or deployed trading availability.
+
 The 18 November [collection search build](NFT-DISCOVERY.md) has a separate signing-disabled [collection preview](http://127.0.0.1:19404/nfts/0x0000000000000000000000000000000000000004?deployment=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd&q=Nebula). Agent desktop/mobile inspection checked full-collection search, typed traits, owner/price filters, ordering, pagination, empty/unavailable responses and scroll preservation. It uses 40 synthetic NFTs and no real wallet. Owner acceptance of these new NFT screens remains pending; earlier home/token approval is unchanged. Its ignored configuration is in `.local/qa/nft-discovery-preview` and proof images/logs are in `.local/qa/nft-discovery`.
 
 [Local review preview](http://127.0.0.1:18390/)
@@ -51,3 +53,11 @@ Real wallet sign-in and cross-device account persistence; Base chain/provider id
 | 2026-11-17 | Home/navigation and token creation | Owner said the screens look good and delegated approval if the agent judged them good enough. Agent approves the two preview interfaces for this milestone, supported by the recorded draft/UI checks. | Preserve this accepted baseline; continue the remaining screen review. Actual account, Base transaction and release acceptance remain pending. |
 
 The broader Phase 1 backlog remains open. Starting Phase 2 reviews the completed milestone and does not mark the full marketplace, social trading platform or future Zero integration complete.
+
+## 19 November additions for review
+
+Wallet profiles, private publication/edit recovery, following and the following activity feed are available in the signing-disabled sample preview. The external collection request page is at [the import preview](http://127.0.0.1:19405/nfts/import); its review queue is available through the fixture's explicitly labeled sample controls. Real operator controls remain behind server admin authentication.
+
+Agent inspection verified import submission without a linked wallet, account isolation, explicit withdrawal consequences, review approval separated from trading, unsigned permit/call display, unavailable configuration with preserved history and failed/unreadable-load recovery. Desktop and 390px mobile layouts, related customer pages and NFT discovery's new import link were checked. Proof images include `external-desktop.jpg`, `external-mobile.jpg` and `external-admin.jpg` under ignored `.local/qa/wallet-profiles`.
+
+The final combined build passes 2,545 app tests, 90 PostgreSQL tests and 134 contract tests, with TypeScript and both production builds passing. These are agent checks. Owner acceptance of these new screens and real Base/wallet evidence remain pending. Review approval does not admit a collection onchain or enable external trading; [the external NFT scope and remaining work](REVIEWED-EXTERNAL-NFTS.md) are recorded separately.

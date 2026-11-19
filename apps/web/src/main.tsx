@@ -10,13 +10,16 @@ import { TokenLaunch } from '../components/token-launch';
 import { TokenTerminal } from '../components/token-terminal';
 import { NftCreate } from '../components/nft-create';
 import { NftCartPage } from '../components/nft-cart';
-import { IndexedNftDiscovery, IndexedNftCollection, IndexedNftItemDetail, IndexedActivityPage, IndexedPortfolioPage } from '../components/indexed-nfts';
+import { IndexedNftDiscovery, IndexedNftCollection, IndexedNftItemDetail, IndexedPortfolioPage } from '../components/indexed-nfts';
 import { AdminPage, SettingsPage } from '../components/workspace-pages';
 import { GenesisWhitelist } from '../components/genesis-whitelist';
 import { GenesisAuthProvider } from '../components/genesis-auth';
 import WorkspaceError from '../app/error';
 import NotFound from '../app/not-found';
 import { workspaceNavigationKey } from '../lib/workspace-navigation';
+import { PublicWalletProfile, WalletProfileSettings } from '../components/wallet-profile';
+import { WalletActivityPage } from '../components/wallet-following';
+import { ExternalNftImportsPage } from '../components/external-nft-imports';
 import '../app/globals.css';
 import '../app/themes.css';
 import '../app/theme-picker.css';
@@ -38,6 +41,7 @@ class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean 
 function TokenPage() { const { id = '' } = useParams(); return <TokenTerminal id={id} />; }
 function CollectionPage() { const { id = '' } = useParams(); return <IndexedNftCollection id={id} />; }
 function ItemPage() { const { id = '', item = '' } = useParams(); return <IndexedNftItemDetail collectionId={id} itemId={item} />; }
+function ProfilePage() { const { wallet = '' } = useParams(); return <PublicWalletProfile wallet={wallet} />; }
 
 function Workspace() {
   const location = useLocation();
@@ -51,12 +55,15 @@ function Workspace() {
     <Route path="/tokens/:id" element={<TokenPage />} />
     <Route path="/nfts" element={<IndexedNftDiscovery />} />
     <Route path="/nfts/new" element={<NftCreate />} />
+    <Route path="/nfts/import" element={<ExternalNftImportsPage />} />
     <Route path="/nfts/cart" element={<NftCartPage />} />
     <Route path="/nfts/:id" element={<CollectionPage />} />
     <Route path="/nfts/:id/:item" element={<ItemPage />} />
-    <Route path="/activity" element={<IndexedActivityPage />} />
+    <Route path="/activity" element={<WalletActivityPage />} />
     <Route path="/portfolio" element={<IndexedPortfolioPage />} />
     <Route path="/settings" element={<SettingsPage />} />
+    <Route path="/settings/profile" element={<WalletProfileSettings />} />
+    <Route path="/profile/:wallet" element={<ProfilePage />} />
     <Route path="/admin" element={<AdminPage />} />
     <Route path="/admin/genesis" element={<AdminPage />} />
     <Route path="*" element={<NotFound />} />

@@ -2,6 +2,8 @@ import { serviceMessage } from './service-message';
 import { oneshotDraftSchema, type OneshotDraft, type OneshotDraftInput } from './oneshot-draft-schema';
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
+import { accountWalletProfileSchema, profileWallet, walletProfileDetailsSchema, type AccountWalletProfile, type WalletProfileDetails } from './wallet-profile';
+import { walletFollowingSchema, type WalletFollowing } from './wallet-following';
 import { tokenAccountDraftId, tokenAccountDraftListSchema, tokenAccountDraftSchema, type TokenAccountDraft } from './token-account-draft';
 import { tokenDraftSchema, tokenDraftsEqual, type TokenDraft } from './token-drafts';
 
@@ -116,6 +118,37 @@ export function createOneshotAccountApi(options: {
     return body as T;
   }
   return {
+    async getWalletProfile(walletInput: string) {
+      const wallet = profileWallet(walletInput);
+      const parsed = accountWalletProfileSchema.safeParse(await request<unknown>(`/api/oneshot/profiles/me?wallet=${wallet}`));
+      if (!parsed.success || parsed.data.wallet !== wallet) throw new Error('Your saved profile could not be verified. Try loading it again.');
+      return parsed.data;
+    },
+    async getWalletFollowing() {
+      const parsed = walletFollowingSchema.safeParse(await request<unknown>('/api/oneshot/following'));
+      if (!parsed.success) throw new Error('Your following list could not be verified. Reload it and try again.');
+      return parsed.data;
+    },
+    async changeWalletFollowing(previous: WalletFollowing, walletInput: string, following: boolean) {
+      const selected = walletFollowingSchema.parse(previous), wallet = profileWallet(walletInput), expected = new Set(selected.wallets);
+      if (following) expected.add(wallet); else expected.delete(wallet);
+      const parsed = walletFollowingSchema.safeParse(await request<unknown>('/api/oneshot/following', { method: 'PUT', body: JSON.stringify({ wallet, following, expectedRevision: selected.revision }) }));
+      if (!parsed.success || parsed.data.revision !== selected.revision + 1 || JSON.stringify(parsed.data.wallets) !== JSON.stringify([...expected].sort())) throw new Error('The following change could not be verified. Reload your following list before trying again.');
+      return parsed.data;
+    },
+    async changeWalletProfile(action: 'save' | 'publish' | 'unpublish', previous: AccountWalletProfile, input?: WalletProfileDetails) {
+      const selected = accountWalletProfileSchema.parse(previous), profile = action === 'save' ? walletProfileDetailsSchema.parse(input) : null;
+      const body = { wallet: selected.wallet, expectedRevision: selected.revision, ...(profile ? { profile } : {}) };
+      const result = await request<unknown>(`/api/oneshot/profiles/me${action === 'save' ? '' : '/publish'}`, { method: action === 'save' ? 'PUT' : action === 'publish' ? 'POST' : 'DELETE', body: JSON.stringify(body) });
+      const parsed = accountWalletProfileSchema.safeParse(result);
+      if (!parsed.success || parsed.data.wallet !== selected.wallet || parsed.data.revision !== selected.revision + 1
+        || JSON.stringify(parsed.data.draft) !== JSON.stringify(profile ?? selected.draft)
+        || action === 'unpublish' && parsed.data.published !== null
+        || action === 'save' && JSON.stringify(parsed.data.published) !== JSON.stringify(selected.published)
+        || action === 'publish' && (!parsed.data.published || JSON.stringify(walletProfileDetailsSchema.parse({ displayName: parsed.data.published.displayName, bio: parsed.data.published.bio, website: parsed.data.published.website, avatarPath: parsed.data.published.avatarPath, bannerPath: parsed.data.published.bannerPath })) !== JSON.stringify(selected.draft)))
+        throw new Error('The profile change could not be verified. Reload the saved profile before trying again.');
+      return parsed.data;
+    },
     async listTokenDrafts() {
       const parsed = tokenAccountDraftListSchema.safeParse(await request<unknown>('/api/oneshot/token-drafts'));
       if (!parsed.success) throw new Error('Account drafts could not be loaded. Refresh and try again.');

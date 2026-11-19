@@ -39,7 +39,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
-  const section = pathname.startsWith("/tokens") ? "Token markets" : pathname.startsWith("/nfts") ? "NFT collections" : pathname.startsWith("/portfolio") ? "Portfolio" : pathname.startsWith("/activity") ? "Activity" : pathname.startsWith("/settings") ? "Settings" : pathname.startsWith("/admin") ? "Administration" : "Home";
+  const section = pathname.startsWith("/tokens") ? "Token markets" : pathname.startsWith("/nfts") ? "NFT collections" : pathname.startsWith("/profile/") ? "Wallet profile" : pathname.startsWith("/portfolio") ? "Portfolio" : pathname.startsWith("/activity") ? "Activity" : pathname.startsWith("/settings") ? "Settings" : pathname.startsWith("/admin") ? "Administration" : "Home";
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
     {mobileOpen && <div className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}

@@ -16,6 +16,7 @@ import { walletFollowingApi } from './wallet-following';
 import { createExternalNftImportsApi } from './external-nft-imports';
 import { reviewedNftImports } from './external-nft-admission';
 import { reviewedNftGateway } from './reviewed-nft-gateway';
+import { reviewedNftRead } from './reviewed-nft-read';
 import { archiveTokenAccountDraft, createTokenAccountDraft, getTokenAccountDraft, listTokenAccountDrafts, updateTokenAccountDraft } from './token-account-drafts';
 
 const revision = z.number().int().positive();
@@ -27,6 +28,7 @@ export const oneshotApi = api(async request => {
   if (!request.nextUrl.pathname.startsWith(prefix)) throw new ApiError(404, 'NOT_FOUND', 'API resource not found.');
   const segments = request.nextUrl.pathname.slice(prefix.length).replace(/\/$/,'').split('/');
   const [resource, id, operation, extra] = segments;
+  if (resource === 'reviewed-nfts') { rateLimit('oneshot:reviewed-nfts:public', 20); return reviewedNftRead(request); }
   if (resource === 'external-nfts') {
     if (segments.length === 2 && id === 'config' && request.method === 'GET' && !request.nextUrl.search) {
       rateLimit('oneshot:external-nfts:config', 20);

@@ -120,7 +120,8 @@ export function IndexedNftDiscovery() {
     setInputError(null); setQuery(normalized.query); setParams(nextParams);
   };
   const clear = () => apply({ query: '', sort: 'newest' });
-  return <><PageHeading title="NFT collections" description="Find a collection, explore the artwork and check its mint terms." action={<><Button variant="ghost" disabled={Boolean(filterError)} loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button><ButtonLink href="/nfts/import" variant="secondary">Import a collection</ButtonLink><ButtonLink href="/nfts/new">Create a collection <ArrowRight size={14} /></ButtonLink></>} />
+  return <><PageHeading title="NFT collections" description="Find a collection, explore the artwork and check its mint terms." action={<><Button variant="ghost" disabled={Boolean(filterError)} loading={page.loading} onClick={() => { void page.refresh(); }}><RefreshCw size={13} />Refresh</Button><ButtonLink href="/nfts/new">Create a collection <ArrowRight size={14} /></ButtonLink></>} />
+    <nav className="reviewed-directory-links" aria-label="External NFT collections"><Link href="/nfts/reviewed">Browse reviewed collections <ArrowRight size={13} /></Link><Link href="/nfts/import">Request a collection review</Link></nav>
     <IndexedContextNote context={page.data?.context} />
     <section className="panel" aria-label="Collections">
       <form className="indexed-discovery-controls" role="search" onSubmit={event => { event.preventDefault(); apply({ ...filters, query }); }}>

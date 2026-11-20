@@ -61,3 +61,9 @@ Wallet profiles, private publication/edit recovery, following and the following 
 Agent inspection verified import submission without a linked wallet, account isolation, explicit withdrawal consequences, review approval separated from trading, unsigned permit/call display, unavailable configuration with preserved history and failed/unreadable-load recovery. Desktop and 390px mobile layouts, related customer pages and NFT discovery's new import link were checked. Proof images include `external-desktop.jpg`, `external-mobile.jpg` and `external-admin.jpg` under ignored `.local/qa/wallet-profiles`.
 
 The final combined build passes 2,545 app tests, 90 PostgreSQL tests and 134 contract tests, with TypeScript and both production builds passing. These are agent checks. Owner acceptance of these new screens and real Base/wallet evidence remain pending. Review approval does not admit a collection onchain or enable external trading; [the external NFT scope and remaining work](REVIEWED-EXTERNAL-NFTS.md) are recorded separately.
+
+## 20 November external NFT records
+
+The [reviewed collection preview](http://127.0.0.1:19405/nfts/reviewed) now exercises canonical admission and sparse event observations through read-only collection/item/listing/activity screens. Agent inspection covered token ID 0, pagination, exact prices/royalties, recipient forwarding, revoked history, unobserved addresses, failed/unreadable/disabled/empty states, and mobile/desktop layouts. Collection headers and tabs reject different checkpoints. Proof images are `reviewed-desktop.jpg` and `reviewed-mobile.jpg` under ignored `.local/qa/wallet-profiles`.
+
+This is sample UI/engineering evidence, not owner acceptance or actual Base deployment. External trading controls, safe metadata/artwork and receipt recovery remain separate work. The [journal reference](REVIEWED-NFT-JOURNAL.md) records the explicit limits and remaining build/release boundaries.

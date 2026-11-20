@@ -20,6 +20,7 @@ import { workspaceNavigationKey } from '../lib/workspace-navigation';
 import { PublicWalletProfile, WalletProfileSettings } from '../components/wallet-profile';
 import { WalletActivityPage } from '../components/wallet-following';
 import { ExternalNftImportsPage } from '../components/external-nft-imports';
+import { ReviewedNftDiscovery, ReviewedNftCollection, ReviewedNftItemDetail } from '../components/reviewed-nfts';
 import '../app/globals.css';
 import '../app/themes.css';
 import '../app/theme-picker.css';
@@ -42,6 +43,8 @@ function TokenPage() { const { id = '' } = useParams(); return <TokenTerminal id
 function CollectionPage() { const { id = '' } = useParams(); return <IndexedNftCollection id={id} />; }
 function ItemPage() { const { id = '', item = '' } = useParams(); return <IndexedNftItemDetail collectionId={id} itemId={item} />; }
 function ProfilePage() { const { wallet = '' } = useParams(); return <PublicWalletProfile wallet={wallet} />; }
+function ReviewedCollectionPage() { const { collection = '' } = useParams(); return <ReviewedNftCollection collection={collection} />; }
+function ReviewedItemPage() { const { collection = '', tokenId = '' } = useParams(); return <ReviewedNftItemDetail collection={collection} tokenId={tokenId} />; }
 
 function Workspace() {
   const location = useLocation();
@@ -56,6 +59,9 @@ function Workspace() {
     <Route path="/nfts" element={<IndexedNftDiscovery />} />
     <Route path="/nfts/new" element={<NftCreate />} />
     <Route path="/nfts/import" element={<ExternalNftImportsPage />} />
+    <Route path="/nfts/reviewed" element={<ReviewedNftDiscovery />} />
+    <Route path="/nfts/reviewed/:collection" element={<ReviewedCollectionPage />} />
+    <Route path="/nfts/reviewed/:collection/:tokenId" element={<ReviewedItemPage />} />
     <Route path="/nfts/cart" element={<NftCartPage />} />
     <Route path="/nfts/:id" element={<CollectionPage />} />
     <Route path="/nfts/:id/:item" element={<ItemPage />} />

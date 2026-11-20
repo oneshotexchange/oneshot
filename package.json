@@ -40,6 +40,7 @@
     "indexer:base-sepolia": "tsx apps/indexer/src/cli.ts --network base-sepolia",
     "indexer:token-snapshot": "tsx scripts/index-token-markets.ts",
     "indexer:token-events": "tsx scripts/index-token-events.ts",
+    "indexer:reviewed-nfts": "tsx scripts/index-reviewed-nfts.ts",
     "indexer:watch": "tsx apps/indexer/src/cli.ts --watch",
     "nft:catalog:backfill": "tsx scripts/backfill-nft-catalog.ts",
     "preview:indexed": "tsx scripts/local-indexed-fixture.ts",

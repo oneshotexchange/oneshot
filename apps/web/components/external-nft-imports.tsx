@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useWallet } from '../lib/client-wallet';
 import { appendExternalNftImportPage, createExternalNftImportsApi, ExternalNftImportError, externalNftImportStatusLabel, type ExternalNftImportConfig, type ExternalNftImportsApi } from '../lib/client-external-nft-imports';
 import { externalNftImportInputSchema, type AccountExternalNftImport, type AccountExternalNftImportPage } from '../lib/external-nft-import';
-import { Address, Badge, Button, EmptyState, ErrorState, Field, Loading, Modal, PageHeading, SafetyNote } from './ui';
+import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, Loading, Modal, PageHeading, SafetyNote } from './ui';
 import { WalletButton } from './wallet-button';
 import '../app/external-nft-imports.css';
 
@@ -24,7 +24,7 @@ export function ExternalNftImportsPage() {
   const scope = wallet.authenticated ? wallet.identityScope() : null;
   function reloadConfig() { setConfig(previous => ({ ...previous, loading: true, error: false })); setVersion(value => value + 1); }
   return <>
-    <PageHeading title="Import a collection" description="Request review for an existing NFT collection, then return to check the decision." />
+    <PageHeading title="Import a collection" description="Request review for an existing NFT collection, then return to check the decision." action={<ButtonLink href="/nfts/reviewed" variant="secondary">Explore reviewed collections</ButtonLink>} />
     <SafetyNote>Submitting a collection address does not establish creator or contract ownership. Review approval does not enable minting, listings or trading.</SafetyNote>
     {!wallet.authenticated ? <section className="panel external-import-intro"><h2>{config.data?.available && !config.error && !config.loading ? 'Sign in to request a review' : 'Sign in to view your review requests'}</h2><p>Your collection import requests and notes are private to your account and the review team. A linked wallet or signature is not required.</p>{config.loading ? <p role="status">Checking new request availability…</p> : (!config.data?.available || config.error) && <div className="external-import-unavailable"><p>{unavailable} You can still sign in to view or withdraw existing requests.</p><Button type="button" variant="secondary" onClick={reloadConfig}>Reload availability</Button></div>}<WalletButton /></section>
       : !scope ? <section className="panel external-import-intro"><ErrorState message="Your account is not ready. Sign in again to manage collection import requests." /><WalletButton /></section>

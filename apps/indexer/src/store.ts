@@ -57,7 +57,12 @@ CREATE INDEX IF NOT EXISTS oneshot_evm_collection_creation_order
 -- Collection detail aggregates only that deployment's current listing states.
 CREATE INDEX IF NOT EXISTS oneshot_evm_listing_collection_status
   ON oneshot_evm_projections(manifest_id,(value->>'collection'),(value->>'status'))
-  WHERE kind='listings';`;
+  WHERE kind='listings';
+-- Observed ownership is tied to the most recent canonical Transfer, including
+-- sparse external token IDs and market callbacks that forward the NFT again.
+CREATE INDEX IF NOT EXISTS oneshot_evm_item_transfer_order
+  ON oneshot_evm_projections(manifest_id,(value->>'collection'),(value->'args'->>'tokenId'),((value->>'blockNumber')::numeric) DESC,((value->>'logIndex')::integer) DESC)
+  WHERE kind='activity' AND value->>'eventName'='Transfer';`;
 
 const kinds: readonly ProjectionKind[] = ['collections', 'items', 'listings', 'claims', 'activity', 'offers', 'offer-sales', 'offer-accounting'];
 const projectionTable=(kind:ProjectionKind)=>['offers','offer-sales','offer-accounting'].includes(kind)?'oneshot_evm_offer_projections':'oneshot_evm_projections';

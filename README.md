@@ -8,7 +8,9 @@ The subsequent [NFT collection search milestone](NFT-DISCOVERY.md) adds complete
 
 [Wallet profiles and private following](WALLET-PROFILES.md) add creator/collector pages, saved edits with explicit publication, private account follows and a canonical NFT activity feed for up to 50 followed wallets. Profile details are self-reported; these pages do not verify identity or copy trades.
 
-[Reviewed external NFT imports](REVIEWED-EXTERNAL-NFTS.md) add private collection requests, authenticated review, a separate ERC-721 registry/market contract foundation and unsigned admission permits. External trading, canonical admission confirmation and ERC-1155 remain separate work; review approval does not enable trading.
+[Reviewed external NFT imports](REVIEWED-EXTERNAL-NFTS.md) add private collection requests, authenticated review, a separate ERC-721 registry/market contract foundation and unsigned admission permits. External trading and ERC-1155 remain separate work; review approval does not enable trading.
+
+The subsequent [external NFT journal and record screens](REVIEWED-NFT-JOURNAL.md) add canonical admission/transfer/listing/sale/payout observations, reorg rollback, sparse token IDs and public collection/item/activity reads. Coverage begins at admission and remains explicitly partial. These screens are read-only; external checkout and ERC-1155 remain separate work.
 
 ## Project structure
 

@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_POOL_MANAGER, nftNetworkForChainId, type IndexedTokenMarket, type TokenAnalyticsContext, type TokenAnalyticsMarketResponse, type TokenAnalyticsTradesResponse, type TokenAnalyticsHoldersResponse, type TokenPoolSwap, type TokenOneshotTrade } from '@oneshot/evm';
+import { BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_POOL_MANAGER, nftNetworkForChainId, type IndexedTokenMarket, type TokenAnalyticsContext, type TokenAnalyticsFeedResponse, type TokenAnalyticsMarketResponse, type TokenAnalyticsTradesResponse, type TokenAnalyticsHoldersResponse, type TokenPoolSwap, type TokenOneshotTrade } from '@oneshot/evm';
 import { TokenAnalyticsHolders, TokenAnalyticsMetrics, TokenAnalyticsTrades } from '../components/token-analytics';
-import { readTokenAnalyticsMarket, tokenAnalyticsCheckpointKey, tokenAnalyticsSourceMatches, tokenAnalyticsPagePath, TokenAnalyticsPageLoader, TokenAnalyticsReadError, validateTokenAnalyticsHolders, validateTokenAnalyticsMarket, validateTokenAnalyticsTrades, validTokenAnalyticsContext, type TokenAnalyticsPageRequest } from './client-token-analytics';
+import { readTokenAnalyticsMarket, readTokenTradesFeed, tokenAnalyticsCheckpointKey, tokenAnalyticsSourceMatches, tokenAnalyticsPagePath, TokenAnalyticsPageLoader, TokenAnalyticsReadError, TokenTradesFeedLoader, tokenTradesFeedPath, validateTokenAnalyticsHolders, validateTokenAnalyticsMarket, validateTokenAnalyticsTrades, validateTokenTradesFeed, validTokenAnalyticsContext, type TokenAnalyticsPageRequest } from './client-token-analytics';
 import { tokenPoolChartPoints } from './token-price-chart';
 
 const address = (n: string) => `0x${n.repeat(40)}`, hash = (n: string) => `0x${n.repeat(64)}`, marketAddress = address('1'), token = address('2');
@@ -107,5 +107,61 @@ describe('token analytics page and chart scope', () => {
     const first = poolSwap({ blockNumber: '9007199254740992', logIndex: 3 }), second = poolSwap({ blockNumber: '9007199254740993', logIndex: 1, sqrtPriceX96Raw: (2n ** 95n).toString() });
     const points = tokenPoolChartPoints([second, first]); expect(points).toHaveLength(1); expect(points[0].blockNumber).toBe('9007199254740993'); expect(points[0].value).toBeCloseTo(0.0000000004);
     expect(points[0].price.denominator).toBe((2n ** 190n).toString()); expect(tokenPoolChartPoints([poolSwap({ timestamp: '999999999999999999999' })])).toEqual([]);
+  });
+});
+
+describe('global and wallet token trades feed', () => {
+  const feed = (changes: Partial<TokenAnalyticsFeedResponse> = {}): TokenAnalyticsFeedResponse => ({
+    context: context(),
+    kind: 'oneshot-trade',
+    wallet: null,
+    items: [oneshot()],
+    nextCursor: null,
+    ...changes,
+  });
+
+  it('builds valid feed URLs and rejects invalid wallet/kind combinations before fetching', () => {
+    expect(tokenTradesFeedPath({ kind: 'oneshot-trade' })).toBe('/api/oneshot/token-analytics/trades?limit=20&kind=oneshot-trade');
+    expect(tokenTradesFeedPath({ kind: 'oneshot-trade', wallet: address('b').toUpperCase(), limit: 10 }, 'c1')).toBe(
+      `/api/oneshot/token-analytics/trades?limit=10&kind=oneshot-trade&wallet=${address('b')}&cursor=c1`,
+    );
+    expect(tokenTradesFeedPath({ kind: 'oneshot-trade', wallets: [address('b')] })).toContain('wallets=');
+    for (const bad of [
+      { kind: 'pool-swap' as const, wallet: address('b') },
+      { kind: 'all' as const, wallet: address('b') },
+      { kind: 'oneshot-trade' as const, wallet: address('b'), wallets: [address('b')] },
+      { kind: 'oneshot-trade' as const, wallets: [] },
+      { kind: 'oneshot-trade' as const, limit: 51 },
+    ]) {
+      expect(() => tokenTradesFeedPath(bad)).toThrow(TokenAnalyticsReadError);
+    }
+  });
+
+  it('enforces wallet/followed actor attribution, ordering and checkpoint consistency across pages', async () => {
+    const traderB = oneshot();
+    const otherTrade: TokenOneshotTrade = { ...oneshot(), id: `${hash('a')}:1`, transactionHash: hash('a'), blockNumber: '98', logIndex: 1, trader: address('d'), recipient: address('e') };
+    expect(validateTokenTradesFeed(feed({ kind: 'oneshot-trade', wallet: address('b'), items: [traderB] }), { kind: 'oneshot-trade', wallet: address('b') }).items).toHaveLength(1);
+    expect(() => validateTokenTradesFeed(feed({ wallet: address('b'), items: [otherTrade] }), { kind: 'oneshot-trade', wallet: address('b') })).toThrow(TokenAnalyticsReadError);
+    expect(() => validateTokenTradesFeed(feed({ items: [otherTrade] }), { kind: 'oneshot-trade', wallets: [address('b')] })).toThrow(TokenAnalyticsReadError);
+    expect(() => validateTokenTradesFeed(feed({ items: [otherTrade, traderB] }), { kind: 'oneshot-trade' })).toThrow(TokenAnalyticsReadError);
+
+    const page1 = feed({ items: [traderB], nextCursor: 'next-1' });
+    const page2 = feed({ items: [otherTrade], nextCursor: null });
+    const loader = new TokenTradesFeedLoader(vi.fn().mockResolvedValueOnce(page1).mockResolvedValueOnce(page2));
+    await loader.open({ kind: 'oneshot-trade' });
+    expect(loader.snapshot().data?.items).toHaveLength(1);
+    await loader.loadMore();
+    expect(loader.snapshot().data?.items).toHaveLength(2);
+
+    const staleNext = feed({ items: [otherTrade] });
+    staleNext.context.checkpoint!.number = '101';
+    staleNext.context.checkpoint!.hash = hash('d');
+    staleNext.context.observedHeadNumber = '104';
+    const staleLoader = new TokenTradesFeedLoader(vi.fn().mockResolvedValueOnce(page1).mockResolvedValueOnce(staleNext));
+    await staleLoader.open({ kind: 'oneshot-trade' });
+    await staleLoader.loadMore();
+    expect(staleLoader.snapshot()).toMatchObject({ stale: true, data: null });
+
+    await expect(readTokenTradesFeed({ kind: 'oneshot-trade' }, undefined, undefined, vi.fn(async () => Response.json({})))).rejects.toThrow('could not be verified');
   });
 });

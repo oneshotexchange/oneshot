@@ -47,6 +47,19 @@ describe('token execution access and customer guidance', () => {
     const html = renderToStaticMarkup(createElement(TokenExecutionSummary, { review, symbol: 'ORBIT' }));
     for (const value of ['1.000000000000000001 test ETH', '1.23456789 ORBIT', '1.20000001 ORBIT', '0.3497%', '0.25%', '0.1%', 'Actual output may change', 'full input reverts']) expect(html).toContain(value);
     expect(html).not.toMatch(/Market cap|24h|Holders|ZRO/);
+
+    const maintainHtml = renderToStaticMarkup(createElement(TokenExecutionSummary, {
+      review: {
+        ...review, action: 'maintain', value: '0',
+        summary: {
+          maximumNativeBudgetRaw: '1000000000000000000', maximumTokenBudgetRaw: '1000000000000000',
+          pendingLpNativeRaw: '10000000000000000', pendingLpTokenRaw: '500000000',
+          pendingLiquidityNativeRaw: '20000000000000000', pendingLiquidityTokenRaw: '0', pendingBurnNativeRaw: '5000000000000000',
+        },
+      },
+      symbol: 'ORBIT',
+    }));
+    for (const value of ['Max native spending budget', '1 test ETH', '10000000 ORBIT', 'Pending LP fees (native)', '0.01 test ETH', '5 ORBIT', '0%']) expect(maintainHtml).toContain(value);
   });
 
   it('keeps a submitted receipt and IDs visible without another approval action, and links a verified created market', () => {

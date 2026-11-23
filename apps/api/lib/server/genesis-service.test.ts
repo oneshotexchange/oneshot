@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { privateKeyToAccount } from 'viem/accounts';
+import { buildNftAllowlistTree, nftAllowlistLeaf } from '@oneshot/evm';
 import { describe, expect, it, vi } from 'vitest';
 import { createGenesisService } from './genesis-service';
 import { memoryGenesisStore, type GenesisStore } from './genesis-store';
@@ -87,5 +89,95 @@ describe('Genesis account applications and allocation safety',()=>{
     expect(await service.shareProfile(app.code)).toBeNull();await service.share(genesisTestSession(),true,1);
     expect(await service.shareProfile(app.code)).toEqual({profile:app.profile,status:'Applied for Genesis'});
     await service.share(genesisTestSession(),false,2);expect(await service.shareProfile(app.code)).toBeNull();
+  });
+  it('binds selected mint wallets with EIP-191 signatures, blocks replay and duplicates, and exports Merkle allowlists',async()=>{
+    const {service,store}=await genesisTestFixture();
+    const unselected=genesisTestApplication(1,false);
+    const selectedOne=genesisTestApplication(2,true);
+    const selectedTwo=genesisTestApplication(3,true);
+    await store.transaction(async tx=>{
+      await tx.saveApplication(unselected);
+      await tx.saveApplication(selectedOne);
+      await tx.saveApplication(selectedTwo);
+    });
+    const signerA=privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
+    const signerB=privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+
+    await expect(service.walletChallenge(genesisTestSession(1),signerA.address)).rejects.toMatchObject({code:'GENESIS_NOT_SELECTED'});
+
+    const challenge=await service.walletChallenge(genesisTestSession(2),signerA.address);
+    expect(challenge.wallet).toBe(signerA.address.toLowerCase());
+    expect(challenge.expectedRevision).toBe(2);
+    expect(JSON.stringify(await service.me(genesisTestSession(2)))).not.toMatch(/mintWalletChallengeNonce/);
+    expect(JSON.stringify(await service.admin())).not.toMatch(/mintWalletChallengeNonce/);
+
+    const wrongSignature=await signerB.signMessage({message:challenge.message});
+    await expect(service.bindWallet(genesisTestSession(2),{
+      wallet:signerA.address,
+      signature:wrongSignature,
+      expectedRevision:challenge.expectedRevision,
+    })).rejects.toMatchObject({code:'GENESIS_SIGNATURE_INVALID',status:400});
+
+    await expect(service.bindWallet(genesisTestSession(2),{
+      wallet:signerA.address,
+      signature:wrongSignature,
+      expectedRevision:1,
+    })).rejects.toMatchObject({code:'GENESIS_REVISION'});
+
+    const validSignature=await signerA.signMessage({message:challenge.message});
+    const boundMe=await service.bindWallet(genesisTestSession(2),{
+      wallet:signerA.address,
+      signature:validSignature,
+      expectedRevision:challenge.expectedRevision,
+    });
+    expect(boundMe.application?.mintWallet).toBe(signerA.address.toLowerCase());
+    expect(boundMe.application?.mintWalletBoundAt).toBeTruthy();
+
+    await expect(service.bindWallet(genesisTestSession(2),{
+      wallet:signerA.address,
+      signature:validSignature,
+      expectedRevision:boundMe.application!.revision,
+    })).rejects.toMatchObject({code:'GENESIS_CHALLENGE_MISSING',status:400});
+
+    await expect(service.walletChallenge(genesisTestSession(3),signerA.address)).rejects.toMatchObject({code:'GENESIS_WALLET_USED'});
+
+    const collection='0x1111111111111111111111111111111111111111' as const;
+    const summary=await service.adminAllowlist();
+    expect(summary).toEqual({
+      selectedCount:2,
+      boundCount:1,
+      missingWalletCount:1,
+      wallets:[signerA.address.toLowerCase()],
+      merkle:null,
+    });
+
+    const singleExport=await service.adminAllowlist({chainId:84532,collection});
+    expect(singleExport.merkle).toEqual({
+      chainId:84532,
+      collection,
+      root:nftAllowlistLeaf(84532,collection,signerA.address),
+      count:1,
+    });
+
+    const challengeTwo=await service.walletChallenge(genesisTestSession(3),signerB.address);
+    const sigTwo=await signerB.signMessage({message:challengeTwo.message});
+    await service.bindWallet(genesisTestSession(3),{
+      wallet:signerB.address,
+      signature:sigTwo,
+      expectedRevision:challengeTwo.expectedRevision,
+    });
+
+    const multiExport=await service.adminAllowlist({chainId:84532,collection});
+    const expectedTree=buildNftAllowlistTree([signerA.address,signerB.address],84532,collection);
+    expect(multiExport.selectedCount).toBe(2);
+    expect(multiExport.boundCount).toBe(2);
+    expect(multiExport.missingWalletCount).toBe(0);
+    expect(multiExport.wallets).toEqual(expectedTree.addresses);
+    expect(multiExport.merkle).toEqual({
+      chainId:84532,
+      collection,
+      root:expectedTree.root,
+      count:2,
+    });
   });
 });

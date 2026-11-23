@@ -10,10 +10,15 @@ export type RpcCapabilityPlan = {
   contracts: { address: Address; codeHash: Hex; call: { data: Hex; expectedResult: Hex } }[];
   expectedLog?: { address: Address; transactionHash: Hex; logIndex: string; topics: Hex[]; data: Hex };
 };
-export type RpcCapabilityOptions = RpcOptions & { overallTimeoutMs?: number };
+export type RpcCapabilityOptions = RpcOptions & { overallTimeoutMs?: number; checkBlockCadence?: boolean };
 type CheckName = 'identity' | 'checkpoint' | 'contractCode' | 'canonicalCalls' | 'callHashRejection'
   | 'blockHashLogs' | 'logHashRejection' | 'checkpointRecheck';
 type Check = { status: 'not-tested' | 'passed' | 'inconclusive' | 'failed'; code?: string };
+export type RpcBlockCadenceEvidence = {
+  sampleBlocks: number;
+  averageIntervalSeconds: number | null;
+  subSecondDetected: boolean;
+};
 export type RpcCapabilityReport = {
   status: 'passed' | 'inconclusive' | 'failed';
   code: string | null;
@@ -24,7 +29,15 @@ export type RpcCapabilityReport = {
   genesisHash: Hex | null;
   checkpoint: { number: string; hash: Hex } | null;
   checks: Record<CheckName, Check>;
-  evidence: { contractsChecked: number; codeSelection: 'checkpoint-number'; callsMatched: number; logsObserved: number; expectedLogObserved: boolean; requests: number };
+  evidence: {
+    contractsChecked: number;
+    codeSelection: 'checkpoint-number';
+    callsMatched: number;
+    logsObserved: number;
+    expectedLogObserved: boolean;
+    requests: number;
+    blockCadence?: RpcBlockCadenceEvidence;
+  };
   limits: { maximumRequests: number; overallTimeoutMs: number; maximumContracts: number };
   /** This probe cannot establish any of these independently. A pass never enables execution. */
   notVerified: readonly ['contractSafety', 'codeHashSelection', 'logCompleteness', 'orphanCanonicality', 'gasEstimation', 'walletSigning',
@@ -214,6 +227,25 @@ export async function probeRpcCapabilities(config: NetworkConfig, rawPlan: unkno
       const rechecked = block(await read('eth_getBlockByNumber', [tag, false]), height, pinned.hash);
       if (rechecked.parentHash !== pinned.parentHash || rechecked.timestamp !== pinned.timestamp) fail('CHECKPOINT_CHANGED');
       report.checks.checkpointRecheck = { status: 'passed' };
+      if (options.checkBlockCadence === true) {
+        const timestamps: bigint[] = [BigInt(pinned.timestamp)];
+        for (let offset = 1n; offset <= 3n && offset <= height; offset += 1n) {
+          if (report.evidence.requests > MAX_REQUESTS - 3) break;
+          const priorNumber = height - offset;
+          const prior = block(await read('eth_getBlockByNumber', [`0x${priorNumber.toString(16)}`, false]), priorNumber);
+          timestamps.unshift(BigInt(prior.timestamp));
+        }
+        const deltas: number[] = [];
+        for (let i = 1; i < timestamps.length; i += 1) {
+          const diff = Number(timestamps[i]! - timestamps[i - 1]!);
+          if (Number.isFinite(diff) && diff >= 0) deltas.push(diff);
+        }
+        report.evidence.blockCadence = {
+          sampleBlocks: timestamps.length,
+          averageIntervalSeconds: deltas.length ? deltas.reduce((sum, val) => sum + val, 0) / deltas.length : null,
+          subSecondDetected: deltas.some(delta => delta === 0),
+        };
+      }
       report.status = logs.expectedObserved ? 'passed' : 'inconclusive';
       report.code = logs.expectedObserved ? null : 'EXPECTED_LOG_NOT_SUPPLIED';
     };

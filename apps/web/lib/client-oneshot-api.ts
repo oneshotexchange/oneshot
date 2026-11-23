@@ -8,7 +8,7 @@ import { tokenAccountDraftId, tokenAccountDraftListSchema, tokenAccountDraftSche
 import { tokenDraftSchema, tokenDraftsEqual, type TokenDraft } from './token-drafts';
 
 export type LocalCollectionDraft = {
-  pricingNetwork?: 'zero' | 'base-sepolia';
+  pricingNetwork?: 'zero' | 'zero-testnet' | 'zero-mainnet' | 'base-sepolia';
   id: string; name: string; symbol?: string; description: string; supply: string; royalty: string; price: string; limit: string;
   metadataMode: 'upload' | 'url'; metadataUrl: string; fileNames: string[]; publicStart: string; publicEnd?: string;
   allowlist: boolean; allowlistStart: string; allowlistEnd?: string; allowlistPrice: string; addresses: string; savedAt: string;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { decodeFunctionData, encodeAbiParameters, keccak256, zeroAddress, type Address, type Hex } from 'viem';
 import { BASE_SEPOLIA_GENESIS_HASH } from '../src/execution-network';
 import { BASE_SEPOLIA_POOL_MANAGER, MARKET_TOKEN_ABI, TOKEN_MARKET_ABI, TOKEN_MARKET_FACTORY_ABI, tokenDexSwapFee } from '../src/token-market';
-import { prepareTokenApprovalCall, prepareTokenLaunchCall, prepareTokenTradeCall, tokenMarketReviewAnchor, type TokenMarketReviewAnchor } from '../src/token-market-review';
+import { prepareTokenApprovalCall, prepareTokenLaunchCall, prepareTokenMaintenanceCall, prepareTokenTradeCall, tokenMarketReviewAnchor, type TokenMarketReviewAnchor } from '../src/token-market-review';
 
 const a = (n: number) => `0x${n.toString(16).padStart(40, '0')}` as Address;
 const h = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as Hex;
@@ -64,6 +64,14 @@ describe('token market exact transaction preparation', () => {
   it('rejects pool and protocol contracts as recipients and invalid price boundaries', () => {
     for (const recipient of [zeroAddress,anchor.market,anchor.token,anchor.poolManager,anchor.factory,anchor.oracle]) expect(()=>prepareTokenTradeCall({...buy(),recipient})).toThrow();
     for (const priceLimit of [0n,99n,10001n]) expect(()=>prepareTokenTradeCall({...buy(),priceLimit})).toThrow();
+  });
+  it('encodes permissionless maintenance with a strict 60-second deadline and explicit budgets', () => {
+    const call = prepareTokenMaintenanceCall({ anchor, from: a(10), maximumNativeBudget: '1.5', maximumTokenBudget: '250000', now: 10001n });
+    expect(call.to).toBe(anchor.market); expect(call.value).toBe(0n); expect(call.deadline).toBe(10060n);
+    expect(call.summary).toMatchObject({ executionFeeBps: '0', maintenanceLifetimeSeconds: '60', maximumNativeBudgetRaw: '1500000000000000000', maximumTokenBudgetRaw: '25000000000000' });
+    expect(decodeFunctionData({ abi: TOKEN_MARKET_ABI, data: call.data })).toEqual({ functionName: 'process', args: [1500000000000000000n, 25000000000000n, 10060n] });
+    for (const now of [9999n, 10060n, 10061n]) expect(() => prepareTokenMaintenanceCall({ anchor, from: a(10), maximumNativeBudget: '1', maximumTokenBudget: '100', now })).toThrow(/expired/i);
+    for (const bad of ['0', '-1', '1.0000000000000000001']) expect(() => prepareTokenMaintenanceCall({ anchor, from: a(10), maximumNativeBudget: bad, maximumTokenBudget: '100', now: 10001n })).toThrow();
   });
 });
 

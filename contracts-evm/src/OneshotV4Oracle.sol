@@ -9,6 +9,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
 interface IOneshotOracleMarketToken {
     function market() external view returns (address);
@@ -35,7 +36,8 @@ contract OneshotV4Oracle {
     error UnsupportedHook();
 
     constructor(IPoolManager manager) {
-        if ((block.chainid != 31337 && block.chainid != 84532) || address(manager).code.length == 0
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid) || address(manager).code.length == 0
+            || (block.chainid == OneshotChainPolicy.BASE_SEPOLIA_CHAIN_ID && address(manager) != OneshotChainPolicy.BASE_SEPOLIA_POOL_MANAGER)
             || uint160(address(this)) & ((1 << 14) - 1) != FLAGS) revert InvalidHookDeployment();
         poolManager = manager;
     }

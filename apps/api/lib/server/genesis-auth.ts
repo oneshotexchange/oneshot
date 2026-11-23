@@ -79,10 +79,10 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
     authenticate,
     assertWrite(request: NextRequest) { if (request.cookies.has(sessionCookie) && !['GET','HEAD'].includes(request.method)) assertOrigin(request); },
     available() { try { return configuration(environment()) !== null; } catch { return false; } },
-    async start(referral?: string) {
-      if (referral && !/^[A-Za-z0-9_-]{16}$/.test(referral)) throw new ApiError(400,'GENESIS_REFERRAL_INVALID','Use a valid Genesis invitation.');
+    async start(referral?: string, returnTo?: '/airdrop' | '/whitelist') {
+      if (referral && !/^[A-Za-z0-9_-]{16}$/.test(referral)) throw new ApiError(400,'GENESIS_REFERRAL_INVALID','Use a valid invitation code.');
       const conf = config(); const state = randomBytes(32).toString('base64url'); const browser = randomBytes(32).toString('base64url'); const verifier = randomBytes(32).toString('base64url');
-      await store.transaction(async tx => { await tx.prune(now()); await tx.state(hash(state), { verifier, browserHash: hash(browser), expiresAt: now() + 600_000, ...(referral?{referral}:{}) }); });
+      await store.transaction(async tx => { await tx.prune(now()); await tx.state(hash(state), { verifier, browserHash: hash(browser), expiresAt: now() + 600_000, ...(referral?{referral}:{}), ...(returnTo?{returnTo}:{}) }); });
       const url = new URL('https://x.com/i/oauth2/authorize');
       Object.entries({ response_type: 'code', client_id: conf.clientId, redirect_uri: conf.redirectUri, scope: 'users.read tweet.read', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).forEach(([key,value]) => url.searchParams.set(key,value));
       return { url: url.href, browser };
@@ -118,13 +118,13 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
         await store.transaction(async tx => { await tx.saveIdentity(identity); await tx.saveSession(hash(cookie), { xId: identity.id, expiresAt }); });
         // X access tokens are discarded. Only a hash of the opaque oneshot session is
         // persisted; the session secret is delivered in a host-only HttpOnly cookie.
-        return { cookie, expiresAt, referral: saved.referral };
+        return { cookie, expiresAt, referral: saved.referral, returnTo: saved.returnTo };
       } catch (error) { reportFailure(failure); throw error; }
     },
     async route(request: NextRequest): Promise<Response | null> {
       const path = request.nextUrl.pathname.replace(/\/$/,'').split('/auth/')[1]; if (!path) return null;
       const secure = environment().NODE_ENV === 'production';
-      const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/api/oneshot/genesis' };
+      const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/api/oneshot' };
       if (path === 'session' && request.method === 'GET') {
         rateLimit('genesis:auth:session',300);
         let session: GenesisSession | null = null;
@@ -134,8 +134,8 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
       }
       if (path === 'start' && request.method === 'POST') {
         assertOrigin(request); rateLimit('genesis:auth:start',120);
-        const input=z.object({referral:z.string().regex(/^[A-Za-z0-9_-]{16}$/).optional()}).strict().parse(JSON.parse(new TextDecoder().decode(await boundedBody(request,1024))));
-        const started = await this.start(input.referral); const response = NextResponse.json({ url: started.url }, { headers: { 'Cache-Control': 'no-store' } });
+        const input=z.object({referral:z.string().regex(/^[A-Za-z0-9_-]{16}$/).optional(),returnTo:z.enum(['/airdrop','/whitelist']).optional()}).strict().parse(JSON.parse(new TextDecoder().decode(await boundedBody(request,1024))));
+        const started = await this.start(input.referral, input.returnTo); const response = NextResponse.json({ url: started.url }, { headers: { 'Cache-Control': 'no-store' } });
         response.cookies.set(browserCookie, started.browser, { ...cookieOptions, path: '/api/oneshot/genesis/auth', maxAge: 600 }); return response;
       }
       if (path === 'callback' && request.method === 'GET') {
@@ -149,6 +149,7 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
           if (query.getAll('code').length !== 1 || query.getAll('state').length !== 1) throw new Error('Invalid callback');
           callbackFailure = null;
           result = await this.callback(query.get('code') || '', query.get('state') || '', request.cookies.get(browserCookie)?.value || '');
+          if (result.returnTo) destination.pathname = result.returnTo;
           if(result.referral)destination.searchParams.set('ref',result.referral);
         } catch { if (callbackFailure) reportFailure(callbackFailure); destination.searchParams.set('x_login','failed'); }
         const response = NextResponse.redirect(destination,303); response.headers.set('Cache-Control','no-store'); response.headers.set('Referrer-Policy','no-referrer');

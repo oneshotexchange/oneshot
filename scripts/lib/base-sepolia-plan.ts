@@ -55,7 +55,7 @@ export function buildBaseSepoliaPlan(artifacts: Record<PlanContract, DeploymentA
   deploy('Deploy guarded NFT marketplace v3 with funded offers and batch purchases', 1n, 'OneshotGuardedMarketplaceV3', [nftFactory, listingAuthority, inputs.deploymentSalt], nftMarketplace);
   deploy('Deploy immutable oracle deployer', 2n, 'OneshotV4OracleDeployer', [], oracleDeployer);
   transactions.push({ action: 'Deploy observation hook with mined CREATE2 salt', nonce: (inputs.nonce + 3n).toString(), from: deployer, chainId: BASE_PLAN_CHAIN_ID, to: oracleDeployer, value: '0x0', data: encodeFunctionData({ abi: artifacts.OneshotV4OracleDeployer.abi, functionName: 'deploy', args: [BASE_PLAN_POOL_MANAGER, oracleSalt] }), expectedContract: oracle, initCodeHash: oracleInitHash });
-  deploy('Deploy token market factory', 4n, 'OneshotV4MarketFactory', [BASE_PLAN_POOL_MANAGER, oracle, platform], tokenFactory);
+  deploy('Deploy token market factory', 4n, 'OneshotV4MarketFactory', [BASE_PLAN_POOL_MANAGER, oracle, platform, 10_000_000_000_000_000n], tokenFactory);
   deploy('Deploy exact-input token quoter', 5n, 'OneshotV4Quoter', [tokenFactory], quoter);
   return {
     schemaVersion: 1, kind: 'oneshot-base-sepolia-unsigned-plan', verifiedDeployment: false, network: { mode: 'base-sepolia', chainId: BASE_PLAN_CHAIN_ID, expectedGenesisHash: BASE_PLAN_GENESIS, rpcIdentityVerified: false, poolManager: BASE_PLAN_POOL_MANAGER, poolManagerCodeHash: null },

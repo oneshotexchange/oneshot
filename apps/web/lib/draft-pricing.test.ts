@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectionCopyForBase, tokenCopyForBase } from './draft-pricing';
+import { collectionCopyForBase, collectionCopyForZero, tokenCopyForBase, tokenCopyForZero } from './draft-pricing';
 import { draftCanLaunchOnNetwork, draftPricingNetwork, readNftNetwork } from './nft-network';
 import { accountCollectionLocalDraft, collectionAccountInput, type LocalCollectionDraft } from './client-oneshot-api';
 import type { OneshotDraft } from './oneshot-draft-schema';
@@ -8,9 +8,11 @@ import { COLLECTION_WORKING_COPY_KEY, LEGACY_COLLECTION_WORKING_COPY_KEY, collec
 import { LEGACY_TOKEN_DRAFTS_STORAGE_KEY, TOKEN_DRAFTS_STORAGE_KEY, emptyTokenDraft, emptyTokenDraftWorkspace, newTokenDraft, readTokenDrafts, writeTokenDrafts } from './token-drafts';
 import { collectionDraftBackup, parseCollectionDraftBackup, parseDraftBackup, serializeDraftBackup } from './draft-backup';
 
-const local: LocalCollectionDraft = { id: 'old-browser-draft', savedAt: '2026-11-14T12:00:00.000Z', name: 'Originals', symbol: 'SHOT', description: 'Art',
+const local: LocalCollectionDraft = {
+  id: 'old-browser-draft', savedAt: '2026-11-14T12:00:00.000Z', name: 'Originals', symbol: 'SHOT', description: 'Art',
   supply: '2', royalty: '5', price: '9007199254740993.000000000000000001', limit: '2', metadataMode: 'url', metadataUrl: 'https://example.com/metadata.json', fileNames: [],
-  publicStart: '2026-12-01T10:00:00', publicEnd: '2026-12-02T10:00:00', allowlist: false, allowlistStart: '', allowlistEnd: '', allowlistPrice: '12.123456789012345678', addresses: '' };
+  publicStart: '2026-12-01T10:00:00', publicEnd: '2026-12-02T10:00:00', allowlist: false, allowlistStart: '', allowlistEnd: '', allowlistPrice: '12.123456789012345678', addresses: ''
+};
 function memory(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
   return { values, getItem: vi.fn((key: string) => values.get(key) ?? null), setItem: vi.fn((key: string, raw: string) => { values.set(key, raw); }) };
@@ -35,14 +37,25 @@ describe('explicit Base pricing copies', () => {
     expect(legacy.openingValuation).toBe('123.000000000000000001'); expect(draftPricingNetwork(legacy)).toBe('zero');
   });
 
+  it('creates Zero Testnet and Zero Mainnet draft copies without converting prior currencies', () => {
+    const zeroTestnetToken = tokenCopyForZero({ ...emptyTokenDraft(), pricingNetwork: 'base-sepolia', name: 'Orbit', symbol: 'ORBIT', openingValuation: '50' }, 'zero-testnet');
+    expect(zeroTestnetToken).toMatchObject({ pricingNetwork: 'zero-testnet', name: 'Orbit', symbol: 'ORBIT', openingValuation: '' });
+    const zeroMainnetToken = tokenCopyForZero(zeroTestnetToken, 'zero-mainnet');
+    expect(zeroMainnetToken).toMatchObject({ pricingNetwork: 'zero-mainnet', name: 'Orbit', symbol: 'ORBIT', openingValuation: '' });
+    const zeroCollection = collectionCopyForZero(local, 'zero-testnet');
+    expect(zeroCollection).toMatchObject({ pricingNetwork: 'zero-testnet', price: '', allowlistPrice: '', name: local.name });
+  });
+
   it('keeps legacy and explicit Zero account records out of Base launch review until a new copy is repriced', () => {
     expect(draftCanLaunchOnNetwork({}, base)).toBe(false);
     expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero' }, base)).toBe(false);
     expect(draftCanLaunchOnNetwork({ pricingNetwork: 'base-sepolia' }, base)).toBe(true);
     expect(draftCanLaunchOnNetwork({ pricingNetwork: 'base-sepolia' }, null)).toBe(false);
     const input = collectionAccountInput(local);
-    const record: OneshotDraft = { ...input, id: 'account-id', ownerUserId: 'owner', revision: 2, status: 'prepared', createdAt: local.savedAt, updatedAt: local.savedAt,
-      snapshot: { manifestHash: 'a'.repeat(64), contentHash: `0x${'b'.repeat(64)}`, baseUri: 'https://example.test/frozen/', collectionUri: 'https://example.test/frozen/collection', itemCount: 2, preparedAt: local.savedAt } };
+    const record: OneshotDraft = {
+      ...input, id: 'account-id', ownerUserId: 'owner', revision: 2, status: 'prepared', createdAt: local.savedAt, updatedAt: local.savedAt,
+      snapshot: { manifestHash: 'a'.repeat(64), contentHash: `0x${'b'.repeat(64)}`, baseUri: 'https://example.test/frozen/', collectionUri: 'https://example.test/frozen/collection', itemCount: 2, preparedAt: local.savedAt }
+    };
     const before = JSON.stringify(record), copy = collectionCopyForBase(accountCollectionLocalDraft(record));
     expect(copy.price).toBe(''); expect(copy.allowlistPrice).toBe(''); expect(copy.id).toBe('');
     expect(JSON.stringify(record)).toBe(before); expect(copy).not.toHaveProperty('snapshot');

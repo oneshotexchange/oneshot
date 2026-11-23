@@ -19,7 +19,7 @@ const invalid = () => new ApiError(409, 'EXTERNAL_REVIEW_CHANGED', 'The collecti
 const quantity = (value: bigint) => `0x${value.toString(16)}` as Hex;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
-async function loadManifest(path: string) {
+export async function loadReviewedNftManifest(path: string) {
   const file = await open(path, 'r');
   try {
     if (!(await file.stat()).isFile() || (await file.stat()).size > 16_384) throw reviewedNftUnavailable();
@@ -66,7 +66,7 @@ export function createReviewedNftGateway(dependencies: {
     try {
       const env = environment();
       if (!['local', 'base-sepolia'].includes(env.ONESHOT_NETWORK ?? '') || env.ONESHOT_REVIEWED_NFT_IMPORTS_ENABLED !== 'true' || !env.ONESHOT_REVIEWED_NFT_MANIFEST_PATH) throw reviewedNftUnavailable();
-      const manifest = parseReviewedNftManifest(reviewedNftManifestJson(await (dependencies.loadManifest ?? loadManifest)(env.ONESHOT_REVIEWED_NFT_MANIFEST_PATH)));
+      const manifest = parseReviewedNftManifest(reviewedNftManifestJson(await (dependencies.loadManifest ?? loadReviewedNftManifest)(env.ONESHOT_REVIEWED_NFT_MANIFEST_PATH)));
       const config = networkConfig(env);
       if (manifest.mode !== env.ONESHOT_NETWORK || config.chainId !== manifest.chainId) throw reviewedNftUnavailable();
       const rpc = await (dependencies.rpc ?? createVerifiedRpc)(config);

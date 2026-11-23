@@ -29,3 +29,7 @@ export type TokenAnalyticsHoldersResponse={context:TokenAnalyticsContext;market:
 /** This deployment's registered markets only. Public wallet data; no cash value or P&L. */
 export type TokenWalletHolding={market:IndexedTokenMarket;balanceRaw:string;price:TokenPoolPrice;lastBalanceBlockNumber:string;lastBalanceBlockHash:string};
 export type TokenWalletHoldingsResponse={context:TokenAnalyticsContext;wallet:string;scope:'registered-token-markets';holdingCount:string|null;items:TokenWalletHolding[];nextCursor:string|null};
+export type TokenAnalyticsSort='newest'|'volume'|'trades'|'holders';
+export type TokenAnalyticsMarketListItem={market:IndexedTokenMarket;analytics:TokenAnalytics};
+export type TokenAnalyticsMarketsResponse={context:TokenAnalyticsContext;sort:TokenAnalyticsSort;items:TokenAnalyticsMarketListItem[];nextCursor:string|null};
+export type TokenAnalyticsFeedResponse={context:TokenAnalyticsContext;kind:'pool-swap'|'oneshot-trade'|'all';wallet:string|null;items:TokenAnalyticsTrade[];nextCursor:string|null};

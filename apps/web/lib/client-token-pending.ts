@@ -1,12 +1,12 @@
 export const TOKEN_PENDING_STORAGE_KEY = 'oneshot.token.pending.v1';
-export type PendingTokenTransaction = { userId: string; from: string; chainId: 31337 | 84532; deploymentId: string; reviewId: string; hash: `0x${string}`; createdAt: string; target: string; action: 'launch' | 'approve' | 'buy' | 'sell' | 'claim' };
+export type PendingTokenTransaction = { userId: string; from: string; chainId: 31337 | 84532; deploymentId: string; reviewId: string; hash: `0x${string}`; createdAt: string; target: string; action: 'launch' | 'approve' | 'buy' | 'sell' | 'claim' | 'maintain' };
 type PendingStorage = Pick<Storage, 'getItem' | 'setItem'>;
 const retention = 30 * 86_400_000;
 function valid(value: unknown, now: number, includeExpired = false): value is PendingTokenTransaction {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as PendingTokenTransaction;
   return typeof item.userId === 'string' && item.userId.length > 0 && item.userId.length <= 256
-    && /^0x[\da-f]{40}$/.test(item.from) && /^0x[\da-f]{40}$/.test(item.target) && ['launch', 'approve', 'buy', 'sell', 'claim'].includes(item.action) && (item.chainId === 31337 || item.chainId === 84532)
+    && /^0x[\da-f]{40}$/.test(item.from) && /^0x[\da-f]{40}$/.test(item.target) && ['launch', 'approve', 'buy', 'sell', 'claim', 'maintain'].includes(item.action) && (item.chainId === 31337 || item.chainId === 84532)
     && /^[\da-f]{64}$/.test(item.deploymentId) && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/.test(item.reviewId)
     && /^0x[\da-f]{64}$/.test(item.hash) && typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt))
     && Date.parse(item.createdAt) <= now && (includeExpired || now - Date.parse(item.createdAt) < retention);

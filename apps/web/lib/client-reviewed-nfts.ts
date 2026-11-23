@@ -1,6 +1,6 @@
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch } from './customer-http';
-import { reviewedStatusSchema, reviewedCollectionsPageSchema, reviewedCollectionDetailSchema, reviewedItemsPageSchema, reviewedItemDetailSchema, reviewedListingsPageSchema, reviewedActivityPageSchema, type ReviewedNftContext, type ReviewedCollection, type ReviewedItem, type ReviewedListing, type ReviewedActivity } from './reviewed-nft-data';
+import { reviewedStatusSchema, reviewedCollectionsPageSchema, reviewedCollectionDetailSchema, reviewedItemsPageSchema, reviewedItemDetailSchema, reviewedListingsPageSchema, reviewedActivityPageSchema, reviewedClaimsPageSchema, type ReviewedNftContext, type ReviewedCollection, type ReviewedItem, type ReviewedListing, type ReviewedActivity, type ReviewedClaim } from './reviewed-nft-data';
 
 const base = '/api/oneshot/reviewed-nfts';
 const deployment = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -45,14 +45,31 @@ export type ReviewedNftReadSelection =
   | { kind: 'items'; collection: string }
   | { kind: 'item'; collection: string; tokenId: string }
   | { kind: 'listings'; collection: string; status?: 'active' | 'sold' | 'cancelled' }
-  | { kind: 'activity'; collection: string };
-export const reviewedNftIsPage = (selection: ReviewedNftReadSelection) => ['collections', 'items', 'listings', 'activity'].includes(selection.kind);
+  | { kind: 'activity'; collection: string }
+  | { kind: 'wallet-items'; wallet: string }
+  | { kind: 'wallet-claims'; wallet: string }
+  | { kind: 'seller-listings'; seller: string; status?: 'active' | 'sold' | 'cancelled' }
+  | { kind: 'global-activity'; wallet?: string };
+export const reviewedNftIsPage = (selection: ReviewedNftReadSelection) =>
+  ['collections', 'items', 'listings', 'activity', 'wallet-items', 'wallet-claims', 'seller-listings', 'global-activity'].includes(selection.kind);
 export function reviewedNftReadPath(selection: ReviewedNftReadSelection, nextCursor?: string) {
   if (nextCursor !== undefined && (!reviewedNftIsPage(selection) || !cursor(nextCursor))) throw new ReviewedNftReadError('Refresh this list from the beginning.', 'INVALID_INPUT', 400);
   let path: string;
   const query = new URLSearchParams();
   if (selection.kind === 'status' || selection.kind === 'collections') path = `${base}/${selection.kind}`;
-  else {
+  else if (selection.kind === 'wallet-items' || selection.kind === 'wallet-claims') {
+    const wallet = reviewedNftAddress(selection.wallet);
+    path = `${base}/wallets/${wallet}/${selection.kind === 'wallet-items' ? 'items' : 'claims'}`;
+  } else if (selection.kind === 'seller-listings') {
+    path = `${base}/listings`;
+    query.set('seller', reviewedNftAddress(selection.seller));
+    const status = selection.status ?? 'active';
+    if (!['active', 'sold', 'cancelled'].includes(status)) throw new ReviewedNftReadError('Check the listing selection and refresh.', 'INVALID_INPUT', 400);
+    query.set('status', status);
+  } else if (selection.kind === 'global-activity') {
+    path = `${base}/activity`;
+    if (selection.wallet !== undefined) query.set('wallet', reviewedNftAddress(selection.wallet));
+  } else {
     const collection = reviewedNftAddress(selection.collection);
     path = selection.kind === 'collection' ? `${base}/collections/${collection}`
       : selection.kind === 'items' ? `${base}/collections/${collection}/items`
@@ -71,14 +88,14 @@ export function reviewedNftReadPath(selection: ReviewedNftReadSelection, nextCur
 
 async function responseJson(response: Response, signal: AbortSignal): Promise<unknown> {
   const maximum = 2 * 1024 * 1024, length = response.headers.get('content-length');
-  if (length && /^\d+$/.test(length) && BigInt(length) > BigInt(maximum)) { void response.body?.cancel().catch(() => {}); throw invalid(); }
+  if (length && /^\d+$/.test(length) && BigInt(length) > BigInt(maximum)) { void response.body?.cancel().catch(() => { }); throw invalid(); }
   const reader = (() => { try { return response.body?.getReader(); } catch { throw invalid(); } })();
   if (!reader) throw invalid();
   const chunks: Uint8Array[] = []; let size = 0, complete = false;
-  const cancel = () => { void reader.cancel().catch(() => {}); };
+  const cancel = () => { void reader.cancel().catch(() => { }); };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    for (;;) {
+    for (; ;) {
       signal.throwIfAborted(); const part = await reader.read(); signal.throwIfAborted();
       if (part.done) { complete = true; break; }
       size += part.value.byteLength; if (size > maximum) throw invalid(); chunks.push(part.value);
@@ -107,23 +124,31 @@ export async function fetchReviewedNftRead(selection: ReviewedNftReadSelection, 
     }
     return parseReviewedNftRead(body, selection, expectedDeployment);
   } catch (error) {
-    void response?.body?.cancel().catch(() => {}); signal?.throwIfAborted();
+    void response?.body?.cancel().catch(() => { }); signal?.throwIfAborted();
     if (deadline.aborted) throw new ReviewedNftReadError('NFT records are taking too long to load. Refresh and try again.', 'READ_TIMEOUT');
     throw error;
   }
 }
 
 export function parseReviewedNftRead(raw: unknown, selection: ReviewedNftReadSelection, expectedDeployment: string | null = null) {
-  const schema = selection.kind === 'status' ? reviewedStatusSchema : selection.kind === 'collections' ? reviewedCollectionsPageSchema : selection.kind === 'collection' ? reviewedCollectionDetailSchema
-    : selection.kind === 'items' ? reviewedItemsPageSchema : selection.kind === 'item' ? reviewedItemDetailSchema : selection.kind === 'listings' ? reviewedListingsPageSchema : reviewedActivityPageSchema;
+  const schema = selection.kind === 'status' ? reviewedStatusSchema
+    : selection.kind === 'collections' ? reviewedCollectionsPageSchema
+      : selection.kind === 'collection' ? reviewedCollectionDetailSchema
+        : selection.kind === 'items' || selection.kind === 'wallet-items' ? reviewedItemsPageSchema
+          : selection.kind === 'item' ? reviewedItemDetailSchema
+            : selection.kind === 'listings' || selection.kind === 'seller-listings' ? reviewedListingsPageSchema
+              : selection.kind === 'wallet-claims' ? reviewedClaimsPageSchema
+                : reviewedActivityPageSchema;
   const parsed = schema.safeParse(raw); if (!parsed.success) throw invalid();
-  type Entry = ReviewedCollection | ReviewedItem | ReviewedListing | ReviewedActivity;
+  type Entry = ReviewedCollection | ReviewedItem | ReviewedListing | ReviewedActivity | ReviewedClaim;
   // Each envelope was validated with its selection-specific strict schema above.
   const value = parsed.data as { context: ReviewedNftContext; items?: Entry[]; nextCursor?: string | null; collection?: ReviewedCollection | null; item?: ReviewedItem | null; listing?: ReviewedListing | null }, context = value.context;
   if (context.available && context.deploymentId !== expectedDeployment && expectedDeployment !== null) throw invalid();
   const entries: Entry[] = value.items ?? [value.item, value.listing, value.collection].filter((entry): entry is ReviewedCollection | ReviewedItem | ReviewedListing => entry !== null && entry !== undefined);
   if (!context.available && (entries.length || 'nextCursor' in value && value.nextCursor !== null)) throw invalid();
   if (context.available && (selection.kind === 'collection' && !value.collection || selection.kind === 'item' && !value.item)) throw invalid();
+  const expectedWallet = selection.kind === 'wallet-items' || selection.kind === 'wallet-claims' || (selection.kind === 'global-activity' && selection.wallet !== undefined)
+    ? reviewedNftAddress(selection.wallet!) : selection.kind === 'seller-listings' ? reviewedNftAddress(selection.seller) : null;
   const seen = new Set<string>(); let previous: typeof entries[number] | undefined;
   for (const entry of entries) {
     const at = 'lastBlockNumber' in entry ? entry.lastBlockNumber : entry.blockNumber;
@@ -132,11 +157,17 @@ export function parseReviewedNftRead(raw: unknown, selection: ReviewedNftReadSel
     if ('collection' in selection && entryCollection !== reviewedNftAddress(selection.collection)) throw invalid();
     if ('marketplace' in entry && entry.marketplace !== context.source?.marketplace) throw invalid();
     if ('eventName' in entry && (entry.eventName === 'ReviewAdmitted' || entry.eventName === 'ReviewRevoked' ? entry.source !== context.source?.registry : entry.eventName === 'Transfer' ? entry.source !== entry.collection : entry.source !== context.source?.marketplace)) throw invalid();
-    const key = 'listingId' in entry ? `listing:${entry.listingId}` : 'tokenId' in entry ? `${entry.collection}:${entry.tokenId}` : 'address' in entry ? entry.address : entry.id;
+    if (selection.kind === 'wallet-items' && 'burned' in entry && (entry.owner !== expectedWallet || entry.burned)) throw invalid();
+    if (selection.kind === 'wallet-claims' && 'pendingRaw' in entry && entry.account !== expectedWallet) throw invalid();
+    if (selection.kind === 'seller-listings' && 'listingId' in entry && (entry.seller !== expectedWallet || entry.status !== (selection.status ?? 'active'))) throw invalid();
+    if (selection.kind === 'global-activity' && expectedWallet && 'eventName' in entry
+      && !['seller', 'buyer', 'recipient', 'from', 'to', 'account', 'caller', 'royaltyRecipient'].some(field => entry.args[field] === expectedWallet)) throw invalid();
+    const key = 'pendingRaw' in entry ? `claim:${entry.marketplace}:${entry.account}` : 'listingId' in entry ? `listing:${entry.listingId}` : 'tokenId' in entry ? `${entry.collection}:${entry.tokenId}` : 'address' in entry ? entry.address : entry.id;
     if (seen.has(key)) throw invalid(); seen.add(key);
     if (selection.kind === 'item' && 'tokenId' in entry && entry.tokenId !== selection.tokenId) throw invalid();
     if (previous && 'items' in value) {
-      if ('listingId' in entry && 'listingId' in previous && BigInt(previous.listingId) <= BigInt(entry.listingId)
+      if ('pendingRaw' in entry && 'pendingRaw' in previous && previous.marketplace >= entry.marketplace
+        || 'listingId' in entry && 'listingId' in previous && BigInt(previous.listingId) <= BigInt(entry.listingId)
         || 'tokenId' in entry && 'tokenId' in previous && (entry.collection < previous.collection || entry.collection === previous.collection && BigInt(previous.tokenId) >= BigInt(entry.tokenId))
         || 'address' in entry && 'address' in previous && previous.address >= entry.address
         || 'blockNumber' in entry && 'blockNumber' in previous && (BigInt(previous.blockNumber) < BigInt(entry.blockNumber) || previous.blockNumber === entry.blockNumber && previous.logIndex <= entry.logIndex)) throw invalid();

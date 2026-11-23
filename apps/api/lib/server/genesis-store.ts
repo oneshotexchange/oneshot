@@ -10,8 +10,10 @@ export interface GenesisTransaction {
   campaign(): Promise<GenesisCampaign>;
   saveCampaign(campaign: GenesisCampaign): Promise<void>;
   application(field: 'id' | 'userId' | 'xId' | 'code', value: string): Promise<GenesisApplication | null>;
+  applicationByMintWallet(wallet: string): Promise<GenesisApplication | null>;
   saveApplication(application: GenesisApplication): Promise<void>;
   applications(offset: number, limit: number): Promise<GenesisApplication[]>;
+  selectedApplications(): Promise<GenesisApplication[]>;
   count(kind: 'selected' | 'total' | 'referrals' | 'reserved', referrerId?: string): Promise<number>;
   nominator(xId: string): Promise<GenesisApplication | null>;
   jobs(limit: number, now: number): Promise<GenesisJob[]>;
@@ -29,11 +31,13 @@ function localTransaction(state: LocalState): GenesisTransaction {
     campaign: async () => structuredClone(state.campaign),
     saveCampaign: async value => { state.campaign = structuredClone(value); },
     application: async (field, value) => structuredClone(Object.values(state.applications).find(app => key(app, field) === value) || null),
+    applicationByMintWallet: async wallet => structuredClone(Object.values(state.applications).find(app => app.mintWallet?.toLowerCase() === wallet.toLowerCase()) || null),
     saveApplication: async app => {
-      if (Object.values(state.applications).some(other => other.id !== app.id && (other.userId === app.userId || other.profile.id === app.profile.id || other.code === app.code))) throw new ApiError(409, 'GENESIS_IDENTITY_USED', 'This X account already has an application. Sign in to the original oneshot account.');
+      if (Object.values(state.applications).some(other => other.id !== app.id && (other.userId === app.userId || other.profile.id === app.profile.id || other.code === app.code || (app.mintWallet && other.mintWallet?.toLowerCase() === app.mintWallet.toLowerCase())))) throw new ApiError(409, 'GENESIS_IDENTITY_USED', 'This identity or wallet is already used by another Genesis application.');
       state.applications[app.id] = structuredClone(app);
     },
     applications: async (offset, limit) => structuredClone(Object.values(state.applications).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)).slice(offset, offset + limit)),
+    selectedApplications: async () => structuredClone(Object.values(state.applications).filter(app => app.publishedDecision === 'selected').sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))),
     count: async (kind, referrerId) => kind === 'reserved' ? Object.values(state.applications).reduce((sum,app) => sum + (app.nominationQuota || 0) - (app.nominations || []).filter(n => n.accepted).length,0) : Object.values(state.applications).filter(app => kind === 'selected' ? app.decision === 'selected' : kind === 'referrals' ? app.referrerId === referrerId && app.status === 'under_review' : true).length,
     nominator: async xId => structuredClone(Object.values(state.applications).find(app => app.nominations?.some(n => n.xId === xId)) || null),
     jobs: async (limit, now) => structuredClone(Object.values(state.jobs).filter(job => job.state !== 'done' && job.nextAt <= now && job.leaseUntil <= now).slice(0, limit)),
@@ -73,8 +77,10 @@ export function createGenesisStore(pool: () => Pool | null = database): GenesisS
         campaign: async () => structuredClone(campaign),
         saveCampaign: async value => { await client.query("UPDATE oneshot_genesis_campaign SET value=$1 WHERE id='genesis'", [JSON.stringify(value)]); campaign = value; },
         application: async (field, value) => { const column = { id: 'id', userId: 'user_id', xId: 'x_id', code: 'code' }[field]; const result = await client.query(`SELECT value FROM oneshot_genesis_applications WHERE ${column}=$1`, [value]); return result.rows[0]?.value || null; },
+        applicationByMintWallet: async wallet => (await client.query("SELECT value FROM oneshot_genesis_applications WHERE lower(value->>'mintWallet')=$1 LIMIT 1", [wallet.toLowerCase()])).rows[0]?.value || null,
         saveApplication: async app => { await client.query('INSERT INTO oneshot_genesis_applications(id,user_id,x_id,code,referrer_id,value) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET value=EXCLUDED.value', [app.id, app.userId, app.profile.id, app.code, app.referrerId, JSON.stringify(app)]); },
         applications: async (offset, limit) => (await client.query('SELECT value FROM oneshot_genesis_applications ORDER BY created_at DESC,id LIMIT $1 OFFSET $2', [limit, offset])).rows.map(row => row.value),
+        selectedApplications: async () => (await client.query("SELECT value FROM oneshot_genesis_applications WHERE value->>'publishedDecision'='selected' ORDER BY created_at ASC,id ASC")).rows.map(row => row.value),
         count: async (kind, referrerId) => {
           if (kind === 'reserved') return Number((await client.query("SELECT COALESCE(sum(COALESCE((value->>'nominationQuota')::integer,0)-(SELECT count(*) FROM jsonb_array_elements(COALESCE(value->'nominations','[]')) n WHERE n->>'accepted'='true')),0) AS count FROM oneshot_genesis_applications")).rows[0].count);
           const filter = kind === 'selected' ? "WHERE value->>'decision'='selected'" : kind === 'referrals' ? "WHERE referrer_id=$1 AND value->>'status'='under_review'" : ''; return Number((await client.query(`SELECT count(*) FROM oneshot_genesis_applications ${filter}`, kind === 'referrals' ? [referrerId] : [])).rows[0].count);

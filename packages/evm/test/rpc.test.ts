@@ -110,6 +110,41 @@ describe('RPC network identity', () => {
     expect(publicResult).not.toContain('rpc.fixture.invalid');
   });
 
+  it('supports zero-testnet and zero-mainnet verification while blocking Zerion 543210 and unopted mainnet', async () => {
+    const testnetConfig = networkConfig({
+      ONESHOT_NETWORK: 'zero-testnet',
+      ONESHOT_CHAIN_ID: '123456',
+      ONESHOT_RPC_URL: `https://rpc.fixture.invalid/v2/${SECRET}`,
+      ONESHOT_GENESIS_HASH: GENESIS,
+      ONESHOT_NATIVE_DECIMALS: '18',
+      ONESHOT_CONFIG_SOURCE_URL: 'https://docs.fixture.invalid/zero-testnet',
+    });
+    const mock = transport();
+    await expect(verifyRpcNetwork(testnetConfig, { fetch: mock.fetch })).resolves.toMatchObject({ mode: 'zero-testnet', chainId: 123456, genesisMatched: true });
+
+    const mainnetLocked = networkConfig({
+      ONESHOT_NETWORK: 'zero-mainnet',
+      ONESHOT_CHAIN_ID: '123456',
+      ONESHOT_RPC_URL: `https://rpc.fixture.invalid/v2/${SECRET}`,
+      ONESHOT_GENESIS_HASH: GENESIS,
+      ONESHOT_NATIVE_DECIMALS: '18',
+      ONESHOT_CONFIG_SOURCE_URL: 'https://docs.fixture.invalid/zero',
+    });
+    await safeError(verifyRpcNetwork(mainnetLocked, { fetch: mock.fetch }), 'CONFIG_INCOMPLETE');
+    await safeError(verifyRpcNetwork({ ...testnetConfig, chainId: 543210 }, { fetch: mock.fetch }), 'CONFIG_INCOMPLETE');
+
+    const mainnetEnabled = networkConfig({
+      ONESHOT_NETWORK: 'zero-mainnet',
+      ONESHOT_MAINNET_ENABLED: 'true',
+      ONESHOT_CHAIN_ID: '123456',
+      ONESHOT_RPC_URL: `https://rpc.fixture.invalid/v2/${SECRET}`,
+      ONESHOT_GENESIS_HASH: GENESIS,
+      ONESHOT_NATIVE_DECIMALS: '18',
+      ONESHOT_CONFIG_SOURCE_URL: 'https://docs.fixture.invalid/zero',
+    });
+    await expect(verifyRpcNetwork(mainnetEnabled, { fetch: mock.fetch })).resolves.toMatchObject({ mode: 'zero-mainnet', chainId: 123456, genesisMatched: true });
+  });
+
   it('rejects another chain before fetching blocks', async () => {
     const mock = transport(() => '0x1');
     await safeError(verifyRpcNetwork(config(), { fetch: mock.fetch }), 'CHAIN_ID_MISMATCH');

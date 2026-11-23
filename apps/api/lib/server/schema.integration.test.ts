@@ -27,7 +27,16 @@ describe.skipIf(!connectionString)('concurrent PostgreSQL schema initialization'
       expect(retained.rows).toEqual([{ value: { retained: true } }]);
       const tables = await pool.query('SELECT tablename FROM pg_tables WHERE schemaname=$1', [schema]);
       expect(tables.rows.map(row => row.tablename)).toEqual(expect.arrayContaining([
-        'b20_app_records', 'oneshot_genesis_identities', 'oneshot_genesis_applications', 'oneshot_genesis_jobs',
+        'b20_app_records',
+        'oneshot_genesis_identities',
+        'oneshot_genesis_applications',
+        'oneshot_genesis_jobs',
+        'oneshot_airdrop_campaign',
+        'oneshot_airdrop_snapshot',
+        'oneshot_airdrop_participants',
+        'oneshot_airdrop_merkle',
+        'oneshot_airdrop_budget',
+        'oneshot_airdrop_audit',
       ]));
     } finally {
       await pool?.end();

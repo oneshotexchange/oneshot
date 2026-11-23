@@ -1,1 +1,1 @@
-{"version":1,"include":["/g/*","/api/oneshot/genesis/*"],"exclude":[]}
+{"version":1,"include":["/g/*","/api/oneshot/genesis/*","/api/oneshot/airdrop/*"],"exclude":[]}

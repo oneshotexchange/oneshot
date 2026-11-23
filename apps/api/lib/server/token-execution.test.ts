@@ -122,6 +122,30 @@ describe('wallet-owned Base token transaction reviews',()=>{
     await expect(f.service.review({...common,recipient:a(4)},session)).rejects.toMatchObject({code:'TOKEN_RECIPIENT_INVALID'});
     f.state.claimable=0n;await expect(f.service.review(common,session)).rejects.toMatchObject({code:'TOKEN_NOTHING_TO_CLAIM'});
   });
+  it('prepares permissionless maintenance capped at 60 seconds and reports unready oracle cleanly',async()=>{
+    const f=fixture(),base=f.input();
+    f.readRpc.mockImplementation(async(method:string,params:readonly unknown[]=[])=>{
+      if(method==='eth_getTransactionByHash')return f.state.transaction;
+      if(method==='eth_getTransactionReceipt')return f.state.receipt;
+      if(method!=='eth_call')throw new Error('Unexpected RPC');
+      const input=params[0] as {to:Address;data:Hex};
+      const abi=input.to===a(1)?TOKEN_MARKET_FACTORY_ABI:input.to===a(5)?MARKET_TOKEN_ABI:input.to===a(8)?TOKEN_MARKET_QUOTER_ABI:TOKEN_MARKET_ABI;
+      const call=decodeFunctionData({abi,data:input.data});
+      const result=call.functionName==='sqrtLowerX96'?100n:call.functionName==='sqrtUpperX96'?10000n
+        :call.functionName==='pendingLpNative'?1000n:call.functionName==='pendingLpToken'?2000n
+        :call.functionName==='pendingLiquidityNative'?3000n:call.functionName==='pendingLiquidityToken'?4000n
+        :call.functionName==='pendingBurnNative'?5000n:undefined;
+      return encodeFunctionResult({abi,functionName:call.functionName,result} as never);
+    });
+    const common={from:base.from,market:a(4),testEthAcknowledged:true,expectedChainId:84532,expectedDeploymentId:base.expectedDeploymentId};
+    const reviewed=await f.service.review({...common,action:'maintain',maximumNativeBudget:'1',maximumTokenBudget:'1000'},session);
+    expect(reviewed.value).toBe('0');
+    expect(Date.parse(reviewed.expiresAt)-f.state.clock).toBeLessThanOrEqual(60_000);
+    expect(reviewed.summary).toMatchObject({executionFeeBps:'0',maintenanceLifetimeSeconds:'60',pendingLpNativeRaw:'1000',pendingLpTokenRaw:'2000',pendingLiquidityNativeRaw:'3000',pendingLiquidityTokenRaw:'4000',pendingBurnNativeRaw:'5000'});
+    await expect(f.service.validate(reviewed.id,reviewed.reviewHash,session)).resolves.toEqual(reviewed);
+    f.state.simulationFails=true;
+    await expect(f.service.review({...common,action:'maintain',maximumNativeBudget:'1',maximumTokenBudget:'1000'},session)).rejects.toMatchObject({code:'TOKEN_MAINTENANCE_NOT_READY'});
+  });
 });
 
 describe('token receipt recovery',()=>{

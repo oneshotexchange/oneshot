@@ -1,18 +1,22 @@
-// Only Genesis routes reach the API. Other product pages remain static assets.
+// Only Genesis and Airdrop routes plus invitation shares reach the API. Other product pages remain static assets.
 // First-party routing keeps X sessions in host-only HttpOnly cookies, including
 // the OAuth callback; the browser never receives an X access token.
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const invitation = /^\/g\/([A-Za-z0-9_-]{16})\/?$/.exec(url.pathname);
-    const account = /^\/api\/oneshot\/genesis\/(?:campaign|me|enroll|verify|submit|share|nominations(?:\/accept)?|auth\/(?:session|start|callback|logout))\/?$/.test(url.pathname);
+    const account = /^\/api\/oneshot\/genesis\/(?:campaign|me|enroll|verify|submit|share|wallet-challenge|wallet|nominations(?:\/accept)?|auth\/(?:session|start|callback|logout))\/?$/.test(url.pathname)
+      || /^\/api\/oneshot\/airdrop\/(?:campaign|eligibility|leaderboard|me|enroll|wallet-challenge|wallet|verify|refresh-engagement)\/?$/.test(url.pathname);
     if (!invitation && !account) return env.ASSETS.fetch(request);
     if (!(invitation ? ['GET','HEAD'] : ['GET','HEAD','POST']).includes(request.method)) return new Response('Method not allowed',{status:405});
     try {
       const origin = new URL(env.GENESIS_API_ORIGIN);
       if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Invalid origin');
       const target = new URL(invitation ? '/api/oneshot/genesis/share/' + invitation[1] : url.pathname, origin);
-      if (account && url.pathname.replace(/\/$/,'').endsWith('/auth/callback')) target.search = url.search;
+      const normalizedPath = url.pathname.replace(/\/$/,'');
+      if (account && (normalizedPath.endsWith('/auth/callback') || normalizedPath === '/api/oneshot/airdrop/eligibility' || normalizedPath === '/api/oneshot/airdrop/leaderboard')) {
+        target.search = url.search;
+      }
       const options = {method:request.method,redirect:invitation?'error':'manual',signal:AbortSignal.timeout(invitation?15000:45000)};
       if (account) {
         const headers = new Headers();
@@ -28,7 +32,7 @@ export default {
       if (account) {
         if (upstream.status>=300 && upstream.status<400) {
           const location=new URL(upstream.headers.get('Location'),url.origin);
-          if(location.origin!==url.origin || location.pathname!=='/whitelist')throw new Error('Invalid redirect');
+          if(location.origin!==url.origin || !['/whitelist','/airdrop'].includes(location.pathname))throw new Error('Invalid redirect');
         }
         const headers=new Headers(upstream.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');
         return new Response(request.method==='HEAD'?null:upstream.body,{status:upstream.status,headers});

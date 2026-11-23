@@ -12,7 +12,7 @@ const hash = z.string().regex(/^0x[\da-f]{64}$/).transform(value=>value as Hex);
 const amount = z.string().regex(/^(0|[1-9]\d{0,77})$/).refine(value => BigInt(value) < 2n ** 256n);
 export const tokenExecutionReviewSchema = z.object({
   id:z.string().uuid(), reviewHash:z.string().regex(/^[\da-f]{64}$/), expiresAt:z.string().datetime(),
-  action:z.enum(['launch','approve','buy','sell','claim']), chainId:z.union([z.literal(31337),z.literal(84532)]),
+  action:z.enum(['launch','approve','buy','sell','claim','maintain']), chainId:z.union([z.literal(31337),z.literal(84532)]),
   deploymentId:z.string().regex(/^[\da-f]{64}$/), network:z.custom<NftExecutionNetwork>(isNftExecutionNetwork),
   from:address, to:address, value:amount, data:z.string().max(32770).regex(/^0x(?:[\da-f]{2})+$/).transform(value=>value as Hex),
   summary:z.record(z.string().max(64),z.string().max(2048)),
@@ -24,8 +24,8 @@ const storedSchema = z.object({
   review:tokenExecutionReviewSchema, intent:z.record(z.string(),z.unknown()),
   transactionHash:hash.optional(), outcome:z.enum(['submitted','confirmed','reverted']).optional(), updatedAt:z.string().datetime().optional(),
 }).strict().superRefine((value,ctx) => {
-  const expiry=Date.parse(value.review.expiresAt);
-  if (expiry <= value.createdAt || expiry > value.createdAt + 120000 || Boolean(value.transactionHash) !== Boolean(value.outcome)) ctx.addIssue({code:'custom',message:'Invalid review lifetime or transaction binding.'});
+  const expiry=Date.parse(value.review.expiresAt),maxLifetime=value.review.action==='maintain'?60000:120000;
+  if (expiry <= value.createdAt || expiry > value.createdAt + maxLifetime || Boolean(value.transactionHash) !== Boolean(value.outcome)) ctx.addIssue({code:'custom',message:'Invalid review lifetime or transaction binding.'});
 });
 export type StoredTokenExecutionReview = z.infer<typeof storedSchema>;
 const integrity = (): never => { throw new ApiError(503,'TOKEN_REVIEW_INTEGRITY','This transaction review could not be read. Refresh and try again.'); };

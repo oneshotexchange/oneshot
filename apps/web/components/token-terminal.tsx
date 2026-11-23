@@ -2,10 +2,11 @@
 
 import { ArrowLeft, ChartNoAxesCombined, Star } from 'lucide-react';
 import type { IndexedTokenContext, IndexedTokenMarket } from '@oneshot/evm';
+import { isMainnetExecutionNetwork } from '@oneshot/evm';
 import Link from './navigation';
 import { tokenNativeAmount, tokenSupplyAmount, useTokenMarket } from '../lib/client-token-markets';
 import { tokenIsWatched, useTokenWatchlist } from '../lib/token-watchlist';
-import { nftExplorerHref } from '../lib/nft-network';
+import { nativeAssetLabel, nftExplorerHref } from '../lib/nft-network';
 import { Address, AssetIcon, Badge, Button, ButtonLink, EmptyState, ErrorState, InfoRow, Loading, SafetyNote } from './ui';
 import { TokenMarketContext, TokenMarketsUnavailable } from './token-market-context';
 import { TokenTradePanel } from './token-execution-panel';
@@ -20,16 +21,18 @@ function MarketAddress({ value, chainId }: { value: string; chainId?: number }) 
 /** A contract snapshot does not supply a current quote, chart, volume or wallet balance. */
 export function TokenMarketDetails({ market, context, onRefresh, analytics }: { market: IndexedTokenMarket; context: IndexedTokenContext; onRefresh(): void; analytics?: React.ReactNode }) {
   const watchlist = useTokenWatchlist(), watched = tokenIsWatched(watchlist.entries, market.token);
+  const currency = nativeAssetLabel(context.network);
+  const mainnet = isMainnetExecutionNetwork(context.network);
   return <>
-    <div className="terminal-header token-market-detail-header"><AssetIcon name={market.symbol} large /><div className="terminal-title"><h1>{market.name}</h1><p>{market.symbol} / test ETH</p></div><Badge tone="amber">Test network</Badge><button className={`watch-button ${watched ? 'watched' : ''}`} aria-label={watched ? 'Remove from watchlist' : 'Add to watchlist'} disabled={!watchlist.loaded} onClick={() => watchlist.toggle(market.token)}><Star size={19} fill={watched ? 'currentColor' : 'none'} /></button><Button variant="secondary" onClick={onRefresh}>Refresh market</Button></div>
+    <div className="terminal-header token-market-detail-header"><AssetIcon name={market.symbol} large /><div className="terminal-title"><h1>{market.name}</h1><p>{market.symbol} / {currency}</p></div><Badge tone="amber">{mainnet ? 'Mainnet' : 'Test network'}</Badge><button className={`watch-button ${watched ? 'watched' : ''}`} aria-label={watched ? 'Remove from watchlist' : 'Add to watchlist'} disabled={!watchlist.loaded} onClick={() => watchlist.toggle(market.token)}><Star size={19} fill={watched ? 'currentColor' : 'none'} /></button><Button variant="secondary" onClick={onRefresh}>Refresh market</Button></div>
     {watchlist.error && <ErrorState message={watchlist.error} retry={watchlist.refresh} />}
     <TokenMarketContext context={context} />
     {analytics}
     <div className="token-market-detail-grid section-gap">
       <section className="panel token-market-summary" aria-label="Token market terms"><h2>Market terms</h2>
-        <InfoRow label="Opening valuation">{tokenNativeAmount(market.openingValuationNativeRaw)} test ETH</InfoRow>
-        <InfoRow label="Effective opening valuation">{tokenNativeAmount(market.effectiveOpeningValuationNativeRaw)} test ETH</InfoRow>
-        <InfoRow label="Effective upper valuation">{tokenNativeAmount(market.effectiveUpperValuationNativeRaw)} test ETH</InfoRow>
+        <InfoRow label="Opening valuation">{tokenNativeAmount(market.openingValuationNativeRaw)} {currency}</InfoRow>
+        <InfoRow label="Effective opening valuation">{tokenNativeAmount(market.effectiveOpeningValuationNativeRaw)} {currency}</InfoRow>
+        <InfoRow label="Effective upper valuation">{tokenNativeAmount(market.effectiveUpperValuationNativeRaw)} {currency}</InfoRow>
         <p className="field-hint">Effective values describe the liquidity range after price rounding. They are not a current token price or market cap.</p>
         <InfoRow label="Initial supply">{tokenSupplyAmount(market.initialSupplyRaw)} {market.symbol}</InfoRow>
         <InfoRow label="Current total supply">{tokenSupplyAmount(market.totalSupplyRaw)} {market.symbol}</InfoRow>
@@ -44,14 +47,14 @@ export function TokenMarketDetails({ market, context, onRefresh, analytics }: { 
         <InfoRow label="Market"><MarketAddress value={market.market} chainId={context.network?.chainId} /></InfoRow>
         <InfoRow label="Creator"><MarketAddress value={market.creator} chainId={context.network?.chainId} /></InfoRow>
         <InfoRow label="Locked liquidity units">{market.lockedLiquidityRaw}</InfoRow>
-        <p className="field-hint">Liquidity units represent this market’s pool position, rather than an ETH balance or a cash value.</p>
+        <p className="field-hint">Liquidity units represent this market’s pool position, rather than an {context.network?.nativeSymbol ?? 'ETH'} balance or a cash value.</p>
         <InfoRow label="Pool ID"><span className="indexed-hash">{market.poolId}</span></InfoRow>
       </section>
     </div>
     {!analytics && <section className="panel token-market-unavailable section-gap" aria-label="Token market analytics">
       <EmptyState compact icon={ChartNoAxesCombined} title="Market analytics are unavailable" description="Price history, volume and holder analytics are not available here yet. Contract terms are shown above." />
     </section>}
-    <SafetyNote>These are test-network assets. Viewing market terms or saving a token to your watchlist does not buy, sell or approve a transaction.</SafetyNote>
+    <SafetyNote amber={mainnet}>{mainnet ? 'Zero Mainnet transactions use real ZRO. Viewing market terms or saving a token to your watchlist does not buy, sell or approve a transaction.' : 'These are test-network assets. Viewing market terms or saving a token to your watchlist does not buy, sell or approve a transaction.'}</SafetyNote>
   </>;
 }
 

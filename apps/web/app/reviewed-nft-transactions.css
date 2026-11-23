@@ -1,0 +1,26 @@
+.reviewed-nft-transactions { min-width: 0; }
+.reviewed-nft-transactions .field { margin-block: 16px; }
+.reviewed-tx-terms, .reviewed-tx-result, .reviewed-tx-reference { min-width: 0; }
+.reviewed-tx-result:not(:empty), .reviewed-tx-reference { margin-block: 20px; }
+.reviewed-nft-transactions .info-row { gap: 18px; align-items: start; }
+.reviewed-nft-transactions .info-row strong { min-width: 0; max-width: 70%; overflow-wrap: anywhere; }
+.reviewed-tx-terms details, .reviewed-tx-recovery { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 20px; }
+.reviewed-nft-transactions summary { cursor: pointer; font-weight: 600; padding-block: 8px; }
+.reviewed-tx-data { display: block; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--bg-elevated); font-size: 12px; }
+.reviewed-tx-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.reviewed-tx-notice { margin-block: 16px; }
+.reviewed-tx-saved { list-style: none; padding: 0; }
+.reviewed-tx-saved li, .reviewed-tx-history { display: flex; justify-content: space-between; align-items: start; gap: 20px; padding-block: 18px; border-bottom: 1px solid var(--border); }
+.reviewed-tx-saved li > span, .reviewed-tx-history > div { min-width: 0; overflow-wrap: anywhere; }
+.reviewed-tx-saved .button, .reviewed-tx-history .button { flex-shrink: 0; }
+.reviewed-tx-history p { margin-block: 8px; }
+.reviewed-tx-history time { font-size: 12px; color: var(--text-muted); }
+.reviewed-nft-transactions .button-row { margin-block: 16px; flex-wrap: wrap; }
+@media (max-width: 680px) {
+  .reviewed-tx-fields { grid-template-columns: 1fr; gap: 0; }
+  .reviewed-nft-transactions .info-row { flex-direction: column; gap: 6px; }
+  .reviewed-nft-transactions .info-row strong { max-width: 100%; text-align: left; }
+  .reviewed-tx-saved li, .reviewed-tx-history { flex-direction: column; gap: 12px; }
+  .reviewed-nft-transactions .section-header { flex-wrap: wrap; gap: 12px; }
+  .reviewed-nft-transactions .section-header > div { min-width: 0; }
+}

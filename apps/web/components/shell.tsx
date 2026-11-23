@@ -2,7 +2,7 @@
 
 import Link from "./navigation";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, ArrowUpRight, ChevronRight, Gem, Layers2, LayoutDashboard, Menu, Plus, Search, Settings2, Users, Wallet, X } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, Gem, Gift, Layers2, LayoutDashboard, Menu, Plus, Search, Settings2, Wallet, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
 import { ThemePicker } from "./theme-picker";
@@ -15,7 +15,7 @@ const navigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
   { label: "Token markets", href: "/tokens", icon: Layers2 },
   { label: "NFT collections", href: "/nfts", icon: Gem },
-  { label: "Genesis whitelist", href: "/whitelist", icon: Users },
+  { label: "Airdrop", href: "/airdrop", icon: Gift },
   { label: "Portfolio", href: "/portfolio", icon: Wallet },
   { label: "Activity", href: "/activity", icon: Activity },
 ];
@@ -39,7 +39,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
-  const section = pathname.startsWith("/tokens") ? "Token markets" : pathname.startsWith("/nfts") ? "NFT collections" : pathname.startsWith("/profile/") ? "Wallet profile" : pathname.startsWith("/portfolio") ? "Portfolio" : pathname.startsWith("/activity") ? "Activity" : pathname.startsWith("/settings") ? "Settings" : pathname.startsWith("/admin") ? "Administration" : "Home";
+  const section = pathname.startsWith("/tokens") ? "Token markets" : pathname.startsWith("/nfts") ? "NFT collections" : pathname.startsWith("/airdrop") ? "Airdrop" : pathname.startsWith("/profile/") ? "Wallet profile" : pathname.startsWith("/portfolio") ? "Portfolio" : pathname.startsWith("/activity") ? "Activity" : pathname.startsWith("/settings") ? "Settings" : pathname.startsWith("/admin") ? "Administration" : "Home";
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
     {mobileOpen && <div className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}

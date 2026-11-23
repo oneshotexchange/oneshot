@@ -9,6 +9,7 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {OneshotNFTFactory} from "./OneshotNFTFactory.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
 /// @notice Authority-reviewed external ERC-721 admission. No token, fund, fee or
 /// marketplace ownership is granted to the authority. Anyone may submit its permit.
@@ -49,7 +50,7 @@ contract OneshotReviewedCollectionRegistry is EIP712, ReentrancyGuard {
     constructor(OneshotNFTFactory factory_, address authority_, bytes32 salt_)
         EIP712("OneshotReviewedCollectionRegistry", "1")
     {
-        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid)) revert UnsupportedTestChain(block.chainid);
         if (address(factory_).code.length == 0 || factory_.treasury() == address(0)) revert InvalidFactory();
         if (authority_ == address(0)) revert InvalidAuthority();
         if (salt_ == bytes32(0)) revert InvalidDeploymentSalt();

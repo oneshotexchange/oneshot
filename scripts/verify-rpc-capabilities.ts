@@ -7,17 +7,30 @@ import { networkConfig } from '../packages/evm/src/config';
 import { probeRpcCapabilities, type RpcCapabilityOptions } from '../packages/evm/src/rpc-capabilities';
 import { RpcError, type RpcProviderLabel } from '../packages/evm/src/rpc';
 
-export function parseRpcCapabilityArguments(args: string[]): { help: true } | { help: false; planPath: string; envPath?: string } {
+export function parseRpcCapabilityArguments(args: string[]): { help: true } | { help: false; planPath: string; envPath?: string; checkBlockCadence?: boolean } {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const values = new Map<string, string>();
-  if (args.length !== 2 && args.length !== 4) throw new Error('INVALID_ARGUMENTS');
-  for (let i = 0; i < args.length; i += 2) {
-    if (!['--plan', '--env-file'].includes(args[i]) || values.has(args[i]) || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error('INVALID_ARGUMENTS');
-    values.set(args[i], args[i + 1]);
+  let checkBlockCadence = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const flag = args[i];
+    if (flag === '--check-block-cadence') {
+      if (checkBlockCadence) throw new Error('INVALID_ARGUMENTS');
+      checkBlockCadence = true;
+      continue;
+    }
+    const next = args[i + 1];
+    if (!['--plan', '--env-file'].includes(flag) || values.has(flag) || !next || next.startsWith('--')) throw new Error('INVALID_ARGUMENTS');
+    values.set(flag, next);
+    i += 1;
   }
   const planPath = values.get('--plan');
   if (!planPath) throw new Error('INVALID_ARGUMENTS');
-  return { help: false, planPath, ...(values.has('--env-file') ? { envPath: values.get('--env-file')! } : {}) };
+  return {
+    help: false,
+    planPath,
+    ...(values.has('--env-file') ? { envPath: values.get('--env-file')! } : {}),
+    ...(checkBlockCadence ? { checkBlockCadence: true } : {}),
+  };
 }
 
 export async function verifyConfiguredCapabilities(env: Record<string, string | undefined>, plan: unknown, options: RpcCapabilityOptions = {}) {
@@ -48,14 +61,14 @@ async function main(args: string[]) {
   const failed = (code: string) => { console.error(JSON.stringify({ status: 'failed', code, readOnly: true, executionEnabled: false })); process.exitCode = 1; };
   try { parsed = parseRpcCapabilityArguments(args); } catch { failed('INVALID_ARGUMENTS'); return; }
   if (parsed.help) {
-    console.log('Usage: npm run verify:rpc-capabilities -- --plan PATH [--env-file PATH]\nExplicit JSON plan: chainId, genesisHash, 1–4 contracts with address/codeHash/call.data/call.expectedResult. Optionally supply checkpoint {number: decimal string, hash} and expectedLog {address, transactionHash, logIndex: decimal string, topics, data}. A positive known event is required for a passed log check. Reads at most 64 KiB of plan data; at most 48 RPC requests and 30 seconds total. A pass does not establish NFT/AMM readiness, finality, native precision, gas estimation or transaction execution. No signing or broadcasting.');
+    console.log('Usage: npm run verify:rpc-capabilities -- --plan PATH [--env-file PATH] [--check-block-cadence]\nExplicit JSON plan: chainId, genesisHash, 1–4 contracts with address/codeHash/call.data/call.expectedResult. Optionally supply checkpoint {number: decimal string, hash} and expectedLog {address, transactionHash, logIndex: decimal string, topics, data}. Optional --check-block-cadence samples consecutive block timestamps (max 4 headers within the 48-request budget) to detect sub-second cadence. A positive known event is required for a passed log check. Reads at most 64 KiB of plan data; at most 48 RPC requests and 30 seconds total. A pass does not establish NFT/AMM readiness, finality, native precision, gas estimation or transaction execution. No signing or broadcasting.');
     return;
   }
   if (parsed.envPath) { try { loadEnvFile(resolve(parsed.envPath)); } catch { failed('ENV_FILE_UNAVAILABLE'); return; } }
   let plan: unknown;
   try { plan = await readRpcCapabilityPlan(parsed.planPath); } catch { failed('CAPABILITY_PLAN_UNAVAILABLE'); return; }
   try {
-    const report = await verifyConfiguredCapabilities(process.env, plan);
+    const report = await verifyConfiguredCapabilities(process.env, plan, parsed.checkBlockCadence ? { checkBlockCadence: true } : {});
     console.log(JSON.stringify(report, null, 2));
     if (report.status !== 'passed') process.exitCode = 1;
   } catch (error) { failed(error instanceof RpcError ? error.code : 'CAPABILITY_UNAVAILABLE'); }

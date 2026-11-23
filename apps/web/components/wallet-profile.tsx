@@ -12,6 +12,9 @@ import { ActivityRows, IndexedCollectionCard, IndexedContextNote, IndexedItemCar
 import { Address, Button, ButtonLink, EmptyState, ErrorState, Field, Loading, Modal, PageHeading, SafetyNote, Tabs } from './ui';
 import { WalletButton } from './wallet-button';
 import { WalletFollowButton } from './wallet-following';
+import { TokenPortfolioPanel } from './token-portfolio';
+import { TokenTradesFeedPanel } from './token-analytics';
+import { ReviewedWalletPanel } from './reviewed-nfts';
 import { completeWalletProfileChange, restoreWalletProfileWorkingCopy, walletProfileEditConflict, walletProfileHasOpenEdits, type WalletProfileWorkingCopy } from '../lib/wallet-profile-editor';
 import '../app/wallet-profile.css';
 
@@ -70,6 +73,9 @@ function PublicWalletProfileContent({ wallet }: { wallet: string }) {
       {loading ? <p className="wallet-profile-status" role="status">Loading profile details…</p> : error ? <ErrorState message={error} retry={() => setVersion(value => value + 1)} /> : !profile?.profile ? <p className="wallet-profile-status">This wallet has no published profile details. Its public NFT records are shown below when available.</p> : <p className="wallet-profile-status">Name, bio and images are supplied by this wallet’s account. They do not verify identity or ownership of artwork.</p>}
     </section>
     {invalidDeployment ? <ErrorState message="This profile link has an invalid NFT network selection. Open a current collection link to continue." /> : <ProfileAssets key={tab} wallet={wallet} tab={tab} deployment={deployments[0] || null} setTab={setTab} />}
+    <TokenPortfolioPanel wallet={wallet} />
+    <TokenTradesFeedPanel wallet={wallet} title="Token trades" description="Confirmed oneshot token buys and sells involving this wallet." />
+    <ReviewedWalletPanel wallet={wallet} />
   </>;
 }
 function ProfileAssets({ wallet, tab, deployment, setTab }: { wallet: string; tab: ProfileTab; deployment: string | null; setTab(value: ProfileTab): void }) {

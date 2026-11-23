@@ -56,4 +56,44 @@ CREATE INDEX IF NOT EXISTS oneshot_genesis_pending ON oneshot_genesis_jobs(next_
   WHERE value->>'state'<>'done';
 CREATE TABLE IF NOT EXISTS oneshot_genesis_budget (day DATE PRIMARY KEY, reads INTEGER NOT NULL CHECK (reads>=0));
 CREATE TABLE IF NOT EXISTS oneshot_genesis_audit (id UUID PRIMARY KEY, value JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+
+-- LayerZero Token Airdrop, Mission Vault Box & Top 500 Leaderboard
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_campaign (
+  id TEXT PRIMARY KEY CHECK (id='airdrop'),
+  value JSONB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_snapshot (
+  wallet TEXT PRIMARY KEY CHECK (wallet ~ '^0x[a-f0-9]{40}$'),
+  tier TEXT NOT NULL CHECK (tier IN ('lz_winner','lz_user_5tx')),
+  tx_count INTEGER CHECK (tx_count >= 0),
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_participants (
+  id UUID PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  x_id TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL UNIQUE,
+  referrer_id UUID REFERENCES oneshot_airdrop_participants(id),
+  wallet TEXT UNIQUE CHECK (wallet IS NULL OR wallet ~ '^0x[a-f0-9]{40}$'),
+  value JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (referrer_id IS DISTINCT FROM id)
+);
+CREATE INDEX IF NOT EXISTS oneshot_airdrop_referrer ON oneshot_airdrop_participants(referrer_id);
+CREATE INDEX IF NOT EXISTS oneshot_airdrop_created ON oneshot_airdrop_participants(created_at DESC, id);
+CREATE INDEX IF NOT EXISTS oneshot_airdrop_posts_gin ON oneshot_airdrop_participants USING GIN ((value->'posts'));
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_merkle (
+  id TEXT PRIMARY KEY CHECK (id='published'),
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_budget (
+  day DATE PRIMARY KEY,
+  reads INTEGER NOT NULL CHECK (reads>=0)
+);
+CREATE TABLE IF NOT EXISTS oneshot_airdrop_audit (
+  id UUID PRIMARY KEY,
+  value JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 COMMIT;

@@ -7,6 +7,8 @@ import { api, boundedBody, json, rateLimit, ApiError } from './http';
 import { genesis } from './genesis-service';
 import { genesisAuth } from './genesis-auth';
 import { genesisCampaignSchema, genesisReviewSchema } from '../../../web/lib/genesis-schema';
+import { airdropService } from './airdrop-service';
+import { airdropCampaignSchema, airdropMerkleExportSchema, airdropSnapshotImportSchema } from '../../../web/lib/airdrop-schema';
 import { externalNftAdminApi } from './external-nft-admin-api';
 
 const credentials = z.object({ password: z.string().max(1024) }).strict();
@@ -24,11 +26,59 @@ export const adminApi = api(async request => {
   adminAuthenticator.requireSession(request);
   rateLimit('oneshot:admin:read', 120);
   if (path.startsWith('/api/admin/external-nfts')) return externalNftAdminApi(request);
+  if (path.startsWith('/api/admin/airdrop')) {
+    const actor = 'admin:' + (await import('node:crypto')).createHash('sha256').update(request.headers.get('authorization') || '').digest('hex').slice(0, 16);
+    if (path === '/api/admin/airdrop' && request.method === 'GET') {
+      return json({
+        ...await airdropService.adminSummary(),
+        oauthConfigured: genesisAuth.available(),
+        providerConfigured: Boolean(process.env.GETX_API_KEY),
+        databaseConfigured: Boolean(process.env.DATABASE_URL),
+      });
+    }
+    if (request.method === 'POST') {
+      rateLimit('airdrop:admin:write', 30);
+      if (path === '/api/admin/airdrop/snapshot') {
+        const body = JSON.parse(new TextDecoder().decode(await boundedBody(request, 2_621_440)));
+        return json(await airdropService.importSnapshot(airdropSnapshotImportSchema.parse(body), actor));
+      }
+      const body = JSON.parse(new TextDecoder().decode(await boundedBody(request, 16_384)));
+      if (path === '/api/admin/airdrop/campaign') {
+        const input = z.object({ expectedRevision: z.number().int().positive(), campaign: airdropCampaignSchema }).strict().parse(body);
+        return json(await airdropService.configure(input.campaign, input.expectedRevision, actor));
+      }
+      if (path === '/api/admin/airdrop/merkle-export') {
+        return json(await airdropService.exportMerkle(airdropMerkleExportSchema.parse(body), actor));
+      }
+    }
+    throw new ApiError(404, 'NOT_FOUND', 'Airdrop administration action not found.');
+  }
   if (path.startsWith('/api/admin/genesis')) {
     const actor = 'admin:' + (await import('node:crypto')).createHash('sha256').update(request.headers.get('authorization') || '').digest('hex').slice(0,16);
     if (path === '/api/admin/genesis' && request.method === 'GET') {
       const offset = z.coerce.number().int().min(0).max(100_000).parse(request.nextUrl.searchParams.get('offset') || 0);
       return json({ ...await genesis.admin(offset), oauthConfigured: genesisAuth.available(), providerConfigured: Boolean(process.env.GETX_API_KEY), databaseConfigured: Boolean(process.env.DATABASE_URL) });
+    }
+    if (path === '/api/admin/genesis/allowlist' && request.method === 'GET') {
+      const query = request.nextUrl.searchParams;
+      for (const key of query.keys()) {
+        if (!['chainId', 'collection'].includes(key) || query.getAll(key).length !== 1) {
+          throw new ApiError(400, 'INVALID_INPUT', 'Provide at most one chainId and collection address.');
+        }
+      }
+      const rawChain = query.get('chainId');
+      const rawCollection = query.get('collection');
+      if ((rawChain !== null) !== (rawCollection !== null)) {
+        throw new ApiError(400, 'INVALID_INPUT', 'Provide both chainId and collection to compute a Merkle root.');
+      }
+      if (rawChain !== null && rawCollection !== null) {
+        const parsed = z.object({
+          chainId: z.string().regex(/^[1-9]\d{0,15}$/).transform(Number).refine(Number.isSafeInteger),
+          collection: z.string().regex(/^0x[\da-fA-F]{40}$/).transform(v => v.toLowerCase() as `0x${string}`).refine(v => !/^0x0{40}$/.test(v)),
+        }).parse({ chainId: rawChain, collection: rawCollection });
+        return json(await genesis.adminAllowlist(parsed));
+      }
+      return json(await genesis.adminAllowlist());
     }
     if (request.method === 'POST') {
       rateLimit('genesis:admin:write', 30);

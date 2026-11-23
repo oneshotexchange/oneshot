@@ -239,11 +239,12 @@ describe('local NFT transaction controller', () => {
 });
 
 describe('reviewed EVM provider bridge', () => {
-  function providerHarness() {
+  function providerHarness(pendingNonce: unknown = '0x11') {
     let scope: string | null = transaction.expectedIdentityScope;
     let time = now; const transactionInput = { ...transaction };
     const request = vi.fn(async (input: { method: string; params?: unknown[] }): Promise<unknown> => {
       if (input.method === 'eth_chainId') return '0x7a69'; if (input.method === 'eth_accounts') return [from]; if (input.method === 'eth_sendTransaction') return hash;
+      if (input.method === 'eth_getTransactionCount') return pendingNonce;
       throw new Error(`Unexpected method ${input.method}`);
     });
     const getProvider = vi.fn(async () => ({ request }));
@@ -254,6 +255,61 @@ describe('reviewed EVM provider bridge', () => {
     const h = providerHarness(); await expect(h.send()).resolves.toBe(hash);
     expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_chainId', 'eth_sendTransaction']);
     expect(h.request).toHaveBeenLastCalledWith({ method: 'eth_sendTransaction', params: [{ from, to, data: review.data, value: `0x${BigInt(review.value).toString(16)}`, chainId: '0x7a69' }] });
+  });
+  it.each(['0', '17', '9007199254740993', '9223372036854775827'])('checks the pending account nonce and sends reviewed decimal nonce %s losslessly as hexadecimal', async nonce => {
+    const hexadecimal = `0x${BigInt(nonce).toString(16)}`, h = providerHarness(hexadecimal); h.transaction.nonce = nonce;
+    await expect(h.send()).resolves.toBe(hash);
+    expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_getTransactionCount', 'eth_chainId', 'eth_sendTransaction']);
+    expect(h.request.mock.calls[2][0]).toEqual({ method: 'eth_getTransactionCount', params: [from, 'pending'] });
+    expect(h.request).toHaveBeenLastCalledWith({ method: 'eth_sendTransaction', params: [{ from, to, data: review.data, value: `0x${BigInt(review.value).toString(16)}`, chainId: '0x7a69', nonce: hexadecimal }] });
+  });
+  it.each<unknown>(['', '01', '-1', '1.0', '1e3', '0x11', ' 17', '17 ', '18446744073709551616', '9'.repeat(1000), 0, 17, 17n, null, {}])('rejects an invalid or coerced reviewed nonce before provider discovery %#', async nonce => {
+    const h = providerHarness(); Object.assign(h.transaction, { nonce });
+    await expect(h.send()).rejects.toMatchObject({ code: 'INVALID_REVIEW' });
+    expect(h.getProvider).not.toHaveBeenCalled(); expect(h.request).not.toHaveBeenCalled();
+  });
+  it.each<unknown>(['0x10', '0x12', '', '17', '0x', '0x011', '0x-1', '0x1g', '0x10000000000000000', `0x${'f'.repeat(1000)}`, 17, 17n, null, undefined, {}])('aborts an unmatched or unreadable pending nonce without a wallet send %#', async pendingNonce => {
+    const h = providerHarness(pendingNonce); h.transaction.nonce = '17';
+    // Explicit undefined is distinct from the helper's default response.
+    if (pendingNonce === undefined) h.request.mockImplementation(async input => input.method === 'eth_chainId' ? '0x7a69' : input.method === 'eth_accounts' ? [from] : undefined);
+    await expect(h.send()).rejects.toMatchObject({ code: 'NONCE_CHANGED' });
+    expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_getTransactionCount']);
+  });
+  it('preserves the reviewed nonce while provider discovery is pending', async () => {
+    const h = providerHarness(); h.transaction.nonce = '17';
+    const loaded = deferred<{ request: typeof h.request }>(); h.getProvider.mockReturnValue(loaded.promise);
+    const pending = h.send(); h.transaction.nonce = '18'; loaded.resolve({ request: h.request });
+    await expect(pending).resolves.toBe(hash);
+    expect(h.request).toHaveBeenLastCalledWith({ method: 'eth_sendTransaction', params: [{ from, to, data: review.data, value: `0x${BigInt(review.value).toString(16)}`, chainId: '0x7a69', nonce: '0x11' }] });
+  });
+  it('does not fall back to a wallet-selected nonce after pending nonce discovery fails', async () => {
+    const h = providerHarness(); h.transaction.nonce = '17';
+    h.request.mockImplementation(async input => {
+      if (input.method === 'eth_chainId') return '0x7a69'; if (input.method === 'eth_accounts') return [from];
+      throw new Error('Pending account nonce could not be read.');
+    });
+    await expect(h.send()).rejects.toThrow('Pending account nonce could not be read.');
+    expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_getTransactionCount']);
+  });
+  it.each(['identity', 'expiry'] as const)('rechecks %s after awaiting the pending nonce', async change => {
+    const h = providerHarness(); h.transaction.nonce = '17';
+    h.request.mockImplementation(async input => {
+      if (input.method === 'eth_chainId') return '0x7a69'; if (input.method === 'eth_accounts') return [from];
+      if (input.method === 'eth_getTransactionCount') { if (change === 'identity') h.setScope(null); else h.setTime(now + 120_000); return '0x11'; }
+      throw new Error('A changed review must not reach wallet approval.');
+    });
+    await expect(h.send()).rejects.toMatchObject({ code: change === 'identity' ? 'IDENTITY_CHANGED' : 'REVIEW_EXPIRED' });
+    expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_getTransactionCount']);
+  });
+  it('rechecks the wallet chain after pending nonce discovery', async () => {
+    const h = providerHarness(); h.transaction.nonce = '17'; let chains = 0;
+    h.request.mockImplementation(async input => {
+      if (input.method === 'eth_chainId') return ++chains === 1 ? '0x7a69' : '0x14a34';
+      if (input.method === 'eth_accounts') return [from]; if (input.method === 'eth_getTransactionCount') return '0x11';
+      throw new Error('The changed chain must not receive a transaction.');
+    });
+    await expect(h.send()).rejects.toMatchObject({ code: 'IDENTITY_CHANGED' });
+    expect(h.request.mock.calls.map(([input]) => input.method)).toEqual(['eth_chainId', 'eth_accounts', 'eth_getTransactionCount', 'eth_chainId']);
   });
   it('does not send if Privy identity changes while the provider is loading', async () => {
     const h = providerHarness(); const loaded = deferred<{ request: typeof h.request }>(); h.getProvider.mockReturnValue(loaded.promise);

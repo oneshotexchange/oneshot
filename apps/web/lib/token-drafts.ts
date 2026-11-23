@@ -11,7 +11,7 @@ const plainLine = (maximum: number) => z.string().max(maximum).refine(value => !
 // A working draft may be incomplete. Publication/readiness validation is separate;
 // in particular, typing an unfinished website must not discard the working copy.
 export const tokenDraftSchema = z.object({
-  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
+  pricingNetwork: z.enum(['zero', 'zero-testnet', 'zero-mainnet', 'base-sepolia']).optional(),
   name: plainLine(32),
   symbol: z.string().regex(/^[A-Z0-9]{0,10}$/, 'Use up to 10 uppercase letters or numbers.'),
   description: z.string().max(500).refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value), 'Use plain text for the description.'),

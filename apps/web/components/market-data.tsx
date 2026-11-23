@@ -3,17 +3,31 @@
 import Link from "./navigation";
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Gem, Layers2, Radio, Star } from "lucide-react";
 import { Activity, apt, Collection, date } from "../lib/client-api";
-import type { IndexedTokenMarket } from '@oneshot/evm';
+import type { IndexedTokenMarket, TokenAnalytics } from '@oneshot/evm';
 import { tokenNativeAmount, tokenSupplyAmount } from '../lib/client-token-markets';
 import { tokenIsWatched, useTokenWatchlist } from "../lib/token-watchlist";
 import { Address, AssetIcon, Badge, ButtonLink, EmptyState, ErrorState } from "./ui";
 import '../app/token-markets.css';
 
 /** Only canonical token snapshots enter this table; launch valuation is not a spot price. */
-export function TokenTable({ tokens, compact = false }: { tokens: IndexedTokenMarket[]; compact?: boolean }) {
+export function TokenTable({
+  tokens,
+  compact = false,
+  analyticsByMarket,
+  nativeSymbol = 'ETH',
+}: {
+  tokens: IndexedTokenMarket[];
+  compact?: boolean;
+  analyticsByMarket?: ReadonlyMap<string, TokenAnalytics>;
+  nativeSymbol?: string;
+}) {
   const watchlist = useTokenWatchlist();
+  const showAnalytics = Boolean(analyticsByMarket && analyticsByMarket.size > 0);
   if (!tokens.length) return <EmptyState icon={Layers2} illustration="tokens" title="No token markets to show" description="No verified markets match this view. You can start a token draft and return later." compact={compact} action={<ButtonLink href="/tokens/new" variant="secondary">Start a draft <ArrowRight size={15} /></ButtonLink>} />;
-  return <>{watchlist.error && <ErrorState message={watchlist.error} retry={watchlist.refresh} />}<div className="table-wrap"><table className="data-table token-table"><thead><tr><th className="star-column"><span className="sr-only">Watchlist</span></th><th>Token</th><th>Opening valuation <span>ETH</span></th><th>Current supply</th><th>Execution fee</th><th /></tr></thead><tbody>{tokens.map(token => <tr key={token.market}><td><button className={`watch-button ${tokenIsWatched(watchlist.entries, token.token) ? "watched" : ""}`} disabled={!watchlist.loaded} onClick={() => watchlist.toggle(token.token)} aria-label={`${tokenIsWatched(watchlist.entries, token.token) ? "Remove" : "Add"} ${token.name} ${tokenIsWatched(watchlist.entries, token.token) ? "from" : "to"} watchlist`}><Star size={15} fill={tokenIsWatched(watchlist.entries, token.token) ? "currentColor" : "none"} /></button></td><td><Link className="asset-cell" href={`/tokens/${encodeURIComponent(token.market)}`}><AssetIcon name={token.symbol || token.name} /><div><strong>{token.name}</strong><span>{token.symbol}</span></div></Link></td><td className="numeric token-snapshot-amount">{tokenNativeAmount(token.openingValuationNativeRaw)}</td><td className="numeric token-snapshot-amount">{tokenSupplyAmount(token.totalSupplyRaw)}</td><td><Badge>{token.executionFeeBps / 100}%</Badge></td><td><Link className="row-link" href={`/tokens/${encodeURIComponent(token.market)}`} aria-label={`Open ${token.name}`}><ArrowUpRight size={16} /></Link></td></tr>)}</tbody></table></div></>;
+  return <>{watchlist.error && <ErrorState message={watchlist.error} retry={watchlist.refresh} />}<div className="table-wrap"><table className="data-table token-table"><thead><tr><th className="star-column"><span className="sr-only">Watchlist</span></th><th>Token</th><th>Opening valuation <span>{nativeSymbol}</span></th><th>Current supply</th><th>Execution fee</th>{showAnalytics && <><th>Pool volume <span>{nativeSymbol}</span></th><th>Holders</th></>}<th /></tr></thead><tbody>{tokens.map(token => {
+    const metrics = analyticsByMarket?.get(token.market.toLowerCase());
+    return <tr key={token.market}><td><button className={`watch-button ${tokenIsWatched(watchlist.entries, token.token) ? "watched" : ""}`} disabled={!watchlist.loaded} onClick={() => watchlist.toggle(token.token)} aria-label={`${tokenIsWatched(watchlist.entries, token.token) ? "Remove" : "Add"} ${token.name} ${tokenIsWatched(watchlist.entries, token.token) ? "from" : "to"} watchlist`}><Star size={15} fill={tokenIsWatched(watchlist.entries, token.token) ? "currentColor" : "none"} /></button></td><td><Link className="asset-cell" href={`/tokens/${encodeURIComponent(token.market)}`}><AssetIcon name={token.symbol || token.name} /><div><strong>{token.name}</strong><span>{token.symbol}</span></div></Link></td><td className="numeric token-snapshot-amount">{tokenNativeAmount(token.openingValuationNativeRaw)}</td><td className="numeric token-snapshot-amount">{tokenSupplyAmount(token.totalSupplyRaw)}</td><td><Badge>{token.executionFeeBps / 100}%</Badge></td>{showAnalytics && <><td className="numeric token-snapshot-amount">{metrics ? tokenNativeAmount(metrics.poolNativeVolumeRaw) : '—'}</td><td className="numeric">{metrics ? metrics.holderCount : '—'}</td></>}<td><Link className="row-link" href={`/tokens/${encodeURIComponent(token.market)}`} aria-label={`Open ${token.name}`}><ArrowUpRight size={16} /></Link></td></tr>;
+  })}</tbody></table></div></>;
 }
 export function CollectionGrid({ collections }: { collections: Collection[] }) {
   if (!collections.length) return <EmptyState icon={Gem} illustration="collection" title="No collections to show" description="Try another search, or start a collection of your own." action={<ButtonLink href="/nfts/new" variant="secondary">Create a collection <ArrowRight size={15} /></ButtonLink>} />;

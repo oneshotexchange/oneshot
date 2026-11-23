@@ -7,6 +7,7 @@ import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockC
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {OneshotV4Market, OneshotV4MarketFactory} from "./OneshotV4Market.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
 /// @notice Exact-input simulation for this immutable factory's markets. Run via
 /// eth_call. The callback always reverts, rolling back the swap, oracle writes,
@@ -27,9 +28,9 @@ contract OneshotV4Quoter is IUnlockCallback, ReentrancyGuard {
     error QuoteResult(uint256 actualInput, uint256 output);
 
     constructor(OneshotV4MarketFactory factory_) {
-        if (address(factory_).code.length == 0 || (block.chainid != 31337 && block.chainid != 84532)) revert InvalidFactory();
+        if (address(factory_).code.length == 0 || !OneshotChainPolicy.isSupportedChain(block.chainid)) revert InvalidFactory();
         factory = factory_; poolManager = factory_.poolManager();
-        if (address(poolManager).code.length == 0 || (block.chainid == 84532 && address(poolManager) != 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408)) revert InvalidFactory();
+        if (address(poolManager).code.length == 0 || (block.chainid == OneshotChainPolicy.BASE_SEPOLIA_CHAIN_ID && address(poolManager) != OneshotChainPolicy.BASE_SEPOLIA_POOL_MANAGER)) revert InvalidFactory();
     }
 
     function quoteSwap(OneshotV4Market market, bool buy, uint256 poolInput, uint160 priceLimit) external nonReentrant returns (uint256 output) {

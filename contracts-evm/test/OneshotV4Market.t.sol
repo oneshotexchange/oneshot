@@ -102,7 +102,7 @@ contract OneshotV4MarketTest {
         uint256 salt;
         while (uint160(address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(deployer), bytes32(salt), hash)))))) & ((1 << 14) - 1) != 0x1040) salt++;
         oracle = deployer.deploy(manager, bytes32(salt));
-        factory = new OneshotV4MarketFactory(manager, oracle, PLATFORM);
+        factory = new OneshotV4MarketFactory(manager, oracle, PLATFORM, 0.01 ether);
         vm.prank(CREATOR); market = factory.createMarket("Test coin", "TEST", 300, false, 1000 ether);
         token = market.token(); vm.deal(TRADER, 1_000_000 ether); vm.deal(address(this), 1_000_000 ether);
     }
@@ -404,16 +404,42 @@ contract OneshotV4MarketTest {
 
     function testSupportedChainsRejectWrongBaseProtocolAndMainnets() public {
         vm.chainId(84532); vm.expectRevert(OneshotV4MarketFactory.InvalidProtocol.selector);
-        new OneshotV4MarketFactory(manager, oracle, PLATFORM);
+        new OneshotV4MarketFactory(manager, oracle, PLATFORM, 0.01 ether);
         vm.chainId(8453); vm.expectRevert(abi.encodeWithSelector(OneshotV4MarketFactory.UnsupportedTestChain.selector, 8453));
-        new OneshotV4MarketFactory(manager, oracle, PLATFORM);
+        new OneshotV4MarketFactory(manager, oracle, PLATFORM, 0.01 ether);
         vm.chainId(1); vm.expectRevert(abi.encodeWithSelector(OneshotV4MarketFactory.UnsupportedTestChain.selector, 1));
-        new OneshotV4MarketFactory(manager, oracle, PLATFORM);
+        new OneshotV4MarketFactory(manager, oracle, PLATFORM, 0.01 ether);
+        vm.chainId(543210); vm.expectRevert(abi.encodeWithSelector(OneshotV4MarketFactory.UnsupportedTestChain.selector, 543210));
+        new OneshotV4MarketFactory(manager, oracle, PLATFORM, 0.01 ether);
+        vm.chainId(33001);
+        bytes memory init = abi.encodePacked(vm.getCode(string.concat(vm.projectRoot(), "/core-out/PoolManager.sol/PoolManager.json")), abi.encode(address(this)));
+        address deployed;
+        assembly ("memory-safe") { deployed := create(0, add(init, 32), mload(init)) }
+        require(deployed.code.length != 0, "canonical core deploy");
+        IPoolManager zeroManager = IPoolManager(deployed);
+        address deployer = address(new OneshotV4OracleDeployer());
+        bytes memory code = abi.encodePacked(type(OneshotV4Oracle).creationCode, abi.encode(zeroManager));
+        bytes32 initHash = keccak256(code);
+        bytes32 salt;
+        for (uint256 i; i < 100_000; i++) {
+            salt = bytes32(i);
+            address predicted = address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), deployer, salt, initHash)))));
+            if (uint160(predicted) & ((1 << 14) - 1) == (1 << 12) | (1 << 6)) break;
+        }
+        OneshotV4Oracle zeroOracle = OneshotV4OracleDeployer(deployer).deploy(zeroManager, salt);
+        OneshotV4MarketFactory zeroFactory = new OneshotV4MarketFactory(zeroManager, zeroOracle, PLATFORM, 1 ether);
+        require(zeroFactory.minProcessingNative() == 1 ether);
+        OneshotV4Market zeroMarket = zeroFactory.createMarket("Zero Token", "ZTEST", 300, true, 1000 ether);
+        require(zeroMarket.deploymentChainId() == 33001 && zeroMarket.minProcessingNative() == 1 ether);
+        zeroMarket.buy{value: 1 ether}(1, address(this), block.timestamp, 0);
+        vm.warp(block.timestamp + 300);
+        vm.expectRevert(OneshotV4Market.BudgetTooSmall.selector);
+        zeroMarket.process(1 ether, type(uint128).max, block.timestamp + 60);
     }
 
     function testRejectedClaimPreservesLiabilityAndCanBeRoutedElsewhere() public {
         RejectNativeV4 receiver = new RejectNativeV4();
-        OneshotV4MarketFactory otherFactory = new OneshotV4MarketFactory(manager, oracle, address(receiver));
+        OneshotV4MarketFactory otherFactory = new OneshotV4MarketFactory(manager, oracle, address(receiver), 0.01 ether);
         OneshotV4Market other = otherFactory.createMarket("Other", "OTHER", 300, false, 1000 ether);
         other.buy{value: 1 ether}(1, address(this), block.timestamp, 0);
         uint256 owed = other.pending(address(receiver));

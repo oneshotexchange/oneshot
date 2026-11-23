@@ -4,7 +4,7 @@ import type { TokenLaunchDraft } from './token-market-review';
 
 /** Browser-safe transport types. Validate runtime values at each trust boundary. */
 export type TokenExecutionReview = {
-  id:string;reviewHash:string;expiresAt:string;action:'launch'|'approve'|'buy'|'sell'|'claim';
+  id:string;reviewHash:string;expiresAt:string;action:'launch'|'approve'|'buy'|'sell'|'claim'|'maintain';
   chainId:31337|84532;deploymentId:string;network:NftExecutionNetwork;
   from:Address;to:Address;value:string;data:Hex;summary:Record<string,string>;
   simulation:{blockNumber:string;blockHash:Hex;gasEstimate:string};
@@ -15,6 +15,7 @@ export type TokenTransactionIntent = Common & (
   | {action:'approve';market:Address;amount:string}
   | {action:'buy'|'sell';market:Address;amount:string;slippageBps:number;recipient?:Address}
   | {action:'claim';market:Address;recipient?:Address}
+  | {action:'maintain';market:Address;maximumNativeBudget:string;maximumTokenBudget:string}
 );
 export type TokenExecutionStatus =
   | {enabled:true;network:NftExecutionNetwork;deploymentId:string;factory:Address;reason:null}

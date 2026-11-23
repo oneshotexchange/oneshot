@@ -2,7 +2,7 @@ import { formatIndexedAmount, type TokenWalletHoldingsResponse } from '@oneshot/
 import { ArrowUpRight } from 'lucide-react';
 import Link from './navigation';
 import { useTokenPortfolio } from '../lib/client-token-portfolio';
-import { nftNetworkLabel } from '../lib/nft-network';
+import { nativeAssetLabel, nftNetworkLabel } from '../lib/nft-network';
 import { tokenPriceDisplay } from '../lib/token-price';
 import { AssetIcon, Button, ButtonLink, EmptyState, ErrorState, Loading } from './ui';
 import '../app/token-analytics.css';
@@ -10,7 +10,7 @@ import '../app/token-analytics.css';
 export function TokenPortfolioBalances({ data }: { data: TokenWalletHoldingsResponse }) {
   return <div className="table-wrap"><table className="data-table token-portfolio-table"><thead><tr><th>Token</th><th>Balance</th><th>Indexed pool price</th><th>Last balance change</th><th /></tr></thead><tbody>{data.items.map(item => {
     const price = tokenPriceDisplay(item.price.nativeRawPerWholeToken);
-    return <tr key={item.market.token}><td><Link className="asset-cell" href={`/tokens/${item.market.market}`}><AssetIcon name={item.market.symbol} /><div><strong>{item.market.name}</strong><span>{item.market.symbol}</span></div></Link></td><td>{formatIndexedAmount(item.balanceRaw, 8)} {item.market.symbol}</td><td>{price.approximate && !price.belowPrecision ? '≈ ' : ''}{price.text} test ETH / token<small className="indexed-subline">Price block {item.price.blockNumber}</small></td><td>Block {item.lastBalanceBlockNumber}</td><td><Link className="text-link" href={`/tokens/${item.market.market}`} aria-label={`Open ${item.market.name} market`}><ArrowUpRight size={16} /></Link></td></tr>;
+    return <tr key={item.market.token}><td><Link className="asset-cell" href={`/tokens/${item.market.market}`}><AssetIcon name={item.market.symbol} /><div><strong>{item.market.name}</strong><span>{item.market.symbol}</span></div></Link></td><td>{formatIndexedAmount(item.balanceRaw, 8)} {item.market.symbol}</td><td>{price.approximate && !price.belowPrecision ? '≈ ' : ''}{price.text} {nativeAssetLabel(data.context.network)} / token<small className="indexed-subline">Price block {item.price.blockNumber}</small></td><td>Block {item.lastBalanceBlockNumber}</td><td><Link className="text-link" href={`/tokens/${item.market.market}`} aria-label={`Open ${item.market.name} market`}><ArrowUpRight size={16} /></Link></td></tr>;
   })}</tbody></table></div>;
 }
 

@@ -10,6 +10,7 @@ import { indexedTokenRead } from './indexed-tokens';
 import { tokenAnalyticsRead } from './token-analytics';
 import { nftLaunch } from './nft-launch';
 import { genesisApi } from './genesis-api';
+import { airdropApi } from './airdrop-api';
 import { tokenExecutionApi } from './token-execution-api';
 import { walletProfilesApi } from './wallet-profiles';
 import { walletFollowingApi } from './wallet-following';
@@ -17,6 +18,7 @@ import { createExternalNftImportsApi } from './external-nft-imports';
 import { reviewedNftImports } from './external-nft-admission';
 import { reviewedNftGateway } from './reviewed-nft-gateway';
 import { reviewedNftRead } from './reviewed-nft-read';
+import { reviewedNftExecutionApi } from './reviewed-nft-execution-api';
 import { archiveTokenAccountDraft, createTokenAccountDraft, getTokenAccountDraft, listTokenAccountDrafts, updateTokenAccountDraft } from './token-account-drafts';
 
 const revision = z.number().int().positive();
@@ -28,6 +30,7 @@ export const oneshotApi = api(async request => {
   if (!request.nextUrl.pathname.startsWith(prefix)) throw new ApiError(404, 'NOT_FOUND', 'API resource not found.');
   const segments = request.nextUrl.pathname.slice(prefix.length).replace(/\/$/,'').split('/');
   const [resource, id, operation, extra] = segments;
+  if (resource === 'reviewed-execution') return reviewedNftExecutionApi(request);
   if (resource === 'reviewed-nfts') { rateLimit('oneshot:reviewed-nfts:public', 20); return reviewedNftRead(request); }
   if (resource === 'external-nfts') {
     if (segments.length === 2 && id === 'config' && request.method === 'GET' && !request.nextUrl.search) {
@@ -37,6 +40,7 @@ export const oneshotApi = api(async request => {
     return externalNftImportsApi(request);
   }
   if (resource === 'genesis') return genesisApi(request);
+  if (resource === 'airdrop') return airdropApi(request);
   if (resource === 'profiles') return walletProfilesApi(request);
   if (resource === 'following') return walletFollowingApi(request);
   if (resource === 'token-execution') return tokenExecutionApi(request);

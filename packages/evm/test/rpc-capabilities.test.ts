@@ -272,4 +272,27 @@ describe('capability plan and profile gates', () => {
     const input = plan(), parsed = parseRpcCapabilityPlan(input);
     expect(parsed).toEqual(input); expect(parsed).not.toBe(input);
   });
+
+  it('records consecutive block timestamps and detects sub-second cadence when checkBlockCadence is enabled', async () => {
+    const timestamps: Record<string, string> = { '0x10': '0x100', '0xf': '0x100', '0xe': '0xff', '0xd': '0xfe' };
+    const rpc = transport(request => {
+      if (request.method === 'eth_getBlockByNumber' && request.params[0] !== '0x0') {
+        const tag = String(request.params[0]).toLowerCase();
+        return {
+          number: tag,
+          hash: tag === '0x10' ? BLOCK : `0x${tag.slice(2).padStart(64, 'a')}`,
+          parentHash: OTHER,
+          timestamp: timestamps[tag] ?? '0xfd',
+        };
+      }
+      return defaults(request);
+    });
+    const result = await probeRpcCapabilities(config(), plan(), { fetch: rpc.fetch, checkBlockCadence: true });
+    expect(result.status).toBe('passed');
+    expect(result.evidence.blockCadence).toEqual({
+      sampleBlocks: 4,
+      averageIntervalSeconds: 2 / 3,
+      subSecondDetected: true,
+    });
+  });
 });

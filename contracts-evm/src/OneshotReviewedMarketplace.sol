@@ -9,6 +9,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {OneshotNFTFactory} from "./OneshotNFTFactory.sol";
 import {OneshotReviewedCollectionRegistry} from "./OneshotReviewedCollectionRegistry.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
 /// @notice Whole-item, fixed-price external ERC-721 trading. No ERC-1155, offers,
 /// upgrade, administrator withdrawal or token-rescue entrypoint exists.
@@ -84,7 +85,7 @@ contract OneshotReviewedMarketplace is IERC721Receiver, EIP712, ReentrancyGuard 
     event Claimed(address indexed account, address indexed recipient, uint256 amount);
 
     constructor(OneshotReviewedCollectionRegistry registry_, bytes32 salt_) EIP712("OneshotReviewedMarketplace", "1") {
-        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid)) revert UnsupportedTestChain(block.chainid);
         if (address(registry_).code.length == 0 || registry_.REGISTRY_VERSION() != 1
             || registry_.ASSET_STANDARD() != type(IERC721).interfaceId || registry_.deploymentChainId() != block.chainid) revert InvalidRegistry();
         if (salt_ == bytes32(0)) revert InvalidDeploymentSalt();

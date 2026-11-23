@@ -3,7 +3,7 @@
 `verify:rpc-capabilities` checks a bounded set of known deployment witnesses. It does not select a network, deploy contracts, enable a service or authorize transactions. Prepare the plan from independently verified network/deployment records, rather than constructing expectations from the endpoint under test.
 
 ```sh
-npm run verify:rpc-capabilities -- --plan PATH_TO_PLAN.json --env-file PATH_TO_NETWORK.env
+npm run verify:rpc-capabilities -- --plan PATH_TO_PLAN.json --env-file PATH_TO_NETWORK.env [--check-block-cadence]
 ```
 
 The environment file is optional; otherwise the command reads the process environment using the existing network configuration validator. Keep credentials outside version control. The plan file is required and limited to 64 KiB. Unknown fields and duplicate contract addresses are rejected.
@@ -22,6 +22,40 @@ The runtime-validated TypeScript shape is `RpcCapabilityPlan` in [rpc-capabiliti
 | `expectedLog` | Optional `{ address, transactionHash, logIndex, topics, data }`. The address must be among the selected contracts; log index is a decimal string. Use an independently recorded event at the supplied checkpoint. |
 
 All hashes, addresses, calldata, return bytes, topics and event data use `0x` hexadecimal strings. Hashes and addresses have their usual fixed widths. Empty event data and an empty topics array are allowed. A known matching event is required for an overall `passed` report; accepting a log filter or returning an empty array cannot establish that evidence.
+
+## Zero Network Templates (Testnet & Mainnet)
+
+> [!IMPORTANT]
+> Never use Chain ID `543210` (`0x849ea`). That ID belongs to **Zerion ZERϴ Network (ETH)**, not LayerZero **Zero (ZRO)**. Both `networkConfig` and on-chain `OneshotChainPolicy` reject `543210`.
+
+Once official LayerZero Zero parameters are published and independently verified, prepare environment variables for the target profile:
+
+### Zero Testnet (`ONESHOT_NETWORK=zero-testnet`)
+
+```sh
+ONESHOT_NETWORK=zero-testnet
+ONESHOT_CHAIN_ID=<OFFICIAL_ZERO_TESTNET_CHAIN_ID>
+ONESHOT_RPC_URL=<HTTPS_ZERO_TESTNET_RPC_URL>
+ONESHOT_GENESIS_HASH=<OFFICIAL_ZERO_TESTNET_GENESIS_HASH>
+ONESHOT_NATIVE_DECIMALS=<VERIFIED_ZRO_DECIMALS>
+ONESHOT_CONFIG_SOURCE_URL=<OFFICIAL_LAYERZERO_DOCS_URL>
+```
+
+### Zero Mainnet (`ONESHOT_NETWORK=zero-mainnet`)
+
+Mainnet remains fail-closed (`configurationReady: false`) unless `ONESHOT_MAINNET_ENABLED=true` is explicitly set alongside verified mainnet facts:
+
+```sh
+ONESHOT_NETWORK=zero-mainnet
+ONESHOT_MAINNET_ENABLED=true
+ONESHOT_CHAIN_ID=<OFFICIAL_ZERO_MAINNET_CHAIN_ID>
+ONESHOT_RPC_URL=<HTTPS_ZERO_MAINNET_RPC_URL>
+ONESHOT_GENESIS_HASH=<OFFICIAL_ZERO_MAINNET_GENESIS_HASH>
+ONESHOT_NATIVE_DECIMALS=<VERIFIED_ZRO_DECIMALS>
+ONESHOT_CONFIG_SOURCE_URL=<OFFICIAL_LAYERZERO_DOCS_URL>
+```
+
+Use `--check-block-cadence` when probing a Zero RPC to inspect up to four consecutive block timestamps for sub-second cadence (`subSecondDetected: true` when consecutive block headers share an integer second timestamp).
 
 ## Checks and limits
 

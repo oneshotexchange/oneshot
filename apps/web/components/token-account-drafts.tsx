@@ -3,7 +3,7 @@ import { createOneshotAccountApi } from '../lib/client-oneshot-api';
 import { useWallet } from '../lib/client-wallet';
 import { tokenDraftSchema, type TokenDraft } from '../lib/token-drafts';
 import type { TokenAccountDraft } from '../lib/token-account-draft';
-import { draftPriceUnit, draftPricingNetwork } from '../lib/nft-network';
+import { draftPriceUnit, draftPricingNetworkLabel } from '../lib/nft-network';
 import { Button, ErrorState, InfoRow } from './ui';
 import { WalletButton } from './wallet-button';
 import './token-account-drafts.css';
@@ -75,13 +75,13 @@ export function TokenAccountDrafts({ draft, ready, onCopy }: { draft: TokenDraft
       {visible.notice && <p className="data-notice" role="status">{visible.notice}</p>}
       {visible.items && <><p className="small muted">{visible.items.length} of 20 account copies saved.</p>{visible.items.length === 0 ? <p>No token drafts saved to your account yet.</p> : <select className="input-control" aria-label="Select an account token draft" value={selectedId} disabled={visible.busy || !!pending} onChange={event => setSelectedId(event.target.value)}><option value="">Choose an account draft…</option>{visible.items.map(record => <option key={record.id} value={record.id}>{name(record.draft)}{record.draft.symbol ? ` (${record.draft.symbol})` : ''} — version {record.revision}</option>)}</select>}</>}
       {selected && <div className="section-gap">
-        <p>Saved {new Date(selected.updatedAt).toLocaleString()}. {draftPricingNetwork(selected.draft) === 'base-sepolia' ? 'Base Sepolia testnet.' : 'Zero planned valuation.'}</p>
+        <p>Saved {new Date(selected.updatedAt).toLocaleString()}. {draftPricingNetworkLabel(selected.draft)}.</p>
         <div className="button-row"><Button type="button" variant="secondary" disabled={visible.busy || !!pending || !ready} onClick={() => void perform('copy', selected)}>Copy to editor</Button><Button type="button" variant="ghost" disabled={visible.busy || !!pending || !ready} onClick={prepareUpdate}>Update from editor</Button><Button type="button" variant="ghost" disabled={visible.busy || !!pending} onClick={() => setPending({ kind: 'archive', record: selected })}>Archive account copy</Button></div>
         <p className="small muted">Copy to editor creates a working copy on this device. It stays here after sign-out. Updating or archiving the account copy does not change your open draft.</p>
       </div>}
       {pending && library.scope === scope && <div className="section-gap" role="group" aria-label={pending.kind === 'archive' ? 'Archive account token draft' : 'Update account token draft'}>
         <h3>{pending.kind === 'archive' ? 'Archive this account copy?' : 'Replace this account copy?'}</h3><p>{name(pending.record.draft)}, version {pending.record.revision}. {pending.kind === 'archive' ? 'Your open working copy will remain.' : 'The terms below are the copy that will be saved.'}</p>
-        {pending.kind === 'update' && <div className="review-rows"><InfoRow label="Token">{name(pending.draft)} {pending.draft.symbol && `(${pending.draft.symbol})`}</InfoRow><InfoRow label="Network">{draftPricingNetwork(pending.draft) === 'base-sepolia' ? 'Base Sepolia testnet' : 'Zero (planned)'}</InfoRow><InfoRow label="Opening valuation">{pending.draft.openingValuation || 'Not set'} {draftPriceUnit(pending.draft)}</InfoRow><InfoRow label="Execution fee">{pending.draft.fee.toFixed(1)}%</InfoRow><InfoRow label="Fee destination">{pending.draft.mode === 'creator' ? 'Creator earnings' : 'Liquidity & burn'}</InfoRow></div>}
+        {pending.kind === 'update' && <div className="review-rows"><InfoRow label="Token">{name(pending.draft)} {pending.draft.symbol && `(${pending.draft.symbol})`}</InfoRow><InfoRow label="Network">{draftPricingNetworkLabel(pending.draft)}</InfoRow><InfoRow label="Opening valuation">{pending.draft.openingValuation || 'Not set'} {draftPriceUnit(pending.draft)}</InfoRow><InfoRow label="Execution fee">{pending.draft.fee.toFixed(1)}%</InfoRow><InfoRow label="Fee destination">{pending.draft.mode === 'creator' ? 'Creator earnings' : 'Liquidity & burn'}</InfoRow></div>}
         <div className="button-row"><Button type="button" disabled={visible.busy} onClick={() => void perform(pending.kind, pending.record, pending.kind === 'update' ? pending.draft : undefined)}>{pending.kind === 'archive' ? 'Archive account copy' : 'Save this version'}</Button><Button type="button" variant="ghost" disabled={visible.busy} onClick={() => setPending(null)}>Keep account copy</Button></div>
       </div>}
     </>}

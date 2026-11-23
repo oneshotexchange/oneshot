@@ -98,7 +98,7 @@ try {
   const hook = mineObservationHook(oracleDeployer, keccak256(encodeDeployData({ abi: oracleArtifact.abi, bytecode: oracleArtifact.bytecode.object, args: [poolManager] })));
   await receipt('Deploy observation-only hook', await wallet.writeContract({ account: creator, address: oracleDeployer, abi: oracleDeployerArtifact.abi, functionName: 'deploy', args: [poolManager, hook.salt] }));
   const oracle = hook.address; assert(await client.getCode({ address: oracle }));
-  const factory = await deploy('Deploy token market factory', factoryArtifact, [poolManager, oracle, platform]);
+  const factory = await deploy('Deploy token market factory', factoryArtifact, [poolManager, oracle, platform, 10_000_000_000_000_000n]);
   const quoter = await deploy('Deploy exact-input quoter', quoterArtifact, [factory]);
   const created = await receipt('Launch fixed-supply token-only locked position', await wallet.writeContract({ account: creator, address: factory, abi: factoryArtifact.abi, functionName: 'createMarket', args: ['Local v4 token', 'V4TEST', 300, true, 1000n * 10n ** 18n] }));
   const event = created.logs.map(log => { try { return decodeEventLog({ abi: factoryArtifact.abi, data: log.data, topics: log.topics }); } catch { return null; } }).find(value => value?.eventName === 'MarketCreated');

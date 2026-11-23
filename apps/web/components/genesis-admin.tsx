@@ -9,6 +9,14 @@ import { Button, ErrorState, Field } from './ui';
 import '../app/genesis.css';
 
 const adminApplication = genesisMeResponse.shape.application.unwrap().extend({ userId:z.string(), referrerId:z.string().nullable(), decision:z.enum(['selected','reserve','not_selected']).nullable(), note:z.string(), consentVersion:z.string() });
+const allowlistExportSchema = z.object({
+  selectedCount: z.number().int().nonnegative(),
+  boundCount: z.number().int().nonnegative(),
+  missingWalletCount: z.number().int().nonnegative(),
+  wallets: z.array(z.string()),
+  merkle: z.object({ chainId: z.number(), collection: z.string(), root: z.string(), count: z.number() }).nullable(),
+});
+type AllowlistExport = z.infer<typeof allowlistExportSchema>;
 const responseSchema = z.object({ campaign:genesisCampaignSchema, applications:z.array(adminApplication), total:z.number(), selected:z.number(), reserved:z.number(), capacity:z.literal(750), offset:z.number(), oauthConfigured:z.boolean(),providerConfigured:z.boolean(), databaseConfigured:z.boolean() });
 type AdminData = z.infer<typeof responseSchema>;
 async function request<T>(path:string, token:string, body?:unknown):Promise<T> {
@@ -20,20 +28,46 @@ async function request<T>(path:string, token:string, body?:unknown):Promise<T> {
 export function GenesisAdmin({token}:{token:string}) {
   const [data,setData]=useState<AdminData|null>(null); const [campaign,setCampaign]=useState<GenesisCampaign|null>(null);
   const [error,setError]=useState<string|null>(null); const [notice,setNotice]=useState(''); const [busy,setBusy]=useState(false);const [offset,setOffset]=useState(0);
+  const [allowlist,setAllowlist]=useState<AllowlistExport|null>(null);const [allowlistError,setAllowlistError]=useState<string|null>(null);const [allowlistBusy,setAllowlistBusy]=useState(false);
+  const [chainInput,setChainInput]=useState('84532');const [collectionInput,setCollectionInput]=useState('');const [copiedWallets,setCopiedWallets]=useState(false);
+  const loadAllowlist=useCallback(async(chain?:string,collection?:string)=>{
+    setAllowlistBusy(true);setAllowlistError(null);setCopiedWallets(false);
+    try{
+      const c=chain?.trim();const col=collection?.trim();
+      const query=col?`/allowlist?chainId=${encodeURIComponent(c||'')}&collection=${encodeURIComponent(col)}`:'/allowlist';
+      setAllowlist(allowlistExportSchema.parse(await request(query,token)));
+    }catch(reason){setAllowlistError(reason instanceof z.ZodError?'The allowlist response could not be read. Try again.':(reason as Error).message);}
+    finally{setAllowlistBusy(false);}
+  },[token]);
   const load=useCallback(async()=>{
     setBusy(true);setError(null);
     try{const value=responseSchema.parse(await request(`?offset=${offset}`,token));setData(value);setCampaign(value.campaign);}catch(reason){setError(reason instanceof z.ZodError?'The administration response could not be read. Try again.':(reason as Error).message);}finally{setBusy(false);}
   },[token,offset]);
-  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{void load();void loadAllowlist();},[load,loadAllowlist]);
   async function save(){if(!campaign||!data)return;setBusy(true);setError(null);setNotice('');try{await request('/campaign',token,{expectedRevision:data.campaign.revision,campaign});await load();setNotice('Campaign settings saved.');}catch(reason){setError((reason as Error).message);}finally{setBusy(false);}}
   async function run(){setBusy(true);setError(null);try{const value=await request<{processed:number}>('/run-checks',token,{});await load();setNotice(`Processed ${value.processed} queued checks.`);}catch(reason){setError((reason as Error).message);}finally{setBusy(false);}}
   const patch=(value:Partial<GenesisCampaign>)=>setCampaign(old=>old?{...old,...value}:null);
-  return <section className="genesis-admin"><div className="genesis-admin-heading"><div><h2>Genesis campaign</h2><p className="genesis-helper">{data?`${data.selected} / 750 places allocated · ${data.reserved} reserved for nominations · ${data.total} applications`:'Loading the review queue…'}</p></div><Button variant="secondary" onClick={()=>void load()} loading={busy}><RefreshCw size={14}/>Refresh queue</Button></div>
+  return <section className="genesis-admin"><div className="genesis-admin-heading"><div><h2>Genesis campaign</h2><p className="genesis-helper">{data?`${data.selected} / 750 places allocated · ${data.reserved} reserved for nominations · ${data.total} applications`:'Loading the review queue…'}</p></div><Button variant="secondary" onClick={()=>{void load();void loadAllowlist(chainInput,collectionInput.trim()||undefined);}} loading={busy}><RefreshCw size={14}/>Refresh queue</Button></div>
     {error&&<ErrorState message={error} retry={()=>void load()}/>} {notice&&<p className="genesis-notice" role="status">{notice}</p>}
     {data&&campaign&&<><div className="genesis-admin-grid"><div className="panel"><h3>Application window</h3><Field label="Campaign state"><select value={campaign.state} onChange={event=>patch({state:event.target.value as GenesisCampaign['state']})}><option value="upcoming">Upcoming</option><option value="open">Open applications</option><option value="closed">Closed</option></select></Field><Field label="Opens at (UTC)"><input type="datetime-local" value={campaign.opensAt?.slice(0,16)||''} onChange={event=>patch({opensAt:event.target.value?new Date(event.target.value+'Z').toISOString():null})}/></Field><Field label="Closes at (UTC)"><input type="datetime-local" value={campaign.closesAt?.slice(0,16)||''} onChange={event=>patch({closesAt:event.target.value?new Date(event.target.value+'Z').toISOString():null})}/></Field><p className="genesis-helper">The official identity and dates lock after the first enrollment. Closing applications preserves pending checks and existing applications.</p></div>
     <div className="panel"><h3>Identity and verification</h3><Field label="Official X handle"><input value={campaign.projectHandle} onChange={event=>patch({projectHandle:event.target.value.replace(/^@/,'')})} maxLength={15} placeholder="oneshot account"/></Field><Field label="Official numeric X ID"><input value={campaign.projectXId} onChange={event=>patch({projectXId:event.target.value})} inputMode="numeric" maxLength={32}/></Field><Field label="Maximum provider reads per UTC day"><input type="number" min={0} max={100000} value={campaign.dailyReadLimit} onChange={event=>patch({dailyReadLimit:Number(event.target.value)})}/></Field><label className="genesis-helper"><input type="checkbox" checked={campaign.rulesAccepted} onChange={event=>patch({rulesAccepted:event.target.checked})}/> Campaign rules, privacy terms and provider data authorization have been reviewed.</label><p className="genesis-helper">X OAuth: {data.oauthConfigured?'Configured':'Missing'}. GetXAPI key: {data.providerConfigured?'Configured':'Missing'}. PostgreSQL: {data.databaseConfigured?'Configured':'Development file store'}. No provider availability is implied by configuration.</p></div></div>
     <label className="genesis-helper"><input type="checkbox" checked={campaign.nominationsOpen} onChange={event=>patch({nominationsOpen:event.target.checked})}/> Open nominations for selected accounts with an assigned quota. Nominations close with the application window.</label>
     <div className="genesis-task-actions"><Button onClick={()=>void save()} disabled={busy}>Save campaign</Button><Button variant="secondary" onClick={()=>void run()} disabled={busy}>Process queued checks</Button></div>
+    <div className="panel">
+      <h3>Allowlist export</h3>
+      {allowlist&&<p className="genesis-helper">{allowlist.selectedCount} selected · {allowlist.boundCount} bound mint wallets · {allowlist.missingWalletCount} awaiting wallet binding</p>}
+      {allowlistError&&<ErrorState message={allowlistError} retry={()=>void loadAllowlist(chainInput,collectionInput.trim()||undefined)}/>}
+      <div className="genesis-admin-grid">
+        <Field label="Target chain ID"><input value={chainInput} onChange={event=>setChainInput(event.target.value)} inputMode="numeric" placeholder="84532" maxLength={16}/></Field>
+        <Field label="Collection address (for Merkle root)"><input value={collectionInput} onChange={event=>setCollectionInput(event.target.value)} placeholder="0x..." maxLength={42}/></Field>
+      </div>
+      <div className="genesis-task-actions">
+        <Button variant="secondary" disabled={allowlistBusy} loading={allowlistBusy} onClick={()=>void loadAllowlist(chainInput,collectionInput.trim()||undefined)}>{collectionInput.trim()?'Compute Merkle root':'Refresh allowlist'}</Button>
+        <Button variant="ghost" disabled={!allowlist?.wallets.length} onClick={()=>{if(!allowlist?.wallets.length)return;void navigator.clipboard.writeText(allowlist.wallets.join('\n')).then(()=>setCopiedWallets(true)).catch(()=>setCopiedWallets(false));}}>{copiedWallets?'Wallets copied':'Copy bound wallets'}</Button>
+      </div>
+      {allowlist?.merkle&&<p className="genesis-helper">Merkle root (chain {allowlist.merkle.chainId}, {allowlist.merkle.count} addresses): <code>{allowlist.merkle.root}</code></p>}
+      <Field label="Bound mint wallets"><textarea readOnly rows={4} value={allowlist?allowlist.wallets.join('\n'):''} placeholder="No selected mint wallets have been bound yet."/></Field>
+    </div>
     <div className="genesis-admin-review">{data.applications.map(app=><ReviewCard key={`${app.id}:${app.revision}`} app={app as GenesisApplication} token={token} onSaved={load}/>)}</div>
     {!data.applications.length&&<p className="genesis-helper">No applications have been received.</p>}
     <div className="genesis-task-actions"><Button variant="secondary" disabled={!offset||busy} onClick={()=>setOffset(value=>Math.max(0,value-25))}><ArrowLeft size={14}/>Previous</Button><span className="genesis-helper">{data.total?`${offset+1}–${Math.min(offset+25,data.total)} of ${data.total}`:'0 applications'}</span><Button variant="secondary" disabled={offset+25>=data.total||busy} onClick={()=>setOffset(value=>value+25)}>Next<ArrowRight size={14}/></Button></div></>}

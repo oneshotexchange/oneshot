@@ -226,5 +226,9 @@ contract OneshotGuardedMarketplaceV3Test is OneshotNFTTestBase {
     function testSupportedTestChainGateAndRuntimeLimit() public {
         require(address(market).code.length<=24576&&type(OneshotGuardedMarketplaceV3).creationCode.length<49152);
         vm.chainId(8453);vm.expectRevert();new OneshotGuardedMarketplaceV3(factory,signatures.addr(KEY),SALT);
+        vm.chainId(543210);signatures.expectRevert(abi.encodeWithSelector(OneshotGuardedMarketplace.UnsupportedTestChain.selector,543210));new OneshotGuardedMarketplaceV3(factory,signatures.addr(KEY),SALT);
+        vm.chainId(33001);
+        OneshotGuardedMarketplaceV3 zeroMarket=new OneshotGuardedMarketplaceV3(factory,signatures.addr(KEY),SALT);
+        require(zeroMarket.deploymentChainId()==33001);
     }
 }

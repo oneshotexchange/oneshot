@@ -1,10 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { verifyMessage, type Address } from 'viem';
+import { buildNftAllowlistTree } from '@oneshot/evm';
 import { ApiError } from './errors';
 import { webOrigin } from './origins';
 import { genesisAuth, type GenesisSession as OneshotSession } from './genesis-auth';
 import { genesisStore, type GenesisStore } from './genesis-store';
 import { createGenesisVerifier, GenesisEvidenceError, type GenesisVerifier } from './genesis-verification';
-import { GENESIS_CAPACITY, genesisAllVerified, genesisCampaignSchema, genesisPostId, type GenesisApplication, type GenesisCampaign, type GenesisDecision, type GenesisMe, type GenesisPublicCampaign, type GenesisTask } from '../../../web/lib/genesis-schema';
+import { GENESIS_CAPACITY, genesisAllVerified, genesisCampaignSchema, genesisPostId, genesisWalletBindMessage, genesisWalletBindSchema, genesisWalletChallengeSchema, type GenesisApplication, type GenesisCampaign, type GenesisDecision, type GenesisMe, type GenesisPublicCampaign, type GenesisTask } from '../../../web/lib/genesis-schema';
 
 const tasks: GenesisTask[] = ['follow', 'post', 'share'];
 function fail(code: string, message: string, status = 409): never { throw new ApiError(status, code, message); }
@@ -33,7 +35,7 @@ export function createGenesisService(options: { store?: GenesisStore; verifier?:
       const nomination = incoming && from ? { id: incoming.id, from: from.profile.username, accepted: incoming.accepted } : null;
       if (!record) return { profile: session.xAccount || null, application: null, qualifiedReferrals: 0, referralUrl: null, shareUrl: null, nomination, nominationsOpen: campaign.nominationsOpen && publicGenesisCampaign(campaign, now()).state === 'open' };
       const app = owner(record, session);
-      const { userId, referrerId, note, decision, consentVersion, ...application } = app;
+      const { userId, referrerId, note, decision, consentVersion, mintWalletChallengeNonce: _nonce, ...application } = app;
       return { profile: session.xAccount || null, application, qualifiedReferrals: await tx.count('referrals', app.id), ...urls(app.code), nomination, nominationsOpen: campaign.nominationsOpen && publicGenesisCampaign(campaign, now()).state === 'open' };
     });
   }
@@ -144,7 +146,17 @@ export function createGenesisService(options: { store?: GenesisStore; verifier?:
         await tx.audit({ at: new Date(now()).toISOString(), actor: session.userId, action: 'accept_nomination', applicationId: app.id, details: { nominationId } });
       }); return me(session);
     },
-    async admin(offset = 0) { return store.transaction(async tx => ({ campaign: await tx.campaign(), applications: await tx.applications(offset, 25), total: await tx.count('total'), selected: await tx.count('selected'), reserved: await tx.count('reserved'), capacity: GENESIS_CAPACITY, offset })); },
+    async admin(offset = 0) {
+      return store.transaction(async tx => ({
+        campaign: await tx.campaign(),
+        applications: (await tx.applications(offset, 25)).map(({ mintWalletChallengeNonce: _nonce, ...application }) => application),
+        total: await tx.count('total'),
+        selected: await tx.count('selected'),
+        reserved: await tx.count('reserved'),
+        capacity: GENESIS_CAPACITY,
+        offset,
+      }));
+    },
     async configure(value: GenesisCampaign, expectedRevision: number, actor: string) {
       const parsed = genesisCampaignSchema.parse(value);
       if (parsed.state === 'open') {
@@ -176,6 +188,83 @@ export function createGenesisService(options: { store?: GenesisStore; verifier?:
         app.decision = input.decision; app.nominationQuota = quota; app.note = input.note; if (input.publish) app.publishedDecision = input.decision; app.revision++;
         await tx.saveApplication(app); await tx.audit({ at: new Date(now()).toISOString(), actor, action: input.publish ? 'publish_decision' : 'review', applicationId: id, details: { decision: input.decision } });
       });
+    },
+    async walletChallenge(session: OneshotSession, walletInput: string) {
+      const { wallet } = genesisWalletChallengeSchema.parse({ wallet: walletInput });
+      return store.transaction(async tx => {
+        const app = owner(await tx.application('userId', session.userId), session);
+        if (app.publishedDecision !== 'selected') fail('GENESIS_NOT_SELECTED', 'Only selected applications can bind a mint wallet.');
+        const existing = await tx.applicationByMintWallet(wallet);
+        if (existing && existing.id !== app.id) fail('GENESIS_WALLET_USED', 'This wallet is already bound to another Genesis application.');
+        const nonce = randomBytes(16).toString('hex');
+        app.mintWalletChallengeNonce = nonce;
+        app.revision++;
+        await tx.saveApplication(app);
+        const message = genesisWalletBindMessage({ origin: options.webOrigin(), applicationId: app.id, xId: app.profile.id, wallet, nonce });
+        return { wallet, nonce, expectedRevision: app.revision, message };
+      });
+    },
+    async bindWallet(session: OneshotSession, input: { wallet: string; signature: string; expectedRevision: number }) {
+      const parsed = genesisWalletBindSchema.parse(input);
+      const snapshot = await store.transaction(async tx => {
+        const app = owner(await tx.application('userId', session.userId), session);
+        if (app.publishedDecision !== 'selected') fail('GENESIS_NOT_SELECTED', 'Only selected applications can bind a mint wallet.');
+        if (app.revision !== parsed.expectedRevision) fail('GENESIS_REVISION', 'Your application changed. Request a fresh wallet signature.');
+        if (!app.mintWalletChallengeNonce) fail('GENESIS_CHALLENGE_MISSING', 'Request a wallet confirmation message before signing.', 400);
+        return {
+          appId: app.id,
+          xId: app.profile.id,
+          nonce: app.mintWalletChallengeNonce,
+          expectedRevision: app.revision,
+        };
+      });
+      const message = genesisWalletBindMessage({ origin: options.webOrigin(), applicationId: snapshot.appId, xId: snapshot.xId, wallet: parsed.wallet, nonce: snapshot.nonce });
+      let valid = false;
+      try {
+        valid = await verifyMessage({ address: parsed.wallet as Address, message, signature: parsed.signature as `0x${string}` });
+      } catch {
+        valid = false;
+      }
+      if (!valid) fail('GENESIS_SIGNATURE_INVALID', 'Wallet signature verification failed.', 400);
+      await store.transaction(async tx => {
+        const app = owner(await tx.application('userId', session.userId), session);
+        if (app.publishedDecision !== 'selected') fail('GENESIS_NOT_SELECTED', 'Only selected applications can bind a mint wallet.');
+        if (app.revision !== snapshot.expectedRevision || app.mintWalletChallengeNonce !== snapshot.nonce) {
+          fail('GENESIS_REVISION', 'Your application changed. Request a fresh wallet signature.');
+        }
+        const existing = await tx.applicationByMintWallet(parsed.wallet);
+        if (existing && existing.id !== app.id) fail('GENESIS_WALLET_USED', 'This wallet is already bound to another Genesis application.');
+        const at = new Date(now()).toISOString();
+        app.mintWallet = parsed.wallet;
+        app.mintWalletBoundAt = at;
+        app.mintWalletChallengeNonce = null;
+        app.revision++;
+        await tx.saveApplication(app);
+        await tx.audit({ at, actor: session.userId, action: 'bind_mint_wallet', applicationId: app.id, details: { wallet: parsed.wallet } });
+      });
+      return me(session);
+    },
+    async adminAllowlist(target?: { chainId: number; collection: Address }) {
+      const selected = await store.transaction(tx => tx.selectedApplications());
+      const wallets = Array.from(new Set(
+        selected
+          .map(app => app.mintWallet)
+          .filter((wallet): wallet is string => Boolean(wallet && /^0x[\da-fA-F]{40}$/.test(wallet) && !/^0x0{40}$/.test(wallet)))
+          .map(wallet => wallet.toLowerCase()),
+      )).sort();
+      const merkle = target
+        ? (() => {
+            const tree = buildNftAllowlistTree(wallets, target.chainId, target.collection);
+            return { chainId: target.chainId, collection: target.collection.toLowerCase(), root: tree.root, count: tree.addresses.length };
+          })()
+        : null;
+      return {
+        selectedCount: selected.length,
+        boundCount: wallets.length,
+        missingWalletCount: Math.max(0, selected.length - wallets.length),
+        wallets,
+        merkle,
+      };
     },
     processJob,
     async runJobs() { const jobs = await store.transaction(tx => tx.jobs(3, now())); const results = await Promise.allSettled(jobs.map(job => processJob(job.id))); return { processed: results.filter(result => result.status === 'fulfilled').length }; },

@@ -4,7 +4,7 @@ import type { Address } from 'viem';
 import { useWallet } from '../lib/client-wallet';
 import { createTokenExecutionApi, createTokenExecutionController, type TokenExecutionContext, type TokenExecutionState } from '../lib/client-token-execution';
 import { createTokenPendingStore, TOKEN_PENDING_STORAGE_KEY } from '../lib/client-token-pending';
-import { draftCanLaunchOnNetwork, nftExplorerHref, nftNetworkLabel, readNftNetwork } from '../lib/nft-network';
+import { draftCanLaunchOnNetwork, nativeAssetLabel, nftExplorerHref, nftNetworkLabel, readNftNetwork } from '../lib/nft-network';
 import type { TokenDraft } from '../lib/token-drafts';
 import { Address as DisplayAddress, Badge, Button, ButtonLink, ErrorState, Field, InfoRow, Loading, SafetyNote, Tabs } from './ui';
 import { WalletButton } from './wallet-button';
@@ -12,10 +12,10 @@ import '../app/token-markets.css';
 
 const busy = (state: TokenExecutionState) => ['reviewing', 'validating', 'signing', 'confirming'].includes(state.phase);
 const unresolved = (state: TokenExecutionState) => Boolean(state.hash && state.receipt?.status !== 'confirmed' && state.receipt?.status !== 'reverted');
-const native = (value: string) => `${formatIndexedAmount(value, 18)} test ETH`;
+const native = (value: string, label = 'test ETH') => `${formatIndexedAmount(value, 18)} ${label}`;
 const tokens = (value: string, symbol: string) => `${formatIndexedAmount(value, 8)} ${symbol}`;
 const percent = (value: string, decimals: number) => `${formatIndexedAmount(value, decimals)}%`;
-const actions = { launch: 'Launch token', approve: 'Approve token amount', buy: 'Buy tokens', sell: 'Sell tokens', claim: 'Claim proceeds' };
+const actions = { launch: 'Launch token', approve: 'Approve token amount', buy: 'Buy tokens', sell: 'Sell tokens', claim: 'Claim proceeds', maintain: 'Process fees' };
 
 /** Testnet availability and the exact public source are checked before wallet/network guidance. */
 export type TokenExecutionAccess = 'unavailable' | 'checking' | 'pricing' | 'wallet-unavailable' | 'sign-in' | 'wallet' | 'network' | 'ready';
@@ -47,8 +47,10 @@ function useTokenExecution(selection: string, target: { market?: IndexedTokenMar
   const pricingMatches = !target.draft || draftCanLaunchOnNetwork(target.draft, status?.enabled ? status.network : null);
   const access = tokenExecutionAccess({ status, failed: availability?.key === availabilityKey && availability.failed, snapshot: target.snapshot, pricingMatches, configured: wallet.configured, authenticated: wallet.authenticated, connected: wallet.connected, scope, chainId: wallet.network?.chainId || null });
   const context = useRef<TokenExecutionContext>({ identityScope: null, userId: null, from: null, chainId: null, deploymentId: null, ready: false, selection });
-  context.current = { identityScope: scope, userId: wallet.userId, from: wallet.account?.address || null, chainId: wallet.network?.chainId || null, deploymentId: status?.enabled ? status.deploymentId : null, ready: access === 'ready', selection,
-    ...(status?.enabled ? { factory: status.factory } : {}), ...(target.market ? { market: target.market.market, token: target.market.token, executionFeeBps: target.market.executionFeeBps, feeMode: target.market.liquidityAndBurn ? 'liquidity_burn' : 'creator' } : {}) };
+  context.current = {
+    identityScope: scope, userId: wallet.userId, from: wallet.account?.address || null, chainId: wallet.network?.chainId || null, deploymentId: status?.enabled ? status.deploymentId : null, ready: access === 'ready', selection,
+    ...(status?.enabled ? { factory: status.factory } : {}), ...(target.market ? { market: target.market.market, token: target.market.token, executionFeeBps: target.market.executionFeeBps, feeMode: target.market.liquidityAndBurn ? 'liquidity_burn' : 'creator' } : {})
+  };
   const controller = useMemo(() => createTokenExecutionController({ api, context: () => context.current, pending, sendEvmTransaction: transaction => latest.current.sendEvmTransaction(transaction) }), [api, pending]);
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot, controller.snapshot), key = JSON.stringify(context.current);
   useEffect(() => { controller.syncContext(); }, [controller, key]);
@@ -61,17 +63,29 @@ function useTokenExecution(selection: string, target: { market?: IndexedTokenMar
 
 export function TokenExecutionSummary({ review, symbol }: { review: TokenExecutionReview; symbol: string }) {
   const summary = review.summary;
+  const unit = nativeAssetLabel(review.network);
   return <div className="review-rows">
-    {review.action === 'launch' ? <><InfoRow label="Token">{summary.name} ({summary.symbol})</InfoRow><InfoRow label="Initial supply">{tokens(summary.initialSupplyRaw, summary.symbol)}</InfoRow><InfoRow label="Opening valuation">{native(summary.openingValuationNativeRaw)}</InfoRow><InfoRow label="Effective opening valuation">{native(summary.effectiveOpeningValuationNativeRaw)}</InfoRow><InfoRow label="Effective upper valuation">{native(summary.effectiveUpperValuationNativeRaw)}</InfoRow><InfoRow label="Execution fee">{percent(summary.executionFeeBps, 2)}</InfoRow><InfoRow label="Fee destination">{summary.feeMode === 'creator' ? 'Creator proceeds' : 'Liquidity and burn'}</InfoRow><p className="field-hint">The initial supply remains locked in the market and its liquidity position. The launch sends no test ETH as liquidity principal. Network gas is still required. The range and execution fee become fixed.</p></>
+    {review.action === 'launch' ? <><InfoRow label="Token">{summary.name} ({summary.symbol})</InfoRow><InfoRow label="Initial supply">{tokens(summary.initialSupplyRaw, summary.symbol)}</InfoRow><InfoRow label="Opening valuation">{native(summary.openingValuationNativeRaw, unit)}</InfoRow><InfoRow label="Effective opening valuation">{native(summary.effectiveOpeningValuationNativeRaw, unit)}</InfoRow><InfoRow label="Effective upper valuation">{native(summary.effectiveUpperValuationNativeRaw, unit)}</InfoRow><InfoRow label="Execution fee">{percent(summary.executionFeeBps, 2)}</InfoRow><InfoRow label="Fee destination">{summary.feeMode === 'creator' ? 'Creator proceeds' : 'Liquidity and burn'}</InfoRow><p className="field-hint">The initial supply remains locked in the market and its liquidity position. The launch sends no {unit} as liquidity principal. Network gas is still required. The range and execution fee become fixed.</p></>
       : review.action === 'approve' ? <><InfoRow label="Token amount allowed">{tokens(summary.allowanceRaw, symbol)}</InfoRow><InfoRow label="Spender"><DisplayAddress value={summary.spender} full /></InfoRow><p className="field-hint">This allowance permits the market to transfer up to this token amount. Selling requires a separate transaction review and approval.</p></>
-        : review.action === 'claim' ? <><InfoRow label="Available proceeds">{native(summary.claimableNativeRaw)}</InfoRow><InfoRow label="Payout recipient"><DisplayAddress value={summary.recipient} full /></InfoRow><p className="field-hint">Transfers the available test ETH proceeds to the recipient shown.</p></>
-          : <><InfoRow label={review.action === 'buy' ? 'Total test ETH input' : 'Token input'}>{review.action === 'buy' ? native(summary.amountRaw) : tokens(summary.amountRaw, symbol)}</InfoRow>
-            {review.action === 'sell' && <InfoRow label="Quoted proceeds before execution fee">{native(summary.grossNativeRaw)}</InfoRow>}
-            <InfoRow label="Quoted execution fee">{native(summary.quotedExecutionFeeRaw)} ({percent(summary.executionFeeBps, 2)})</InfoRow>
-            <InfoRow label="Quoted receive">{review.action === 'buy' ? tokens(summary.quotedReceiveRaw, symbol) : native(summary.quotedReceiveRaw)}</InfoRow>
-            <InfoRow label="Minimum receive">{review.action === 'buy' ? tokens(summary.minimumReceiveRaw, symbol) : native(summary.minimumReceiveRaw)}</InfoRow>
-            <InfoRow label="Total pool swap fee">{percent(summary.totalDexFeePips, 4)}</InfoRow><InfoRow label="Pool LP fee">{percent(summary.lpFeePips, 4)}</InfoRow><InfoRow label="Directional pool protocol fee">{percent(summary.protocolFeePips, 4)}</InfoRow>
-            <InfoRow label="Asset recipient"><DisplayAddress value={summary.recipient} full /></InfoRow><p className="field-hint">{review.action === 'buy' ? 'The execution fee comes from your test ETH input.' : 'The execution fee is deducted from gross test ETH proceeds.'} The total pool fee includes the LP and directional protocol fees and is already included in the quote. Network gas is additional. Actual output may change within your reviewed minimum; a trade that cannot use the full input reverts.</p></>}
+        : review.action === 'claim' ? <><InfoRow label="Available proceeds">{native(summary.claimableNativeRaw, unit)}</InfoRow><InfoRow label="Payout recipient"><DisplayAddress value={summary.recipient} full /></InfoRow><p className="field-hint">Transfers the available {unit} proceeds to the recipient shown.</p></>
+          : review.action === 'maintain' ? <>
+            <InfoRow label="Max native spending budget">{native(summary.maximumNativeBudgetRaw, unit)}</InfoRow>
+            <InfoRow label="Max token conversion budget">{tokens(summary.maximumTokenBudgetRaw, symbol)}</InfoRow>
+            <InfoRow label="Pending LP fees (native)">{native(summary.pendingLpNativeRaw, unit)}</InfoRow>
+            <InfoRow label="Pending LP fees (token)">{tokens(summary.pendingLpTokenRaw, symbol)}</InfoRow>
+            <InfoRow label="Pending liquidity budget (native)">{native(summary.pendingLiquidityNativeRaw, unit)}</InfoRow>
+            <InfoRow label="Pending liquidity budget (token)">{tokens(summary.pendingLiquidityTokenRaw, symbol)}</InfoRow>
+            <InfoRow label="Pending burn budget (native)">{native(summary.pendingBurnNativeRaw, unit)}</InfoRow>
+            <InfoRow label="Execution fee">0%</InfoRow>
+            <p className="field-hint">Converts LP token fees, allocates revenue, and processes liquidity and burn budgets within a 5-minute price window, max 1% slippage, and a 60-second review deadline. Network gas is additional.</p>
+          </>
+            : <><InfoRow label={review.action === 'buy' ? `Total ${unit} input` : 'Token input'}>{review.action === 'buy' ? native(summary.amountRaw, unit) : tokens(summary.amountRaw, symbol)}</InfoRow>
+              {review.action === 'sell' && <InfoRow label="Quoted proceeds before execution fee">{native(summary.grossNativeRaw, unit)}</InfoRow>}
+              <InfoRow label="Quoted execution fee">{native(summary.quotedExecutionFeeRaw, unit)} ({percent(summary.executionFeeBps, 2)})</InfoRow>
+              <InfoRow label="Quoted receive">{review.action === 'buy' ? tokens(summary.quotedReceiveRaw, symbol) : native(summary.quotedReceiveRaw, unit)}</InfoRow>
+              <InfoRow label="Minimum receive">{review.action === 'buy' ? tokens(summary.minimumReceiveRaw, symbol) : native(summary.minimumReceiveRaw, unit)}</InfoRow>
+              <InfoRow label="Total pool swap fee">{percent(summary.totalDexFeePips, 4)}</InfoRow><InfoRow label="Pool LP fee">{percent(summary.lpFeePips, 4)}</InfoRow><InfoRow label="Directional pool protocol fee">{percent(summary.protocolFeePips, 4)}</InfoRow>
+              <InfoRow label="Asset recipient"><DisplayAddress value={summary.recipient} full /></InfoRow><p className="field-hint">{review.action === 'buy' ? `The execution fee comes from your ${unit} input.` : `The execution fee is deducted from gross ${unit} proceeds.`} The total pool fee includes the LP and directional protocol fees and is already included in the quote. Network gas is additional. Actual output may change within your reviewed minimum; a trade that cannot use the full input reverts.</p></>}
   </div>;
 }
 
@@ -81,7 +95,7 @@ export function TokenExecutionResult({ state, symbol, canApprove, onApprove, onD
   const expired = Boolean(state.review && Date.parse(state.review.expiresAt) <= clock), href = state.hash && state.review ? nftExplorerHref(state.review.chainId, state.hash, 'tx') : null;
   return <>
     {state.review && <div className="nft-launch-review section-gap"><div className="section-header"><h3>{actions[state.review.action]}</h3><Badge>Transaction review</Badge></div><TokenExecutionSummary review={state.review} symbol={symbol} />
-      <InfoRow label="Network">{nftNetworkLabel(state.review.network)}</InfoRow><InfoRow label="Signing wallet"><DisplayAddress value={state.review.from} full /></InfoRow><InfoRow label="Wallet transaction recipient"><DisplayAddress value={state.review.to} full /></InfoRow><InfoRow label="Wallet transaction value">{native(state.review.value)}</InfoRow><InfoRow label="Gas estimate">{state.review.simulation.gasEstimate} gas units</InfoRow><p className="field-hint">Simulated at block {state.review.simulation.blockNumber}. Your wallet shows the final network gas cost.</p>
+      <InfoRow label="Network">{nftNetworkLabel(state.review.network)}</InfoRow><InfoRow label="Signing wallet"><DisplayAddress value={state.review.from} full /></InfoRow><InfoRow label="Wallet transaction recipient"><DisplayAddress value={state.review.to} full /></InfoRow><InfoRow label="Wallet transaction value">{native(state.review.value, nativeAssetLabel(state.review.network))}</InfoRow><InfoRow label="Gas estimate">{state.review.simulation.gasEstimate} gas units</InfoRow><p className="field-hint">Simulated at block {state.review.simulation.blockNumber}. Your wallet shows the final network gas cost.</p>
       <details className="token-transaction-data"><summary>Transaction data</summary><code>{state.review.data}</code></details>
       <InfoRow label="Review ID"><span className="indexed-hash">{state.review.id}</span></InfoRow>
       {state.phase === 'review' && <><p className="field-hint">{expired ? 'This review expired. Prepare a new review.' : `Review expires at ${new Date(state.review.expiresAt).toLocaleTimeString()}.`}</p><div className="button-row section-gap"><Button disabled={!canApprove || expired} onClick={onApprove}>Approve in wallet</Button><Button variant="ghost" onClick={onDiscard}>Discard review</Button></div></>}
@@ -108,22 +122,35 @@ function SavedTransactions({ execution }: { execution: ReturnType<typeof useToke
 }
 
 export function TokenTradePanel({ market, context, onRefresh }: { market: IndexedTokenMarket; context: IndexedTokenContext; onRefresh(): void }) {
-  const [side, setSide] = useState('buy'), [amount, setAmount] = useState(''), [slippage, setSlippage] = useState(100), [ack, setAck] = useState(false);
-  const execution = useTokenExecution(JSON.stringify([side, amount, slippage]), { market, snapshot: context }), locked = busy(execution.state) || unresolved(execution.state);
+  const [side, setSide] = useState('buy'), [amount, setAmount] = useState(''), [slippage, setSlippage] = useState(100), [maxNativeBudget, setMaxNativeBudget] = useState('1'), [maxTokenBudget, setMaxTokenBudget] = useState('10000000'), [ack, setAck] = useState(false);
+  const execution = useTokenExecution(JSON.stringify([side, amount, slippage, maxNativeBudget, maxTokenBudget]), { market, snapshot: context }), locked = busy(execution.state) || unresolved(execution.state);
+  const unit = nativeAssetLabel(execution.status?.enabled ? execution.status.network : context.network);
   useEffect(() => setAck(false), [execution.key]);
-  const validAmount = (() => { if (side === 'claim') return true; try { const raw = parseAssetAmount(amount, side === 'buy' ? 18 : 8); return raw > 0n && raw < 2n ** 127n; } catch { return false; } })();
+  const validAmount = (() => {
+    if (side === 'claim') return true;
+    if (side === 'maintain') {
+      try {
+        const nat = parseAssetAmount(maxNativeBudget, 18), tok = parseAssetAmount(maxTokenBudget, 8);
+        return nat > 0n && nat < 2n ** 127n && tok > 0n && tok < 2n ** 127n;
+      } catch { return false; }
+    }
+    try { const raw = parseAssetAmount(amount, side === 'buy' ? 18 : 8); return raw > 0n && raw < 2n ** 127n; } catch { return false; }
+  })();
   const changed = (callback: () => void) => { execution.controller.invalidate('Trade details changed. Prepare a new review.'); setAck(false); callback(); };
-  function prepare(action: 'buy' | 'sell' | 'approve' | 'claim') {
+  function prepare(action: 'buy' | 'sell' | 'approve' | 'claim' | 'maintain') {
     if (!ack || !validAmount || execution.access !== 'ready' || !execution.status?.enabled || !execution.wallet.account) return;
     const common = { from: execution.wallet.account.address as Address, testEthAcknowledged: true as const, expectedChainId: execution.status.network.chainId, expectedDeploymentId: execution.status.deploymentId, market: market.market as Address };
-    const input: TokenTransactionIntent = action === 'claim' ? { ...common, action } : action === 'approve' ? { ...common, action, amount } : { ...common, action, amount, slippageBps: slippage };
+    const input: TokenTransactionIntent = action === 'claim' ? { ...common, action }
+      : action === 'maintain' ? { ...common, action, maximumNativeBudget: maxNativeBudget.trim(), maximumTokenBudget: maxTokenBudget.trim() }
+        : action === 'approve' ? { ...common, action, amount } : { ...common, action, amount, slippageBps: slippage };
     void execution.controller.prepare(input);
   }
-  return <section className="panel token-execution-panel section-gap" aria-label="Token trading"><div className="section-header"><div><h2>Trade {market.symbol}</h2><p>Get a current review before approving a test-network transaction.</p></div><Badge tone="amber">Test ETH</Badge></div><TokenExecutionAccessGuidance access={execution.access} status={execution.status} onRefresh={execution.refresh} />
-    {execution.access === 'ready' && <><Tabs tabs={[{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }, { value: 'claim', label: 'Claim proceeds' }]} active={side} onChange={value => { if (!locked) changed(() => setSide(value)); }} />
-      {side !== 'claim' && <div className="field-grid section-gap"><Field label={side === 'buy' ? 'Test ETH to spend' : `${market.symbol} amount`} hint={side === 'buy' ? 'Up to 18 decimals. The execution fee comes from this input.' : 'Up to 8 decimals. Token approval and sale are separate transactions.'}><input value={amount} disabled={locked} maxLength={100} inputMode="decimal" onChange={event => changed(() => setAmount(event.target.value))} placeholder="0.0" /></Field><Field label="Slippage tolerance" hint="Sets the minimum amount you accept in the review."><select value={slippage} disabled={locked} onChange={event => changed(() => setSlippage(Number(event.target.value)))}><option value={50}>0.5%</option><option value={100}>1%</option><option value={200}>2%</option><option value={500}>5%</option></select></Field></div>}
+  return <section className="panel token-execution-panel section-gap" aria-label="Token trading"><div className="section-header"><div><h2>Trade {market.symbol}</h2><p>Get a current review before approving a network transaction.</p></div><Badge tone="amber">{unit === 'test ETH' ? 'Test ETH' : unit}</Badge></div><TokenExecutionAccessGuidance access={execution.access} status={execution.status} onRefresh={execution.refresh} />
+    {execution.access === 'ready' && <><Tabs tabs={[{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }, { value: 'claim', label: 'Claim proceeds' }, { value: 'maintain', label: 'Process fees' }]} active={side} onChange={value => { if (!locked) changed(() => setSide(value)); }} />
+      {side !== 'claim' && side !== 'maintain' && <div className="field-grid section-gap"><Field label={side === 'buy' ? `${unit} to spend` : `${market.symbol} amount`} hint={side === 'buy' ? 'Up to 18 decimals. The execution fee comes from this input.' : 'Up to 8 decimals. Token approval and sale are separate transactions.'}><input value={amount} disabled={locked} maxLength={100} inputMode="decimal" onChange={event => changed(() => setAmount(event.target.value))} placeholder="0.0" /></Field><Field label="Slippage tolerance" hint="Sets the minimum amount you accept in the review."><select value={slippage} disabled={locked} onChange={event => changed(() => setSlippage(Number(event.target.value)))}><option value={50}>0.5%</option><option value={100}>1%</option><option value={200}>2%</option><option value={500}>5%</option></select></Field></div>}
+      {side === 'maintain' && <div className="field-grid section-gap"><Field label="Max native spending budget" hint={`Caps ${unit} spent on liquidity and burns during this pass.`}><input value={maxNativeBudget} disabled={locked} maxLength={100} inputMode="decimal" onChange={event => changed(() => setMaxNativeBudget(event.target.value))} placeholder="1" /></Field><Field label={`Max ${market.symbol} conversion budget`} hint="Caps accumulated LP token fees converted (8 decimals). Requires 5-minute TWAP window and minimum budget."><input value={maxTokenBudget} disabled={locked} maxLength={100} inputMode="decimal" onChange={event => changed(() => setMaxTokenBudget(event.target.value))} placeholder="10000000" /></Field></div>}
       <label className="checkbox-field section-gap"><input type="checkbox" checked={ack} disabled={locked} onChange={event => { if (!event.target.checked) execution.controller.invalidate('Test ETH acknowledgement removed.'); setAck(event.target.checked); }} /><span>I understand this uses {nftNetworkLabel(execution.status?.enabled ? execution.status.network : null)}. I will review fees, the recipient and network gas before approving.</span></label>
-      <div className="button-row"><Button disabled={!ack || !validAmount || locked} onClick={() => prepare(side as 'buy' | 'sell' | 'claim')}>{side === 'buy' ? 'Review buy' : side === 'sell' ? 'Review sale' : 'Review claim'}</Button>{side === 'sell' && <Button variant="secondary" disabled={!ack || !validAmount || locked} onClick={() => prepare('approve')}>Review token approval</Button>}</div>
+      <div className="button-row"><Button disabled={!ack || !validAmount || locked} onClick={() => prepare(side as 'buy' | 'sell' | 'claim' | 'maintain')}>{side === 'buy' ? 'Review buy' : side === 'sell' ? 'Review sale' : side === 'maintain' ? 'Review fee processing' : 'Review claim'}</Button>{side === 'sell' && <Button variant="secondary" disabled={!ack || !validAmount || locked} onClick={() => prepare('approve')}>Review token approval</Button>}</div>
     </>}
     <TokenExecutionResult state={execution.state} symbol={market.symbol} canApprove={execution.access === 'ready' && ack} onApprove={() => void execution.controller.approve()} onDiscard={() => execution.controller.invalidate('Review discarded.')} onReceipt={() => void execution.controller.refreshReceipt()} />
     {execution.state.phase === 'confirmed' && <Button variant="secondary" onClick={onRefresh}>Refresh market terms</Button>}
@@ -136,10 +163,12 @@ export function TokenLaunchReview({ draft, termsReviewed = true }: { draft: Toke
   useEffect(() => setAck(false), [execution.key]);
   const validValuation = (() => { try { return parseAssetAmount(draft.openingValuation, 18) > 0n; } catch { return false; } })();
   return <section className="panel token-execution-panel section-gap" aria-label="Token launch transaction"><div className="section-header"><h2>Launch your token</h2><Badge tone="amber">Test network</Badge></div><TokenExecutionAccessGuidance access={execution.access} status={execution.status} onRefresh={execution.refresh} />
-    {execution.access === 'ready' && <>{!termsReviewed && <p className="data-notice">Review and confirm the planned terms above before preparing a launch transaction.</p>}{!validValuation && <p className="data-notice">Enter a positive test ETH opening valuation before preparing a launch review.</p>}<label className="checkbox-field section-gap"><input type="checkbox" checked={ack} disabled={!termsReviewed || busy(execution.state) || unresolved(execution.state)} onChange={event => { if (!event.target.checked) execution.controller.invalidate('Launch acknowledgement removed.'); setAck(event.target.checked); }} /><span>I have reviewed these test ETH launch terms. Launching creates a token and permanently locks its fee, range and supply terms.</span></label><Button disabled={!termsReviewed || !ack || !validValuation || busy(execution.state) || unresolved(execution.state)} onClick={() => {
+    {execution.access === 'ready' && <>{!termsReviewed && <p className="data-notice">Review and confirm the planned terms above before preparing a launch transaction.</p>}{!validValuation && <p className="data-notice">Enter a positive opening valuation before preparing a launch review.</p>}<label className="checkbox-field section-gap"><input type="checkbox" checked={ack} disabled={!termsReviewed || busy(execution.state) || unresolved(execution.state)} onChange={event => { if (!event.target.checked) execution.controller.invalidate('Launch acknowledgement removed.'); setAck(event.target.checked); }} /><span>I have reviewed these launch terms. Launching creates a token and permanently locks its fee, range and supply terms.</span></label><Button disabled={!termsReviewed || !ack || !validValuation || busy(execution.state) || unresolved(execution.state)} onClick={() => {
       if (!execution.status?.enabled || !execution.wallet.account || !termsReviewed || !ack || !validValuation) return;
-      void execution.controller.prepare({ action: 'launch', from: execution.wallet.account.address as Address, testEthAcknowledged: true, expectedChainId: execution.status.network.chainId, expectedDeploymentId: execution.status.deploymentId,
-        draft: { pricingNetwork: draft.pricingNetwork || 'zero', name: draft.name, symbol: draft.symbol, openingValuation: draft.openingValuation, executionFeeBps: Math.round(draft.fee * 100), feeMode: draft.mode } });
+      void execution.controller.prepare({
+        action: 'launch', from: execution.wallet.account.address as Address, testEthAcknowledged: true, expectedChainId: execution.status.network.chainId, expectedDeploymentId: execution.status.deploymentId,
+        draft: { pricingNetwork: draft.pricingNetwork === 'base-sepolia' ? 'base-sepolia' : 'zero', name: draft.name, symbol: draft.symbol, openingValuation: draft.openingValuation, executionFeeBps: Math.round(draft.fee * 100), feeMode: draft.mode }
+      });
     }}>Review launch transaction</Button></>}
     <TokenExecutionResult state={execution.state} symbol={draft.symbol} canApprove={execution.access === 'ready' && termsReviewed && ack && validValuation} onApprove={() => void execution.controller.approve()} onDiscard={() => execution.controller.invalidate('Review discarded.')} onReceipt={() => void execution.controller.refreshReceipt()} /><SavedTransactions execution={execution} />
   </section>;

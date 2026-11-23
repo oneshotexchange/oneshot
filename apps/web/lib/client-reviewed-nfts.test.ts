@@ -71,4 +71,33 @@ describe('public reviewed NFT client', () => {
     await expect(fetchReviewedNftRead({ kind: 'collections' }, null, undefined, controller.signal, fetcher)).rejects.toBeDefined(); expect(fetcher).not.toHaveBeenCalled();
     expect(() => reviewedNftReadPath({ kind: 'collections' }, 'has spaces')).toThrow(); expect(() => reviewedNftReadPath({ kind: 'item', collection: ra(10), tokenId: '0' }, 'cursor')).toThrow();
   });
+
+  it('builds and validates wallet items, wallet claims, seller listings and global/wallet reviewed activity', async () => {
+    const f = await data();
+    expect(reviewedNftReadPath({ kind: 'wallet-items', wallet: ra(4).toUpperCase() })).toBe(`/api/oneshot/reviewed-nfts/wallets/${ra(4)}/items?limit=20`);
+    expect(reviewedNftReadPath({ kind: 'wallet-claims', wallet: ra(4) })).toBe(`/api/oneshot/reviewed-nfts/wallets/${ra(4)}/claims?limit=20`);
+    expect(reviewedNftReadPath({ kind: 'seller-listings', seller: ra(2) })).toBe(`/api/oneshot/reviewed-nfts/listings?seller=${ra(2)}&status=active&limit=20`);
+    expect(reviewedNftReadPath({ kind: 'global-activity' })).toBe('/api/oneshot/reviewed-nfts/activity?limit=20');
+    expect(reviewedNftReadPath({ kind: 'global-activity', wallet: ra(4) })).toBe(`/api/oneshot/reviewed-nfts/activity?wallet=${ra(4)}&limit=20`);
+
+    const ownedItem = { ...f.item, owner: ra(4), burned: false, activeListingId: null };
+    expect(parseReviewedNftRead({ context: f.context, items: [ownedItem], nextCursor: null }, { kind: 'wallet-items', wallet: ra(4) }, deployment).items).toHaveLength(1);
+    expect(() => parseReviewedNftRead({ context: f.context, items: [{ ...ownedItem, owner: ra(5) }], nextCursor: null }, { kind: 'wallet-items', wallet: ra(4) }, deployment)).toThrow();
+    expect(() => parseReviewedNftRead({ context: f.context, items: [{ ...ownedItem, owner: `0x${'0'.repeat(40)}`, burned: true }], nextCursor: null }, { kind: 'wallet-items', wallet: ra(4) }, deployment)).toThrow();
+
+    const claim = {
+      schemaVersion: 1, kind: 'reviewed-market-claim', marketplace: m.marketplace.address, account: ra(4),
+      pendingRaw: '100', claimedRaw: '0', lastBlockNumber: f.context.checkpoint!.number, lastBlockHash: f.context.checkpoint!.hash,
+      lastTransactionHash: f.listing!.lastTransactionHash, lastLogIndex: 0,
+    };
+    expect(parseReviewedNftRead({ context: f.context, items: [claim], nextCursor: null }, { kind: 'wallet-claims', wallet: ra(4) }, deployment).items).toHaveLength(1);
+    expect(() => parseReviewedNftRead({ context: f.context, items: [{ ...claim, account: ra(5) }], nextCursor: null }, { kind: 'wallet-claims', wallet: ra(4) }, deployment)).toThrow();
+    expect(() => parseReviewedNftRead({ context: f.context, items: [claim, claim], nextCursor: null }, { kind: 'wallet-claims', wallet: ra(4) }, deployment)).toThrow();
+
+    expect(parseReviewedNftRead({ context: f.context, items: [f.listing], nextCursor: null }, { kind: 'seller-listings', seller: String(f.listing!.seller) }, deployment).items).toHaveLength(1);
+    expect(() => parseReviewedNftRead({ context: f.context, items: [f.listing], nextCursor: null }, { kind: 'seller-listings', seller: ra(99) }, deployment)).toThrow();
+
+    expect(parseReviewedNftRead({ context: f.context, items: [f.activity], nextCursor: null }, { kind: 'global-activity' }, deployment).items).toHaveLength(1);
+    expect(() => parseReviewedNftRead({ context: f.context, items: [f.activity], nextCursor: null }, { kind: 'global-activity', wallet: ra(99) }, deployment)).toThrow();
+  });
 });

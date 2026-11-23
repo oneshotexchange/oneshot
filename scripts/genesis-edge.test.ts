@@ -29,4 +29,56 @@ describe('Genesis invitation edge routing',()=>{
   async function fixture(){const fetcher=vi.fn(async(_input:RequestInfo|URL,_init?:RequestInit)=>new Response('<html>Public invitation</html>',{headers:{'Content-Type':'text/html','Content-Security-Policy':"default-src 'none'"}}));const source=await readFile(new URL('../apps/web/public/_worker.js',import.meta.url),'utf8');const worker=new Function('fetch',source.replace('export default','return'))(fetcher) as {fetch(request:Request,env:unknown):Promise<Response>};const assets={fetch:vi.fn(async()=>new Response('static asset'))};return{worker,fetcher,assets};}
   it('keeps ordinary routes static and forwards only the code to the fixed configured origin',async()=>{const {worker,fetcher,assets}=await fixture();expect(await(await worker.fetch(new Request('https://app.example/whitelist'),{ASSETS:assets})).text()).toBe('static asset');expect(assets.fetch).toHaveBeenCalledOnce();const response=await worker.fetch(new Request('https://app.example/g/abcdefghijklmnop?secret=ignore',{headers:{Authorization:'Bearer private-token',Cookie:'private-session'}}),{ASSETS:assets,GENESIS_API_ORIGIN:'https://api.example'});expect(response.status).toBe(200);expect(String(fetcher.mock.calls[0][0])).toBe('https://api.example/api/oneshot/genesis/share/abcdefghijklmnop');expect(fetcher.mock.calls[0][1]).not.toHaveProperty('headers');expect(response.headers.get('cache-control')).toBe('no-store');});
   it('rejects writes and fails safely for a missing or unsafe upstream origin',async()=>{const {worker,fetcher,assets}=await fixture();expect((await worker.fetch(new Request('https://app.example/g/abcdefghijklmnop',{method:'POST'}),{ASSETS:assets,GENESIS_API_ORIGIN:'https://api.example'})).status).toBe(405);for(const value of [undefined,'http://127.0.0.1:3001','https://user:password@api.example','https://api.example/private']){const result=await worker.fetch(new Request('https://app.example/g/abcdefghijklmnop'),{ASSETS:assets,GENESIS_API_ORIGIN:value});expect(result.status).toBe(503);expect(await result.text()).toContain('Continue to Genesis');}expect(fetcher).not.toHaveBeenCalled();});
+  it('proxies airdrop reads with query parameters, forwards airdrop writes, allows /airdrop OAuth redirect, and bypasses admin routes', async () => {
+    const { worker, fetcher, assets } = await fixture();
+    await worker.fetch(
+      new Request('https://app.example/api/oneshot/airdrop/eligibility?wallet=0x1111111111111111111111111111111111111111'),
+      { ASSETS: assets, GENESIS_API_ORIGIN: 'https://api.example' },
+    );
+    expect(String(fetcher.mock.calls[0][0])).toBe(
+      'https://api.example/api/oneshot/airdrop/eligibility?wallet=0x1111111111111111111111111111111111111111',
+    );
+
+    await worker.fetch(
+      new Request('https://app.example/api/oneshot/airdrop/leaderboard?offset=0&limit=20'),
+      { ASSETS: assets, GENESIS_API_ORIGIN: 'https://api.example' },
+    );
+    expect(String(fetcher.mock.calls[1][0])).toBe(
+      'https://api.example/api/oneshot/airdrop/leaderboard?offset=0&limit=20',
+    );
+
+    await worker.fetch(
+      new Request('https://app.example/api/oneshot/airdrop/wallet?ignore=1', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://app.example',
+          Cookie: 'oneshot_genesis_session=private',
+          'Content-Type': 'application/json',
+          'X-Genesis-Session': 'current',
+        },
+        body: '{"wallet":"0x1111111111111111111111111111111111111111"}',
+      }),
+      { ASSETS: assets, GENESIS_API_ORIGIN: 'https://api.example' },
+    );
+    expect(String(fetcher.mock.calls[2][0])).toBe('https://api.example/api/oneshot/airdrop/wallet');
+    expect(new Headers(fetcher.mock.calls[2][1]?.headers).get('Cookie')).toBe('oneshot_genesis_session=private');
+    expect(new Headers(fetcher.mock.calls[2][1]?.headers).get('X-Genesis-Session')).toBe('current');
+    expect(new TextDecoder().decode(fetcher.mock.calls[2][1]?.body as Uint8Array)).toBe(
+      '{"wallet":"0x1111111111111111111111111111111111111111"}',
+    );
+
+    fetcher.mockImplementationOnce(async () => new Response(null, { status: 303, headers: { Location: 'https://app.example/airdrop' } }));
+    const cb = await worker.fetch(new Request('https://app.example/api/oneshot/genesis/auth/callback?code=c&state=s'), {
+      ASSETS: assets,
+      GENESIS_API_ORIGIN: 'https://api.example',
+    });
+    expect(cb.status).toBe(303);
+    expect(cb.headers.get('location')).toBe('https://app.example/airdrop');
+
+    await worker.fetch(new Request('https://app.example/api/admin/airdrop'), {
+      ASSETS: assets,
+      GENESIS_API_ORIGIN: 'https://api.example',
+    });
+    expect(assets.fetch).toHaveBeenCalledOnce();
+  });
 });

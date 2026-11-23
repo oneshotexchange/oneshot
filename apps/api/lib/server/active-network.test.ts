@@ -70,6 +70,38 @@ describe('active Zero routes cannot fall through into the Aptos prototype', () =
     expect(JSON.stringify(result)).not.toContain('invalid-private-rpc-secret');
     expect(publicOneshotStatus({ ONESHOT_NETWORK: 'invalid-mode-private' }).network).toBe('Unknown');
   });
+  it('reports zero-testnet and zero-mainnet scopes with mainnet opt-in gating while keeping public status minimal', () => {
+    const testnet = oneshotStatus({
+      ONESHOT_NETWORK: 'zero-testnet',
+      ONESHOT_EXTERNAL_NFTS_READS_ENABLED: 'true',
+      ONESHOT_TOKEN_ANALYTICS_READS_ENABLED: 'true',
+    });
+    expect(testnet).toMatchObject({
+      network: 'Zero Testnet',
+      nativeSymbol: 'ZRO',
+      executionScope: 'Zero Testnet',
+      reviewedNfts: { readsEnabled: true, executionEnabled: false },
+      tokenAnalytics: { readsEnabled: true },
+    });
+    expect(testnet.networkConfig.isTestnet).toBe(true);
+
+    const lockedMainnet = oneshotStatus({
+      ONESHOT_NETWORK: 'zero-mainnet',
+      ONESHOT_CHAIN_ID: '33000',
+      ONESHOT_NATIVE_DECIMALS: '18',
+      ONESHOT_RPC_URL: 'https://rpc.zero.example',
+      ONESHOT_GENESIS_HASH: `0x${'ab'.repeat(32)}`,
+      ONESHOT_CONFIG_SOURCE_URL: 'https://docs.layerzero.network/zero',
+    });
+    expect(lockedMainnet.executionScope).toBe('Zero Mainnet');
+    expect(lockedMainnet.networkConfig.isTestnet).toBe(false);
+    expect(lockedMainnet.networkConfig.configurationReady).toBe(false);
+
+    const publicMainnet = publicOneshotStatus({ ONESHOT_NETWORK: 'zero-mainnet' });
+    expect(Object.keys(publicMainnet).sort()).toEqual(['app', 'network', 'chainId', 'nativeSymbol', 'nativeDecimals', 'features'].sort());
+    expect(publicMainnet.network).toBe('Zero Mainnet');
+  });
+
   it('passes admin routes through to their password-protected dedicated router', () => {
     for (const [path, method] of [['/api/admin/status', 'GET'], ['/api/admin/session', 'POST'], ['/api/admin/session', 'DELETE']])
       expect(activeNetworkResponse(new NextRequest(`http://localhost${path}`, { method }))).toBeNull();

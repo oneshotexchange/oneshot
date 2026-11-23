@@ -6,7 +6,7 @@ import { ThemePicker } from './theme-picker';
 import { Button, ErrorState } from './ui';
 import { useGenesisAuth } from './genesis-auth';
 import { apiUrl } from '../lib/api-url';
-import { clearGenesisReferral, genesisAccountRequest, loadGenesisCampaign, readGenesisReferral } from '../lib/client-genesis-api';
+import { clearGenesisReferral, genesisAccountRequest, loadGenesisCampaign, readGenesisReferral, requestGenesisWalletChallenge } from '../lib/client-genesis-api';
 import { createGenesisEnrollment } from '../lib/genesis-enrollment';
 import { genesisAllVerified, genesisDisplayStatus, type GenesisMe, type GenesisPublicCampaign, type GenesisTask } from '../lib/genesis-schema';
 import '../app/genesis.css';
@@ -164,6 +164,7 @@ export function GenesisWhitelist() {
       </section>
       {app?.submittedAt && <section className="genesis-after-application"><div><Users size={22}/><h2>Your invitation, your people.</h2><p><strong>{me?.qualifiedReferrals || 0}</strong> qualified invitations. Every person counts once, after their application checks pass.</p><p>Referrals support review. They do not automatically award a place.</p></div><div className="genesis-share-preview"><h2>A card worth sharing.</h2><p>Choose whether your X handle and profile picture appear on your public invitation. Your wallet stays private.</p><label><input type="checkbox" checked={app.shareConsent} disabled={Boolean(busy)} onChange={event => void action('card','share',{ enabled:event.target.checked,expectedRevision:app.revision })}/>Show my X profile on my invitation card</label>{me?.shareUrl && <><img alt="Your current oneshot Genesis invitation card" src={apiUrl(`/api/oneshot/genesis/share/${app.code}/image`) + `?v=${app.revision}`}/><div className="genesis-task-actions"><a className="button button-secondary" href={me.shareUrl} target="_blank" rel="noreferrer">Preview invitation <ArrowUpRight size={14}/></a><button className="button button-ghost" onClick={() => void copy(me.shareUrl!)}>Copy link <Copy size={14}/></button></div></>}</div></section>}
       {app?.publishedDecision === 'selected' && Boolean(app.nominationQuota) && <section className="genesis-nominations"><div><span className="genesis-edition-label">Pass a place forward</span><h2>Who would you bring?</h2><p>You have {Math.max(0,(app.nominationQuota || 0)-(app.nominations?.length || 0))} nominations left. Each accepted nomination uses a reserved place within the 750-person allocation.</p></div><div>{app.nominations?.map(n => <p key={n.id} className="genesis-nominee">@{n.username}<span>{n.accepted?'Accepted':'Awaiting acceptance'}</span></p>)}{!me?.nominationsOpen && <p className="genesis-helper">Nominations are not open right now.</p>}{(app.nominations?.length || 0) < (app.nominationQuota || 0) && <><label className="field"><span className="field-label">Their X handle</span><input value={nominee} onChange={event => {setNominee(event.target.value.replace(/^@/,''));setNominationConfirmed(false);}} placeholder="username" maxLength={15}/></label><label className="genesis-helper"><input type="checkbox" checked={nominationConfirmed} onChange={event => setNominationConfirmed(event.target.checked)}/> I have checked this handle. A submitted nomination cannot be changed.</label><Button className="section-gap" disabled={!me?.nominationsOpen || !/^[A-Za-z0-9_]{1,15}$/.test(nominee) || !nominationConfirmed || Boolean(busy)} loading={busy==='nominate'} onClick={() => void action('nominate','nominations',{username:nominee})}>Nominate @{nominee || 'someone'} <ArrowRight size={15}/></Button></>}</div></section>}
+      {app?.publishedDecision === 'selected' && <MintWalletPanel scope={identity!} sessionId={wallet.sessionId} getToken={() => walletRef.current.getAccessToken()} currentScope={() => currentScope.current} currentWallet={app.mintWallet ?? null} boundAt={app.mintWalletBoundAt ?? null} busy={Boolean(busy)} onBound={data => { if (currentScope.current === identity) setAccount({ scope: identity!, data }); }} />}
       <section id="genesis-questions" className="genesis-questions"><div><span className="genesis-edition-label">Before you apply</span><h2>A few things<br />to know.</h2></div><div><details><summary>Does applying guarantee an NFT?</summary><p>No. The team reviews applications and selects 750 guaranteed recipients. Additional eligible applicants can join the reserve list.</p></details><details><summary>Do I need a wallet now?</summary><p>No wallet or transaction is needed to apply. Selected accounts will choose their mint wallet before the claim window.</p></details><details><summary>What does a free mint cost?</summary><p>Selected recipients pay no mint price. Network fees may still apply. The network, claim window and transaction terms will be shown before minting.</p></details><details><summary>How do invitations count?</summary><p>A distinct person must join through your invitation and submit an application that passes its checks. Clicks and copied links do not count. You do not need a minimum number of invitations to apply.</p></details><details><summary>Can oneshot post from my X account?</summary><p>This application uses X to confirm your identity. You write and publish your own posts on X. Task checks read public account and post evidence.</p></details><details><summary>What information is saved?</summary><p>Your public X identity and profile are saved when you sign in. Submitted post evidence, verification results and referral attribution are saved with your application for review. Personal invitation cards are optional. You can sign out at the top of this page.</p><Link href="/settings" className="genesis-text-link">Account settings <ArrowRight size={14}/></Link></details></div></section>
     </main><footer className="genesis-footer"><Link href="/" className="brand" aria-label="oneshot home"><OneshotLogo /></Link><span>The first edition starts with its people.</span><Link href="/settings">Account settings <ArrowUpRight size={14}/></Link></footer>
   </div>;
@@ -174,4 +175,92 @@ function TaskRow({ number,title,description,done,check,children }: { number:stri
 function ApplicationStatus({me,onRefresh}:{me:GenesisMe;onRefresh():void}) {
   const app = me.application!;
   return <div className={`genesis-status ${app.publishedDecision === 'selected' ? 'genesis-status-selected' : ''}`}><CheckCircle2 size={24}/><div><span>Your application</span><h3>{genesisDisplayStatus(app)}</h3><p>{app.publishedDecision === 'selected' ? 'A Genesis free-mint place is reserved for you. Return here for wallet selection and the claim window.' : app.publishedDecision === 'reserve' ? 'You are on the reserve list. A place has not been allocated to you.' : app.publishedDecision === 'not_selected' ? 'You were not selected in this round. Thank you for taking part.' : app.status === 'awaiting_verification' ? 'Your submission time is saved. Outstanding X checks will finish before review.' : 'Your application is with the team. Return here to see the published decision.'}</p><button className="genesis-text-link" onClick={onRefresh}>Refresh status <RefreshCw size={13}/></button></div></div>;
+}
+type EthereumProvider = { request(args: { method: string; params?: unknown[] }): Promise<unknown> };
+function MintWalletPanel({ scope, sessionId, getToken, currentScope, currentWallet, boundAt, busy, onBound }: {
+  scope: string;
+  sessionId: string | null;
+  getToken(): Promise<string | null>;
+  currentScope(): string | null;
+  currentWallet: string | null;
+  boundAt: string | null;
+  busy: boolean;
+  onBound(data: GenesisMe): void;
+}) {
+  const [binding, setBinding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function confirmWallet() {
+    if (busy || binding) return;
+    setError(null);
+    setStatusMessage(null);
+    const provider = (window as { ethereum?: EthereumProvider }).ethereum;
+    if (!provider || typeof provider.request !== 'function') {
+      setError('Install or open an EVM wallet extension in this browser to confirm your mint wallet.');
+      return;
+    }
+    setBinding(true);
+    try {
+      const accounts = await provider.request({ method: 'eth_requestAccounts' });
+      const raw = Array.isArray(accounts) ? accounts[0] : null;
+      if (typeof raw !== 'string' || !/^0x[\da-fA-F]{40}$/.test(raw)) {
+        throw new Error('No EVM wallet account was returned. Unlock your wallet and try again.');
+      }
+      const selectedWallet = raw.toLowerCase();
+      const challenge = await requestGenesisWalletChallenge({ wallet: selectedWallet, getToken, sessionId, scope: currentScope });
+      const signature = await provider.request({ method: 'personal_sign', params: [challenge.message, selectedWallet] });
+      if (typeof signature !== 'string' || !/^0x[\da-fA-F]{130}$/.test(signature)) {
+        throw new Error('Your wallet returned an unexpected signature format. Please try again.');
+      }
+      const updated = await genesisAccountRequest('wallet', {
+        body: { wallet: challenge.wallet, signature, expectedRevision: challenge.expectedRevision },
+        getToken,
+        sessionId,
+        scope: currentScope,
+      });
+      if (mounted.current && currentScope() === scope) {
+        onBound(updated);
+        setStatusMessage('Mint wallet confirmed.');
+      }
+    } catch (reason) {
+      if (!mounted.current || currentScope() !== scope) return;
+      const code = typeof reason === 'object' && reason !== null && 'code' in reason ? (reason as { code?: unknown }).code : undefined;
+      if (code === 4001) {
+        setError('Wallet confirmation was cancelled. Sign the message when you are ready.');
+      } else {
+        setError(reason instanceof Error && reason.message ? reason.message : 'Your mint wallet could not be confirmed. Please try again.');
+      }
+    } finally {
+      if (mounted.current) setBinding(false);
+    }
+  }
+  return (
+    <section className="genesis-nominations">
+      <div>
+        <span className="genesis-edition-label">Mint wallet</span>
+        <h2>{currentWallet ? 'Mint wallet confirmed.' : 'Confirm your mint wallet.'}</h2>
+        <p>Sign a free verification message with the EVM wallet that should receive your Genesis free-mint allowlist spot. No transaction or gas is needed now.</p>
+      </div>
+      <div>
+        {currentWallet ? (
+          <div className="genesis-invitation">
+            <label htmlFor="genesis-mint-wallet">Confirmed allowlist wallet</label>
+            <div>
+              <input id="genesis-mint-wallet" value={currentWallet} readOnly onFocus={event => event.target.select()} />
+            </div>
+            {boundAt && <p className="genesis-helper">Confirmed {new Date(boundAt).toLocaleString()}</p>}
+          </div>
+        ) : (
+          <p className="genesis-helper">No mint wallet is confirmed yet.</p>
+        )}
+        {statusMessage && <p className="genesis-notice" role="status">{statusMessage}</p>}
+        {error && <ErrorState message={error} />}
+        <Button className="section-gap" disabled={busy || binding} loading={binding} onClick={() => void confirmWallet()}>
+          {currentWallet ? 'Switch mint wallet' : 'Connect and sign with wallet'} <ArrowRight size={15} />
+        </Button>
+      </div>
+    </section>
+  );
 }

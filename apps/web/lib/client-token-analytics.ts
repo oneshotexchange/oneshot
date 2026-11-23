@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { IndexedTokenSource, TokenAnalyticsContext, TokenAnalyticsMarketResponse, TokenAnalyticsTrade, TokenAnalyticsTradesResponse, TokenAnalyticsHoldersResponse, TokenPoolPrice } from '@oneshot/evm';
+import type { IndexedTokenSource, TokenAnalyticsContext, TokenAnalyticsFeedResponse, TokenAnalyticsMarketResponse, TokenAnalyticsTrade, TokenAnalyticsTradesResponse, TokenAnalyticsHoldersResponse, TokenPoolPrice } from '@oneshot/evm';
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
 import { validTokenMarketRecord, validTokenSource } from './client-token-markets';
 import { nativeTokenPriceMatchesSqrt } from './token-price';
+import { encodeFollowedWallets } from './wallet-following';
 
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const uint = (value: unknown): value is string => typeof value === 'string' && value.length <= 256 && /^(0|[1-9]\d*)$/.test(value);
@@ -61,8 +62,8 @@ const validRequest = (request: TokenAnalyticsPageRequest) => address(request.mar
   && Number.isInteger(request.limit ?? 20) && (request.limit ?? 20) >= 1 && (request.limit ?? 20) <= 50
   && (!request.reference || address(request.reference.token) && hash(request.reference.poolId) && Number.isInteger(request.reference.executionFeeBps) && request.reference.executionFeeBps >= 100 && request.reference.executionFeeBps <= 500 && request.reference.executionFeeBps % 10 === 0);
 type Page = TokenAnalyticsTradesResponse | TokenAnalyticsHoldersResponse;
-function validTrade(value: unknown, market: string, context: TokenAnalyticsContext, reference?: Reference): value is TokenAnalyticsTrade {
-  if (!object(value) || !address(value.market) || !same(value.market, market) || !tokenAnalyticsPosition(value.blockNumber, value.blockHash, context) || !bounded(value.timestamp) || BigInt(value.timestamp) > BigInt(context.checkpoint!.timestamp)
+function validTrade(value: unknown, market: string | undefined, context: TokenAnalyticsContext, reference?: Reference): value is TokenAnalyticsTrade {
+  if (!object(value) || !address(value.market) || (market !== undefined && !same(value.market, market)) || !tokenAnalyticsPosition(value.blockNumber, value.blockHash, context) || !bounded(value.timestamp) || BigInt(value.timestamp) > BigInt(context.checkpoint!.timestamp)
     || !hash(value.transactionHash) || !Number.isSafeInteger(value.transactionIndex) || Number(value.transactionIndex) < 0 || !Number.isSafeInteger(value.logIndex) || Number(value.logIndex) < 0 || Number(value.logIndex) > 2147483647
     || value.id !== `${value.transactionHash}:${value.logIndex}`) return false;
   if (value.kind === 'pool-swap') return hash(value.poolId) && (!reference || same(value.poolId, reference.poolId)) && address(value.poolSender) && value.trader === null && value.recipient === null
@@ -161,4 +162,168 @@ export function useTokenAnalyticsMarket(market: string) {
   const [version, setVersion] = useState(0), [state, setState] = useState<{ market: string; data: TokenAnalyticsMarketResponse | null; loading: boolean; error: string | null }>({ market, data: null, loading: true, error: null });
   useEffect(() => { const abort = new AbortController(); let active = true; setState({ market, data: null, loading: true, error: null }); void readTokenAnalyticsMarket(market, abort.signal).then(data => { if (active) setState({ market, data, loading: false, error: null }); }).catch(error => { if (active) setState({ market, data: null, loading: false, error: error instanceof TokenAnalyticsReadError ? error.message : unavailable }); }); return () => { active = false; abort.abort(); }; }, [market, version]);
   return { ...(state.market === market ? state : { market, data: null, loading: true, error: null }), refresh: () => { setState({ market, data: null, loading: true, error: null }); setVersion(value => value + 1); } };
+}
+
+export type TokenTradesFeedRequest = {
+  kind: TokenAnalyticsTradeKind;
+  wallet?: string;
+  wallets?: string[];
+  limit?: number;
+};
+
+function validFeedRequest(request: TokenTradesFeedRequest): boolean {
+  if (!['pool-swap', 'oneshot-trade', 'all'].includes(request.kind)) return false;
+  const limit = request.limit ?? 20;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) return false;
+  if (request.wallet !== undefined && request.wallets !== undefined) return false;
+  if (request.wallet !== undefined && (!address(request.wallet) || request.kind !== 'oneshot-trade')) return false;
+  if (request.wallets !== undefined) {
+    if (request.kind !== 'oneshot-trade' || !Array.isArray(request.wallets) || request.wallets.length === 0 || request.wallets.length > 50) return false;
+    if (!request.wallets.every(item => address(item))) return false;
+  }
+  return true;
+}
+
+export function tokenTradesFeedPath(request: TokenTradesFeedRequest, cursor?: string): string {
+  if (!validFeedRequest(request) || (cursor !== undefined && !validCursor(cursor))) {
+    throw new TokenAnalyticsReadError(400, 'TOKEN_ANALYTICS_INPUT_INVALID', 'Check the trades selection and try again.');
+  }
+  const params = new URLSearchParams({ limit: String(request.limit ?? 20), kind: request.kind });
+  if (request.wallet !== undefined) params.set('wallet', request.wallet.toLowerCase());
+  if (request.wallets !== undefined) params.set('wallets', encodeFollowedWallets(request.wallets));
+  if (cursor) params.set('cursor', cursor);
+  return `/api/oneshot/token-analytics/trades?${params}`;
+}
+
+export function validateTokenTradesFeed(value: unknown, request: TokenTradesFeedRequest): TokenAnalyticsFeedResponse {
+  if (
+    !validFeedRequest(request) ||
+    !object(value) ||
+    !validTokenAnalyticsContext(value.context) ||
+    value.kind !== request.kind ||
+    value.wallet !== (request.wallet ? request.wallet.toLowerCase() : null) ||
+    !Array.isArray(value.items) ||
+    value.items.length > (request.limit ?? 20) ||
+    !validCursor(value.nextCursor) ||
+    (!value.context.available && (value.items.length !== 0 || value.nextCursor !== null)) ||
+    (value.nextCursor !== null && value.items.length === 0)
+  ) {
+    throw invalid();
+  }
+  const seen = new Set<string>();
+  const actors = request.wallet
+    ? [request.wallet.toLowerCase()]
+    : request.wallets
+      ? request.wallets.map(item => item.toLowerCase())
+      : null;
+  for (let index = 0; index < value.items.length; index++) {
+    const item = value.items[index];
+    if (!validTrade(item, undefined, value.context as TokenAnalyticsContext)) throw invalid();
+    if (request.kind !== 'all' && item.kind !== request.kind) throw invalid();
+    if (actors && (item.kind !== 'oneshot-trade' || (!actors.includes(item.trader.toLowerCase()) && !actors.includes(item.recipient.toLowerCase())))) {
+      throw invalid();
+    }
+    if (seen.has(item.id)) throw invalid();
+    seen.add(item.id);
+    if (index > 0 && !afterTrade(item, value.items[index - 1] as TokenAnalyticsTrade)) throw invalid();
+  }
+  return value as TokenAnalyticsFeedResponse;
+}
+
+export function readTokenTradesFeed(request: TokenTradesFeedRequest, signal?: AbortSignal, cursor?: string, fetcher?: typeof fetch) {
+  return read(tokenTradesFeedPath(request, cursor), value => validateTokenTradesFeed(value, request), signal, fetcher);
+}
+
+type FeedState = { key: string | null; data: TokenAnalyticsFeedResponse | null; loading: boolean; loadingMore: boolean; error: string | null; stale: boolean };
+const emptyFeed = (key: string | null): FeedState => ({ key, data: null, loading: Boolean(key), loadingMore: false, error: null, stale: false });
+const feedRequestKey = (request: TokenTradesFeedRequest | null) =>
+  request
+    ? JSON.stringify([
+        request.kind,
+        request.limit ?? 20,
+        request.wallet ? request.wallet.toLowerCase() : null,
+        request.wallets ? [...new Set(request.wallets.map(item => item.toLowerCase()))].sort() : null,
+      ])
+    : null;
+
+/** Feed pages remain bound to one filter selection and one canonical event-journal checkpoint. */
+export class TokenTradesFeedLoader {
+  private state = emptyFeed(null);
+  private request: TokenTradesFeedRequest | null = null;
+  private generation = 0;
+  private abort: AbortController | null = null;
+  private listeners = new Set<() => void>();
+  constructor(private readonly fetcher = readTokenTradesFeed) {}
+  snapshot = () => this.state;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  private publish(value: FeedState) {
+    this.state = value;
+    for (const listener of this.listeners) listener();
+  }
+  cancel() {
+    this.generation++;
+    this.abort?.abort();
+    this.abort = null;
+  }
+  open = async (request: TokenTradesFeedRequest | null) => {
+    this.cancel();
+    this.request = request ? structuredClone(request) : null;
+    const key = feedRequestKey(request), ticket = this.generation;
+    this.publish(emptyFeed(key));
+    if (!request) return;
+    const abort = new AbortController();
+    this.abort = abort;
+    try {
+      const value = await this.fetcher(request, abort.signal);
+      const data = validateTokenTradesFeed(value, request);
+      if (ticket === this.generation) this.publish({ key, data, loading: false, loadingMore: false, error: null, stale: false });
+    } catch (error) {
+      if (ticket === this.generation) {
+        this.publish({ ...emptyFeed(key), loading: false, error: error instanceof TokenAnalyticsReadError ? error.message : unavailable });
+      }
+    }
+  };
+  refresh = () => this.open(this.request);
+  loadMore = async () => {
+    const previous = this.state, request = this.request;
+    if (!request || !previous.data?.nextCursor || previous.loading || previous.loadingMore) return;
+    const ticket = this.generation, cursor = previous.data.nextCursor, abort = new AbortController();
+    this.abort = abort;
+    this.publish({ ...previous, loadingMore: true, error: null });
+    try {
+      const value = await this.fetcher(request, abort.signal, cursor);
+      if (ticket !== this.generation) return;
+      const next = validateTokenTradesFeed(value, request);
+      if (tokenAnalyticsCheckpointKey(previous.data.context) !== tokenAnalyticsCheckpointKey(next.context)) {
+        this.publish({ ...previous, data: null, loadingMore: false, stale: true, error: 'The activity checkpoint changed. Refresh the feed before continuing.' });
+        return;
+      }
+      if (next.nextCursor === cursor) throw invalid();
+      if (previous.data.items.length && next.items.length && !afterTrade(next.items[0], previous.data.items.at(-1)!)) throw invalid();
+      this.publish({ ...previous, data: { ...next, items: [...previous.data.items, ...next.items] }, loadingMore: false });
+    } catch (error) {
+      if (ticket !== this.generation) return;
+      if (error instanceof TokenAnalyticsReadError && error.status === 409) {
+        this.publish({ ...previous, data: null, loadingMore: false, stale: true, error: error.message });
+      } else {
+        this.publish({ ...previous, loadingMore: false, error: error instanceof TokenAnalyticsReadError ? error.message : unavailable });
+      }
+    }
+  };
+}
+
+export function useTokenTradesFeed(request: TokenTradesFeedRequest | null) {
+  const loader = useMemo(() => new TokenTradesFeedLoader(), []);
+  const state = useSyncExternalStore(loader.subscribe, loader.snapshot, loader.snapshot);
+  const key = feedRequestKey(request);
+  useEffect(() => {
+    void loader.open(request);
+    return () => loader.cancel();
+  }, [loader, key]);
+  return { ...(state.key === key ? state : emptyFeed(key)), refresh: loader.refresh, loadMore: loader.loadMore };
 }

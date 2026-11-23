@@ -4,8 +4,10 @@ import { z } from 'zod';
 import { formatEther } from 'viem';
 import { ArrowLeft, ArrowRight, Gem, RefreshCw } from 'lucide-react';
 import { assertReviewedNftCheckpoint, fetchReviewedNftRead, reviewedNftAddress, reviewedNftCollectionHref, reviewedNftDeployment, reviewedNftDiscoveryHref, reviewedNftItemHref, reviewedNftTokenId, type ReviewedNftReadSelection } from '../lib/client-reviewed-nfts';
-import { reviewedCollectionsPageSchema, reviewedCollectionDetailSchema, reviewedItemsPageSchema, reviewedItemDetailSchema, reviewedListingsPageSchema, reviewedActivityPageSchema, type ReviewedCollection, type ReviewedListing, type ReviewedNftContext } from '../lib/reviewed-nft-data';
-import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, InfoRow, Loading, PageHeading, SafetyNote, Tabs } from './ui';
+import { reviewedCollectionsPageSchema, reviewedCollectionDetailSchema, reviewedItemsPageSchema, reviewedItemDetailSchema, reviewedListingsPageSchema, reviewedActivityPageSchema, reviewedClaimsPageSchema, type ReviewedActivity, type ReviewedClaim, type ReviewedCollection, type ReviewedListing, type ReviewedNftContext } from '../lib/reviewed-nft-data';
+import { nativeAssetLabel, nftNetworkLabel } from '../lib/nft-network';
+import { Address, Badge, Button, ButtonLink, EmptyState, ErrorState, Field, InfoRow, Loading, PageHeading, Tabs } from './ui';
+import { ReviewedNftTransactions } from './reviewed-nft-transactions';
 import Link from './navigation';
 import '../app/reviewed-nfts.css';
 
@@ -29,7 +31,7 @@ function useSelection(collection?: string, tokenId?: string) {
 }
 function Context({ context }: { context: ReviewedNftContext | undefined }) {
   if (!context?.available) return null;
-  return <div className="reviewed-context"><p>{context.network!.chainId === 84532 ? 'Base Sepolia testnet' : 'Local testnet'} · Observed through block {context.checkpoint!.number}. Recent records may change.</p><p>These records begin at collection admission. NFTs without a later observed transfer may be missing.</p></div>;
+  return <div className="reviewed-context"><p>{nftNetworkLabel(context.network)} · Observed through block {context.checkpoint!.number}. Recent records may change.</p><p>These records begin at collection admission. NFTs without a later observed transfer may be missing.</p></div>;
 }
 function State({ read, empty, emptyDescription, children }: { read: { loading: boolean; error: string | null; data: { context: ReviewedNftContext } | null; refresh(): void }; empty?: boolean; emptyDescription?: string; children: React.ReactNode }) {
   return read.loading ? <Loading /> : read.error ? <ErrorState message={read.error} retry={read.refresh} /> : !read.data?.context.available ? <EmptyState icon={Gem} title="Collection records are unavailable" description="Check again later, or request a review for a collection you want to see here." action={<><Button variant="secondary" onClick={read.refresh}>Try again</Button><ButtonLink href="/nfts/import" variant="secondary">Request collection review</ButtonLink></>} />
@@ -54,9 +56,17 @@ export function ReviewedNftDiscovery() {
     {read.data?.context.available && <Pager cursor={pages.cursor} next={read.data.nextCursor} back={pages.back} forward={() => pages.next(read.data!.nextCursor)} refresh={refresh} />}
   </>;
 }
-const money = (value: string) => `${formatEther(BigInt(value))} test ETH`;
-function ListingRows({ items, deployment }: { items: ReviewedListing[]; deployment: string }) {
-  return <div className="reviewed-records">{items.map(value => <article key={value.listingId} className="reviewed-listing"><div><Link href={reviewedNftItemHref(value.collection, value.tokenId, deployment)}>NFT #{value.tokenId}</Link><Badge>{value.status === 'active' ? 'Listed' : value.status === 'sold' ? 'Sold' : 'Cancelled'}</Badge></div><InfoRow label="Total asking price">{money(value.totalPriceRaw)}</InfoRow><InfoRow label="Royalty in this listing">{money(value.royaltyRaw)}</InfoRow><InfoRow label="Seller"><Address value={value.seller} /></InfoRow><p>2% platform fee is included in the total. Gas is separate.</p></article>)}</div>;
+const money = (value: string, nativeLabel = 'test ETH') => `${formatEther(BigInt(value))} ${nativeLabel}`;
+function ListingRows({ items, deployment, nativeLabel = 'test ETH' }: { items: ReviewedListing[]; deployment: string; nativeLabel?: string }) {
+  return <div className="reviewed-records">{items.map(value => <article key={value.listingId} className="reviewed-listing"><div><Link href={reviewedNftItemHref(value.collection, value.tokenId, deployment)}>NFT #{value.tokenId}</Link><Badge>{value.status === 'active' ? 'Listed' : value.status === 'sold' ? 'Sold' : 'Cancelled'}</Badge></div><InfoRow label="Total asking price">{money(value.totalPriceRaw, nativeLabel)}</InfoRow><InfoRow label="Royalty in this listing">{money(value.royaltyRaw, nativeLabel)}</InfoRow><InfoRow label="Seller"><Address value={value.seller} /></InfoRow><p>2% platform fee is included in the total. Gas is separate.</p></article>)}</div>;
+}
+const reviewedActivityTitles = { ReviewAdmitted: 'Collection admitted', ReviewRevoked: 'Admission revoked', Transfer: 'NFT transfer', Listed: 'NFT listed', Sold: 'NFT sold', Cancelled: 'Listing cancelled', Claimed: 'Payout claimed' } as const;
+function ReviewedActivityRows({ items, deployment, nativeLabel = 'test ETH', showCollection = false }: { items: ReviewedActivity[]; deployment: string; nativeLabel?: string; showCollection?: boolean }) {
+  return <div className="reviewed-records">{items.map(value => <article key={value.id} className="reviewed-event"><strong>{reviewedActivityTitles[value.eventName]}</strong>
+    {showCollection && value.collection && <Link href={reviewedNftCollectionHref(value.collection, deployment)}><Address value={value.collection} /></Link>}
+    {typeof value.args.tokenId === 'string' && (value.collection ? <Link href={reviewedNftItemHref(value.collection, value.args.tokenId, deployment)}>NFT #{value.args.tokenId}</Link> : <span>NFT #{value.args.tokenId}</span>)}
+    {typeof value.args.totalPrice === 'string' && <span>{money(value.args.totalPrice, nativeLabel)}</span>}{value.eventName === 'Claimed' && <span>{money(String(value.args.amount), nativeLabel)}</span>}
+    {value.eventName === 'Transfer' && <span>From <Address value={String(value.args.from)} /> to <Address value={String(value.args.to)} /></span>}<span>Block {value.blockNumber}</span><time>{new Date(value.timestamp).toLocaleString()}</time><Address value={value.transactionHash} /></article>)}</div>;
 }
 function CollectionRecords({ collection, context, refresh }: { collection: string; context: ReviewedNftContext; refresh(): void }) {
   const [tab, setTab] = useState('items');
@@ -64,16 +74,15 @@ function CollectionRecords({ collection, context, refresh }: { collection: strin
 }
 function CollectionTab({ collection, context, tab, refreshParent }: { collection: string; context: ReviewedNftContext; tab: string; refreshParent(): void }) {
   const deployment = context.deploymentId!;
+  const nativeLabel = nativeAssetLabel(context.network);
   const pages = usePages(), selection: ReviewedNftReadSelection = tab === 'items' ? { kind: 'items', collection } : tab === 'listings' ? { kind: 'listings', collection } : { kind: 'activity', collection };
   const schema = tab === 'items' ? reviewedItemsPageSchema : tab === 'listings' ? reviewedListingsPageSchema : reviewedActivityPageSchema;
   const read = useRead(selection, schema as z.ZodType<z.infer<typeof reviewedItemsPageSchema> | z.infer<typeof reviewedListingsPageSchema> | z.infer<typeof reviewedActivityPageSchema>>, deployment, pages.cursor, context);
   const refresh = () => { pages.reset(); refreshParent(); };
   return <><State read={{ ...read, refresh }} empty={read.data?.items.length === 0}>
     {tab === 'items' ? <div className="reviewed-item-grid">{read.data?.items.map(raw => { const value = reviewedItemsPageSchema.shape.items.element.parse(raw); return <Link className="reviewed-item" key={value.tokenId} href={reviewedNftItemHref(collection, value.tokenId, deployment)}><Gem size={24} /><h3>NFT #{value.tokenId}</h3><Badge>{value.burned ? 'Burned' : value.activeListingId ? 'Listed' : 'Observed transfer'}</Badge><p>{value.burned ? 'No current owner' : 'Observed owner'} {!value.burned && <Address value={value.owner} />}</p></Link>; })}</div>
-      : tab === 'listings' ? <ListingRows items={reviewedListingsPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} />
-        : <div className="reviewed-records">{reviewedActivityPageSchema.shape.items.parse(read.data?.items ?? []).map(value => <article key={value.id} className="reviewed-event"><strong>{({ ReviewAdmitted: 'Collection admitted', ReviewRevoked: 'Admission revoked', Transfer: 'NFT transfer', Listed: 'NFT listed', Sold: 'NFT sold', Cancelled: 'Listing cancelled', Claimed: 'Payout claimed' } as const)[value.eventName]}</strong>
-          {typeof value.args.tokenId === 'string' && <span>NFT #{value.args.tokenId}</span>}{typeof value.args.totalPrice === 'string' && <span>{money(value.args.totalPrice)}</span>}{value.eventName === 'Claimed' && <span>{money(String(value.args.amount))}</span>}
-          {value.eventName === 'Transfer' && <span>From <Address value={String(value.args.from)} /> to <Address value={String(value.args.to)} /></span>}<span>Block {value.blockNumber}</span><time>{new Date(value.timestamp).toLocaleString()}</time><Address value={value.transactionHash} /></article>)}</div>}
+      : tab === 'listings' ? <ListingRows items={reviewedListingsPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} nativeLabel={nativeLabel} />
+        : <ReviewedActivityRows items={reviewedActivityPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} nativeLabel={nativeLabel} />}
   </State>{read.data?.context.available && <Pager cursor={pages.cursor} next={read.data.nextCursor} back={pages.back} forward={() => pages.next(read.data!.nextCursor)} refresh={refresh} />}</>;
 }
 export function ReviewedNftCollection({ collection }: { collection: string }) {
@@ -84,8 +93,129 @@ export function ReviewedNftCollection({ collection }: { collection: string }) {
 }
 export function ReviewedNftItemDetail({ collection, tokenId }: { collection: string; tokenId: string }) {
   const selected = useSelection(collection, tokenId), read = useRead(selected.collection && selected.tokenId !== null ? { kind: 'item', collection: selected.collection, tokenId: selected.tokenId } : null, reviewedItemDetailSchema, selected.deployment), value = read.data?.item, listing = read.data?.listing;
+  const nativeLabel = nativeAssetLabel(read.data?.context.network);
   return <><Link className="back-link" href={selected.collection && selected.deployment ? reviewedNftCollectionHref(selected.collection, selected.deployment) : reviewedNftDiscoveryHref()}><ArrowLeft size={14} />View collection</Link><PageHeading title={`NFT #${selected.tokenId ?? ''}`} description="Ownership and listings observed in this collection’s recorded history." action={<Button variant="secondary" onClick={read.refresh}><RefreshCw size={14} />Refresh</Button>} />{selected.error && <ErrorState message={selected.error} />}<Context context={read.data?.context} /><State read={read}>{value && <>
     <section className="panel reviewed-detail"><InfoRow label="Collection"><Address value={value.collection} /></InfoRow><InfoRow label="Token ID">{value.tokenId}</InfoRow><InfoRow label={value.burned ? 'Ownership' : 'Observed owner'}>{value.burned ? 'Burned' : <Address value={value.owner} />}</InfoRow><InfoRow label="First observed at block">{value.firstObservedBlockNumber}</InfoRow></section>
-    {listing && <ListingRows items={[listing]} deployment={read.data!.context.deploymentId!} />}<SafetyNote>Checkout is currently unavailable for these records. View the collection’s activity or check again later. No wallet approval is needed to browse.</SafetyNote>
+    {listing && <ListingRows items={[listing]} deployment={read.data!.context.deploymentId!} nativeLabel={nativeLabel} />}
+    <ReviewedNftTransactions collection={value.collection} tokenId={value.tokenId} listing={listing ?? null} burned={value.burned} deploymentId={read.data!.context.deploymentId!} onRefresh={read.refresh} />
   </>}</State></>;
+}
+
+function ReviewedWalletTab({ wallet, tab }: { wallet: string; tab: 'items' | 'listings' | 'claims' | 'activity' }) {
+  const pages = usePages();
+  const selection: ReviewedNftReadSelection =
+    tab === 'items' ? { kind: 'wallet-items', wallet }
+      : tab === 'listings' ? { kind: 'seller-listings', seller: wallet, status: 'active' }
+        : tab === 'claims' ? { kind: 'wallet-claims', wallet }
+          : { kind: 'global-activity', wallet };
+  const schema =
+    tab === 'items' ? reviewedItemsPageSchema
+      : tab === 'listings' ? reviewedListingsPageSchema
+        : tab === 'claims' ? reviewedClaimsPageSchema
+          : reviewedActivityPageSchema;
+  const read = useRead(
+    selection,
+    schema as z.ZodType<
+      z.infer<typeof reviewedItemsPageSchema> | z.infer<typeof reviewedListingsPageSchema> | z.infer<typeof reviewedClaimsPageSchema> | z.infer<typeof reviewedActivityPageSchema>
+    >,
+    null,
+    pages.cursor,
+  );
+  const deployment = read.data?.context.deploymentId || '';
+  const nativeLabel = nativeAssetLabel(read.data?.context.network);
+  const refresh = () => { pages.reset(); read.refresh(); };
+  return <>
+    <Context context={read.data?.context} />
+    <State
+      read={{ ...read, refresh }}
+      empty={read.data?.items.length === 0}
+      emptyDescription={
+        tab === 'items'
+          ? 'No admitted external NFTs observed in this wallet.'
+          : tab === 'listings'
+            ? 'No active reviewed NFT listings from this wallet.'
+            : tab === 'claims'
+              ? 'No reviewed marketplace payout balances for this wallet.'
+              : 'No reviewed NFT activity involving this wallet.'
+      }
+    >
+      {tab === 'items' ? (
+        <div className="reviewed-item-grid">
+          {reviewedItemsPageSchema.shape.items.parse(read.data?.items ?? []).map(value => (
+            <Link className="reviewed-item" key={`${value.collection}:${value.tokenId}`} href={reviewedNftItemHref(value.collection, value.tokenId, deployment)}>
+              <Gem size={24} />
+              <h3>NFT #{value.tokenId}</h3>
+              <Badge>{value.activeListingId ? 'Listed' : 'Observed custody'}</Badge>
+              <p><Address value={value.collection} /></p>
+            </Link>
+          ))}
+        </div>
+      ) : tab === 'listings' ? (
+        <ListingRows items={reviewedListingsPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} nativeLabel={nativeLabel} />
+      ) : tab === 'claims' ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr><th>Marketplace</th><th>Available payout</th><th>Total claimed</th><th>Last block</th></tr>
+            </thead>
+            <tbody>
+              {(read.data?.items as ReviewedClaim[] | undefined ?? []).map(claim => (
+                <tr key={`${claim.marketplace}:${claim.account}`}>
+                  <td><Address value={claim.marketplace} /></td>
+                  <td>{money(claim.pendingRaw, nativeLabel)}</td>
+                  <td>{money(claim.claimedRaw, nativeLabel)}</td>
+                  <td>Block {claim.lastBlockNumber}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <ReviewedActivityRows items={reviewedActivityPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} nativeLabel={nativeLabel} showCollection />
+      )}
+    </State>
+    {read.data?.context.available && <Pager cursor={pages.cursor} next={read.data.nextCursor} back={pages.back} forward={() => pages.next(read.data!.nextCursor)} refresh={refresh} />}
+  </>;
+}
+
+export function ReviewedWalletPanel({ wallet, includeClaims = false }: { wallet: string; includeClaims?: boolean }) {
+  let normalized: string;
+  try { normalized = reviewedNftAddress(wallet); } catch { return null; }
+  const [tab, setTab] = useState<'items' | 'listings' | 'claims' | 'activity'>('items');
+  const [version, setVersion] = useState(0);
+  const tabs = includeClaims
+    ? [{ value: 'items', label: 'Observed NFTs' }, { value: 'listings', label: 'Listings' }, { value: 'claims', label: 'Marketplace payouts' }]
+    : [{ value: 'items', label: 'Observed NFTs' }, { value: 'listings', label: 'Listings' }, { value: 'activity', label: 'Activity' }];
+  return (
+    <section className="panel reviewed-record-panel section-gap" aria-label="Reviewed external NFTs">
+      <div className="section-header">
+        <div>
+          <h2>Reviewed external NFTs</h2>
+          <p>ERC-721 collections reviewed and admitted outside oneshot.</p>
+        </div>
+        <div className="heading-actions">
+          <Button variant="secondary" onClick={() => setVersion(value => value + 1)}><RefreshCw size={14} />Refresh</Button>
+          <ButtonLink href="/nfts/reviewed" variant="ghost">Explore reviewed</ButtonLink>
+        </div>
+      </div>
+      <Tabs tabs={tabs} active={tab} onChange={value => setTab(value as typeof tab)} />
+      <ReviewedWalletTab key={`${normalized}:${tab}:${version}`} wallet={normalized} tab={tab} />
+    </section>
+  );
+}
+
+export function ReviewedGlobalActivityPanel({ wallet }: { wallet?: string }) {
+  const normalized = wallet ? (() => { try { return reviewedNftAddress(wallet); } catch { return undefined; } })() : undefined;
+  const pages = usePages();
+  const read = useRead({ kind: 'global-activity', ...(normalized ? { wallet: normalized } : {}) }, reviewedActivityPageSchema, null, pages.cursor);
+  const deployment = read.data?.context.deploymentId || '';
+  const nativeLabel = nativeAssetLabel(read.data?.context.network);
+  const refresh = () => { pages.reset(); read.refresh(); };
+  return <>
+    <Context context={read.data?.context} />
+    <State read={{ ...read, refresh }} empty={read.data?.items.length === 0} emptyDescription="Recorded external collection admissions, listings and sales will appear here.">
+      <ReviewedActivityRows items={reviewedActivityPageSchema.shape.items.parse(read.data?.items ?? [])} deployment={deployment} nativeLabel={nativeLabel} showCollection />
+    </State>
+    {read.data?.context.available && <Pager cursor={pages.cursor} next={read.data.nextCursor} back={pages.back} forward={() => pages.next(read.data!.nextCursor)} refresh={refresh} />}
+  </>;
 }

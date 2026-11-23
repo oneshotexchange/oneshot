@@ -1,8 +1,8 @@
-import type { IndexedTokenContext } from '@oneshot/evm';
+import type { IndexedTokenContext, TokenAnalyticsContext } from '@oneshot/evm';
 import { nftNetworkLabel, readNftNetwork } from '../lib/nft-network';
 import { Button, EmptyState } from './ui';
 
-export function TokenMarketContext({ context }: { context: IndexedTokenContext }) {
+export function TokenMarketContext({ context }: { context: IndexedTokenContext | TokenAnalyticsContext }) {
   if (!context.available) return null;
   return <p className="data-notice token-market-context">{nftNetworkLabel(readNftNetwork(context.network))}. Contract terms at block {context.checkpoint!.number}; recent blocks may change. Opening valuation is a launch term. Review each market for prices, activity and transaction availability.</p>;
 }

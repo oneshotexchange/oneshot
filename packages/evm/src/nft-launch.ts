@@ -129,7 +129,7 @@ const encoder = new TextEncoder();
 export type NftLaunchDraft = {
   status: string;
   /** Undefined means a legacy Zero-priced draft, never implicit test ETH. */
-  pricingNetwork?: 'zero' | 'base-sepolia';
+  pricingNetwork?: 'zero' | 'zero-testnet' | 'zero-mainnet' | 'base-sepolia';
   name: string;
   symbol?: string;
   maxSupply: number;
@@ -244,6 +244,15 @@ function allowlistTree(values: readonly string[], context: NftTermsContext): Pre
     proofs[wallet] = proof;
   });
   return { root: levels.at(-1)![0]!, addresses, proofs };
+}
+
+/** Builds the commutative sorted Merkle tree matching OneshotCollection.allowlistLeaf(wallet). */
+export function buildNftAllowlistTree(
+  values: readonly string[],
+  chainId: number,
+  collection: Address,
+): PreparedNftTerms['allowlist'] {
+  return allowlistTree(values, { chainId, nativeDecimals: 18, collection, nowSeconds: 0n });
 }
 
 /** Pure draft-to-contract conversion. Snapshot bytes/availability are verified by the API before

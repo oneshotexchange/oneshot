@@ -40,7 +40,7 @@ const whole = (max: number) => text(4).refine(value => value === '' || /^\d+$/.t
 // Incomplete dates and empty terms can be backed up while editing. The creator's
 // normal save/review validation still checks schedules, addresses and fee terms.
 export const portableCollectionDraftSchema = z.object({
-  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
+  pricingNetwork: z.enum(['zero', 'zero-testnet', 'zero-mainnet', 'base-sepolia']).optional(),
   name: text(100), symbol: text(20).default(''), description: text(2048),
   supply: whole(1000), royalty: text(5).refine(value => value === '' || /^\d+(?:\.\d*)?$/.test(value) && Number(value) <= 10),
   price: decimal, limit: whole(1000), metadataMode: z.enum(['upload', 'url']),

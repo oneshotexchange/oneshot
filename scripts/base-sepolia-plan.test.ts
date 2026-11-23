@@ -13,7 +13,7 @@ function artifacts(): Record<PlanContract, DeploymentArtifact> {
     OneshotGuardedMarketplaceV3: artifact(['constructor(address factory,address authority,bytes32 salt)']),
     OneshotV4OracleDeployer: artifact(['function deploy(address manager,bytes32 salt) returns (address)']),
     OneshotV4Oracle: artifact(['constructor(address manager)']),
-    OneshotV4MarketFactory: artifact(['constructor(address manager,address oracle,address platform)']),
+    OneshotV4MarketFactory: artifact(['constructor(address manager,address oracle,address platform,uint256 minProcessingNative)']),
     OneshotV4Market: artifact([]), OneshotV4Quoter: artifact(['constructor(address factory)']),
   };
 }

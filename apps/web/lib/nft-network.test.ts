@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { nftNetworkForChainId } from '@oneshot/evm';
-import { nftExplorerHref, nftNetworkLabel, nftTestAcknowledgement, readNftNetwork, validNftTestAcknowledgement } from './nft-network';
+import { nftExplorerHref, nftNetworkLabel, nftTestAcknowledgement, readNftNetwork, validNftTestAcknowledgement, nativeAssetLabel, draftCanLaunchOnNetwork, draftPriceUnit, draftPricingNetworkLabel } from './nft-network';
 import { createNftLaunchController, sendReviewedEvmTransaction, validateNftLaunchStatus, type EvmWalletTransaction, type NftLaunchContext, type NftLaunchReview, type NftLaunchRequest } from './client-nft-launch';
 import { createNftPendingStore } from './client-nft-recovery';
 import { nftCheckoutAccess } from './client-nft-checkout-access';
@@ -86,5 +86,28 @@ describe('Base Sepolia transaction authority', () => {
     const details = { network, deploymentId: status.deploymentId, collection: to, opened: true };
     expect(nftCheckoutAccess({ details: details as never, collection: to, indexedDeploymentId: status.deploymentId, loading: false, error: null, authenticated: true, connected: true, identityScope: 'owner', chainId: 84532 }).ready).toBe(true);
     expect(nftCheckoutAccess({ details: details as never, collection: to, indexedDeploymentId: status.deploymentId, loading: false, error: null, authenticated: true, connected: true, identityScope: 'owner', chainId: 8453 }).ready).toBe(false);
+  });
+
+  it('unlocks ZRO drafts for Zero profiles and derives network-appropriate currency labels', () => {
+    const zeroTestnet = { mode: 'zero-testnet' as const, chainId: 33001, name: 'Zero Testnet', nativeSymbol: 'ZRO' as const, nativeDecimals: 18, isTestnet: true };
+    const zeroMainnet = { mode: 'zero-mainnet' as const, chainId: 33000, name: 'Zero Mainnet', nativeSymbol: 'ZRO' as const, nativeDecimals: 18, isTestnet: false };
+
+    expect(nativeAssetLabel(network)).toBe('test ETH');
+    expect(nativeAssetLabel(zeroTestnet)).toBe('test ZRO');
+    expect(nativeAssetLabel(zeroMainnet)).toBe('ZRO');
+    expect(draftPriceUnit({ pricingNetwork: 'zero-testnet' })).toBe('test ZRO');
+    expect(draftPriceUnit({ pricingNetwork: 'zero-mainnet' })).toBe('ZRO');
+    expect(draftPricingNetworkLabel({ pricingNetwork: 'base-sepolia' })).toBe('Base Sepolia testnet (84532)');
+    expect(draftPricingNetworkLabel({ pricingNetwork: 'zero-testnet' })).toBe('Zero Testnet (planned)');
+    expect(draftPricingNetworkLabel({ pricingNetwork: 'zero-mainnet' })).toBe('Zero Mainnet (planned)');
+    expect(draftPricingNetworkLabel({ pricingNetwork: 'zero' })).toBe('Zero (planned)');
+
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero' }, network)).toBe(false);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero' }, zeroTestnet)).toBe(true);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero-testnet' }, zeroTestnet)).toBe(true);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero-testnet' }, zeroMainnet)).toBe(false);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero' }, zeroMainnet)).toBe(true);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'zero-mainnet' }, zeroMainnet)).toBe(true);
+    expect(draftCanLaunchOnNetwork({ pricingNetwork: 'base-sepolia' }, zeroMainnet)).toBe(false);
   });
 });

@@ -8,6 +8,8 @@ import { encodeFollowedWallets, type WalletFollowing } from '../lib/wallet-follo
 import { useWallet } from '../lib/client-wallet';
 import { walletProfileHref } from '../lib/wallet-profile';
 import { ActivityRows, IndexedContextNote } from './indexed-nfts';
+import { TokenTradesFeedPanel } from './token-analytics';
+import { ReviewedGlobalActivityPanel } from './reviewed-nfts';
 import { Address, Button, ButtonLink, EmptyState, ErrorState, Loading, PageHeading, SafetyNote, Tabs } from './ui';
 import { WalletButton } from './wallet-button';
 import Link from './navigation';
@@ -80,10 +82,10 @@ function FollowedActivity() {
   if (following.loading) return <Loading rows={3} />;
   if (following.error || !following.data) return <ErrorState message={following.error || 'Your following list could not be loaded. Please try again.'} retry={following.refresh} />;
   return <><div className="wallet-profile-asset-heading"><span>Your following list is private</span><Button variant="ghost" disabled={following.busy} onClick={following.refresh}><RefreshCw size={13} />Reload following</Button></div><details className="wallet-following-list"><summary>Following {following.data.wallets.length} of 50 wallets · private to your account</summary><ul>{following.data.wallets.map(address => <li key={address}><Link className="text-link" href={walletProfileHref(address)}><Address value={address} /></Link><Button variant="ghost" disabled={following.busy} onClick={() => { void following.change(address, false); }}>Unfollow</Button></li>)}</ul></details>
-    {following.data.wallets.length ? <FollowingEvents key={JSON.stringify(following.data.wallets)} following={following.data} /> : <EmptyState title="You’re not following any wallets yet" description="Open a creator or collector profile and choose Follow wallet. Your following list is private." action={<ButtonLink href="/nfts" variant="secondary">Explore NFT collections</ButtonLink>} />}
+    {following.data.wallets.length ? <><FollowingEvents key={JSON.stringify(following.data.wallets)} following={following.data} /><TokenTradesFeedPanel key={`tokens:${JSON.stringify(following.data.wallets)}`} wallets={following.data.wallets} title="Followed token trades" description="Confirmed oneshot token buys and sells involving wallets you follow." /></> : <EmptyState title="You’re not following any wallets yet" description="Open a creator or collector profile and choose Follow wallet. Your following list is private." action={<ButtonLink href="/nfts" variant="secondary">Explore NFT collections</ButtonLink>} />}
   </>;
 }
 export function WalletActivityPage() {
   const [tab, setTab] = useState('all'), all = useIndexedPage<IndexedActivity>(tab === 'all' ? '/api/oneshot/indexed/activity' : null, eventKey);
-  return <><PageHeading title="NFT activity" description="Explore NFT events across oneshot or from wallets you follow." /><section className="panel wallet-profile-assets"><Tabs tabs={[{ value: 'all', label: 'All activity' }, { value: 'following', label: 'Following' }]} active={tab} onChange={setTab} />{tab === 'all' ? <ActivityFeedResults page={all} /> : <FollowedActivity />}</section><SafetyNote>This feed shows public NFT events. Transfers and approvals do not prove a trade, and recent confirmations can change. Following a wallet does not copy its trades, send funds or notify its owner.</SafetyNote></>;
+  return <><PageHeading title="Market activity" description="Explore NFT events, reviewed collections and token trades across oneshot or from wallets you follow." /><section className="panel wallet-profile-assets"><Tabs tabs={[{ value: 'all', label: 'NFT activity' }, { value: 'following', label: 'Following' }, { value: 'tokens', label: 'Token trades' }, { value: 'reviewed', label: 'Reviewed NFTs' }]} active={tab} onChange={setTab} />{tab === 'all' ? <ActivityFeedResults page={all} /> : tab === 'following' ? <FollowedActivity /> : tab === 'tokens' ? <TokenTradesFeedPanel title="Token trades" description="Confirmed oneshot token buys and sells across registered markets." /> : <ReviewedGlobalActivityPanel />}</section><SafetyNote>This feed shows public NFT and token events. Transfers and approvals do not prove a trade, and recent confirmations can change. Following a wallet does not copy its trades, send funds or notify its owner.</SafetyNote></>;
 }

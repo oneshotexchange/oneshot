@@ -10,12 +10,24 @@ export default defineConfig(({ mode }) => {
     esbuild: { jsx: 'automatic' },
     build: {
       outDir: 'dist', sourcemap: false, reportCompressedSize: false,
-      rollupOptions: { onLog(level, log, handler) {
-        // This entire artifact runs in the browser; server/client boundaries
-        // from dependency packages do not apply to a static SPA.
-        if (log.code === 'MODULE_LEVEL_DIRECTIVE' && log.message.includes('use client')) return;
-        handler(level, log);
-      } },
+      rolldownOptions: {
+        onLog(level, log, handler) {
+          // This entire artifact runs in the browser; server/client boundaries
+          // from dependency packages do not apply to a static SPA.
+          if (log.code === 'MODULE_LEVEL_DIRECTIVE' && log.message.includes('use client')) return;
+          handler(level, log);
+        },
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'charts', test: /node_modules[\\/]lightweight-charts/, priority: 30 },
+              { name: 'evm-crypto', test: /node_modules[\\/](?:viem|abitype|@noble|ox)/, priority: 25 },
+              { name: 'ui-vendor', test: /node_modules[\\/](?:lucide-react|gsap|@gsap)/, priority: 20 },
+              { name: 'router-zod', test: /node_modules[\\/](?:react-router|zod)/, priority: 15 },
+            ],
+          },
+        },
+      },
     },
     server: { proxy: { '/api': { target: 'http://127.0.0.1:3001', changeOrigin: false }, '/g/': { target: 'http://127.0.0.1:3001', changeOrigin: false, rewrite: path => path.replace(/^\/g\//, '/api/oneshot/genesis/share/') } } },
   };

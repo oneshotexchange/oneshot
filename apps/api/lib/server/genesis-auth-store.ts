@@ -3,7 +3,7 @@ import { database, withLocalNamespace } from './store';
 import { ApiError } from './errors';
 import type { GenesisProfile } from '../../../web/lib/genesis-schema';
 
-export type GenesisOAuthState = { verifier: string; browserHash: string; expiresAt: number; referral?: string };
+export type GenesisOAuthState = { verifier: string; browserHash: string; expiresAt: number; referral?: string; returnTo?: '/airdrop' | '/whitelist' };
 export type GenesisXSession = { xId: string; expiresAt: number };
 type Stored = { states: Record<string, GenesisOAuthState>; identities: Record<string, GenesisProfile>; sessions: Record<string, GenesisXSession> };
 export interface GenesisAuthTransaction {

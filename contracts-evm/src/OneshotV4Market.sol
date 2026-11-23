@@ -18,8 +18,9 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 import {OneshotMarketToken} from "./OneshotMarketToken.sol";
 import {OneshotV4Oracle} from "./OneshotV4Oracle.sol";
 import {OneshotV4Math} from "./OneshotV4Math.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
-/// @notice One testnet token, one immutable v4 principal position, and explicit oneshot executions.
+/// @notice One market, one immutable v4 principal position, and explicit oneshot executions.
 /// No owner/proxy/arbitrary call/approval/removal/range-change path exists. The AMM
 /// position is owned directly by this contract, not by a transferable position NFT.
 contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
@@ -27,7 +28,7 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
     using StateLibrary for IPoolManager;
     uint24 public constant LP_FEE = 2500;
     int24 public constant TICK_SPACING = 10;
-    uint256 public constant MIN_PROCESSING_NATIVE = 0.01 ether;
+    uint256 public constant DEFAULT_MIN_PROCESSING_NATIVE = 0.01 ether;
     uint256 public constant MAX_MAINTENANCE_LIFETIME = 60;
     int24 public constant MAX_ORACLE_TICK_DEVIATION = 50;
     uint32 public constant ORACLE_WINDOW = 300;
@@ -43,6 +44,7 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
     uint16 public immutable executionFeeBps;
     bool public immutable liquidityAndBurn;
     uint256 public immutable openingValuationNative;
+    uint256 public immutable minProcessingNative;
     int24 public immutable tickLower;
     int24 public immutable tickUpper;
     uint160 public immutable sqrtLowerX96;
@@ -63,7 +65,7 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
     enum Operation { Liquidity, Swap }
     struct Call { Operation operation; uint128 liquidity; bool nativeToToken; uint256 amount; uint256 minimum; uint160 limit; }
     struct Modification { uint256 nativePrincipal; uint256 tokenPrincipal; uint256 nativeFee; uint256 tokenFee; }
-    struct Terms { address creator; address platform; uint16 feeBps; bool liquidityAndBurn; uint256 openingValuation; }
+    struct Terms { address creator; address platform; uint16 feeBps; bool liquidityAndBurn; uint256 openingValuation; uint256 minProcessingNative; }
     error UnsupportedTestChain(uint256 chainId);
     error InvalidProtocol();
     error InvalidTerms();
@@ -93,13 +95,14 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
     event MaintenanceProcessed(uint256 tokenFeesConverted, uint256 nativeFromConversion, uint128 liquidityAdded, uint256 tokensBurned);
 
     constructor(IPoolManager manager, OneshotV4Oracle oracle_, string memory name, string memory symbol, Terms memory terms) {
-        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid)) revert UnsupportedTestChain(block.chainid);
         if (address(manager).code.length == 0 || address(oracle_).code.length == 0 || address(oracle_.poolManager()) != address(manager)
-            || (block.chainid == 84532 && address(manager) != BASE_SEPOLIA_POOL_MANAGER)) revert InvalidProtocol();
-        if (terms.creator == address(0) || terms.platform == address(0) || terms.feeBps < 100 || terms.feeBps > 500 || terms.feeBps % 10 != 0) revert InvalidTerms();
+            || (block.chainid == OneshotChainPolicy.BASE_SEPOLIA_CHAIN_ID && address(manager) != BASE_SEPOLIA_POOL_MANAGER)) revert InvalidProtocol();
+        if (terms.creator == address(0) || terms.platform == address(0) || terms.feeBps < 100 || terms.feeBps > 500 || terms.feeBps % 10 != 0
+            || terms.minProcessingNative == 0 || terms.minProcessingNative > 1_000_000 ether) revert InvalidTerms();
         poolManager = manager; oracle = oracle_; factory = msg.sender; creator = terms.creator; platformRecipient = terms.platform;
         deploymentChainId = block.chainid; executionFeeBps = terms.feeBps; liquidityAndBurn = terms.liquidityAndBurn;
-        openingValuationNative = terms.openingValuation;
+        openingValuationNative = terms.openingValuation; minProcessingNative = terms.minProcessingNative;
         (int24 lower, int24 upper) = OneshotV4Math.ticks(terms.openingValuation);
         tickLower = lower; tickUpper = upper;
         sqrtLowerX96 = TickMath.getSqrtPriceAtTick(lower); sqrtUpperX96 = TickMath.getSqrtPriceAtTick(upper);
@@ -131,6 +134,7 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
         emit MarketInitialized(liquidity, lockedRoundingDust);
     }
 
+    function MIN_PROCESSING_NATIVE() external view returns (uint256) { return minProcessingNative; }
     function isMarketLaunch() external view returns (bool) { return initialized && lockedLiquidity != 0; }
     function effectiveOpeningValuationNative() external view returns (uint256) { return OneshotV4Math.quote(sqrtUpperX96, token.INITIAL_SUPPLY(), false); }
     function effectiveUpperValuationNative() external view returns (uint256) { return OneshotV4Math.quote(sqrtLowerX96, token.INITIAL_SUPPLY(), false); }
@@ -181,7 +185,7 @@ contract OneshotV4Market is IUnlockCallback, ReentrancyGuard {
         _collect();
         uint256 totalBudget = pendingLpNative + pendingLiquidityNative + pendingBurnNative
             + OneshotV4Math.quote(referencePrice, pendingLpToken + pendingLiquidityToken, false);
-        if (totalBudget < MIN_PROCESSING_NATIVE) revert BudgetTooSmall();
+        if (totalBudget < minProcessingNative) revert BudgetTooSmall();
         uint256 converted = Math.min(pendingLpToken, maximumTokenBudget);
         uint256 nativeConverted;
         if (converted != 0) {
@@ -360,6 +364,7 @@ contract OneshotV4MarketFactory {
     IPoolManager public immutable poolManager;
     OneshotV4Oracle public immutable oracle;
     address public immutable platformRecipient;
+    uint256 public immutable minProcessingNative;
     address public immutable creationCodeFirst;
     address public immutable creationCodeSecond;
     uint256 public immutable creationCodeLength;
@@ -372,12 +377,13 @@ contract OneshotV4MarketFactory {
     error DeploymentFailed();
     event MarketCreated(address indexed market, address indexed token, address indexed creator, bytes32 poolId);
 
-    constructor(IPoolManager manager, OneshotV4Oracle oracle_, address platform) {
-        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+    constructor(IPoolManager manager, OneshotV4Oracle oracle_, address platform, uint256 minProcessingNative_) {
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid)) revert UnsupportedTestChain(block.chainid);
         if (platform == address(0) || address(manager).code.length == 0 || address(oracle_).code.length == 0
             || address(oracle_.poolManager()) != address(manager)
-            || (block.chainid == 84532 && address(manager) != 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408)) revert InvalidProtocol();
-        poolManager = manager; oracle = oracle_; platformRecipient = platform;
+            || minProcessingNative_ == 0 || minProcessingNative_ > 1_000_000 ether
+            || (block.chainid == OneshotChainPolicy.BASE_SEPOLIA_CHAIN_ID && address(manager) != OneshotChainPolicy.BASE_SEPOLIA_POOL_MANAGER)) revert InvalidProtocol();
+        poolManager = manager; oracle = oracle_; platformRecipient = platform; minProcessingNative = minProcessingNative_;
         bytes memory code = type(OneshotV4Market).creationCode;
         uint256 split = code.length / 2;
         bytes memory first = new bytes(split);
@@ -390,7 +396,7 @@ contract OneshotV4MarketFactory {
     }
 
     function createMarket(string calldata name, string calldata symbol, uint16 feeBps, bool liquidityAndBurn, uint256 openingValuationNative) external returns (OneshotV4Market market) {
-        market = _deploy(abi.encode(poolManager, oracle, name, symbol, OneshotV4Market.Terms(msg.sender, platformRecipient, feeBps, liquidityAndBurn, openingValuationNative)));
+        market = _deploy(abi.encode(poolManager, oracle, name, symbol, OneshotV4Market.Terms(msg.sender, platformRecipient, feeBps, liquidityAndBurn, openingValuationNative, minProcessingNative)));
         market.initialize();
         address token = address(market.token());
         isMarket[address(market)] = true; marketForToken[token] = address(market); markets.push(address(market));

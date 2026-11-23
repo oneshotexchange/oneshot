@@ -71,6 +71,20 @@ services:
     cpus: 1
     logging: *logging
 
+  airdrop-ops:
+    profiles: [operations]
+    image: oneshot-migrate:${IMAGE_TAG:-local}
+    environment: *database-client
+    secrets: [postgres_password]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [database, edge]
+    restart: 'no'
+    mem_limit: 1g
+    cpus: 1
+    logging: *logging
+
   api:
     image: oneshot-api:${IMAGE_TAG:-local}
     build:

@@ -1,5 +1,11 @@
 import type { NetworkConfig } from './config';
-import { BASE_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_CONFIG_SOURCE_URL, nftExecutionNetwork } from './execution-network';
+import {
+  BASE_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_CONFIG_SOURCE_URL,
+  BASE_SEPOLIA_GENESIS_HASH,
+  isValidZeroChainId,
+  nftExecutionNetwork,
+} from './execution-network';
 
 export type RpcProviderLabel = 'alchemy' | 'official' | 'custom';
 export type RpcReadMethod = 'eth_blockNumber' | 'eth_getBlockByNumber' | 'eth_getBalance' | 'eth_getCode'
@@ -126,10 +132,11 @@ function connectionFor(config: NetworkConfig, options: RpcOptions): Connection {
     if (config.chainId !== BASE_SEPOLIA_CHAIN_ID || config.nativeSymbol !== 'ETH' || config.nativeDecimals !== 18
       || url.protocol !== 'https:' || config.genesisHash?.toLowerCase() !== BASE_SEPOLIA_GENESIS_HASH
       || config.sourceUrl !== BASE_SEPOLIA_CONFIG_SOURCE_URL) throw new RpcError('CONFIG_INVALID');
-  } else if (config.mode === 'zero') {
-    if ([31337,8453,BASE_SEPOLIA_CHAIN_ID].includes(config.chainId) || config.nativeSymbol !== 'ZRO' || config.nativeDecimals === null
+  } else if (config.mode === 'zero' || config.mode === 'zero-testnet' || config.mode === 'zero-mainnet') {
+    if (!isValidZeroChainId(config.chainId) || config.nativeSymbol !== 'ZRO' || config.nativeDecimals === null
       || !Number.isInteger(config.nativeDecimals) || config.nativeDecimals < 0 || config.nativeDecimals > 38
-      || url.protocol !== 'https:' || !hexHash(config.genesisHash) || !config.sourceUrl) throw new RpcError('CONFIG_INCOMPLETE');
+      || url.protocol !== 'https:' || !hexHash(config.genesisHash) || !config.sourceUrl
+      || (config.mode === 'zero-mainnet' && !config.mainnetOptIn)) throw new RpcError('CONFIG_INCOMPLETE');
     try {
       const source = new URL(config.sourceUrl);
       if (source.protocol !== 'https:' || source.username || source.password || source.hash) throw new Error();

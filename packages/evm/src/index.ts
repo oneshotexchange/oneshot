@@ -5,6 +5,8 @@ export * from './rpc';
 export * from './rpc-capabilities';
 export * from './indexed-nfts';
 export * from './nft-launch';
+export * from './edition-1155';
+export * from './airdrop';
 export * from './nft-launch-progress';
 export * from './nft-earnings';
 export * from './protected-floor';

@@ -4,8 +4,14 @@ import type { GenesisMe, GenesisPublicCampaign } from './genesis-schema';
 
 const profile = z.object({ id: z.string().regex(/^\d{1,32}$/), username: z.string(), name: z.string(), avatarUrl: z.string().nullable() });
 const check = z.object({ state: z.enum(['pending','verified','needs_action','temporarily_unavailable']), message: z.string(), checkedAt: z.string().nullable(), postId: z.string().optional(), metrics: z.object({ likes: z.number().nullable(), reposts: z.number().nullable(), replies: z.number().nullable(), views: z.number().nullable() }).optional() });
-const application = z.object({ id: z.string().uuid(), profile, code: z.string().regex(/^[A-Za-z0-9_-]{16}$/), createdAt: z.string(), submittedAt: z.string().nullable(), revision: z.number().int().positive(), ruleVersion: z.number().int().positive(), status: z.enum(['draft','awaiting_verification','under_review']), checks: z.object({ follow: check.optional(), post: check.optional(), share: check.optional() }), publishedDecision: z.enum(['selected','reserve','not_selected']).nullable(), shareConsent: z.boolean(), nominationQuota:z.number().int().nonnegative().optional(), nominations:z.array(z.object({ id:z.string().uuid(),xId:z.string(),username:z.string(),accepted:z.boolean(),createdAt:z.string() })).optional() });
+const application = z.object({ id: z.string().uuid(), profile, code: z.string().regex(/^[A-Za-z0-9_-]{16}$/), createdAt: z.string(), submittedAt: z.string().nullable(), revision: z.number().int().positive(), ruleVersion: z.number().int().positive(), status: z.enum(['draft','awaiting_verification','under_review']), checks: z.object({ follow: check.optional(), post: check.optional(), share: check.optional() }), publishedDecision: z.enum(['selected','reserve','not_selected']).nullable(), shareConsent: z.boolean(), nominationQuota:z.number().int().nonnegative().optional(), nominations:z.array(z.object({ id:z.string().uuid(),xId:z.string(),username:z.string(),accepted:z.boolean(),createdAt:z.string() })).optional(), mintWallet:z.string().regex(/^0x[\da-f]{40}$/).nullable().optional(), mintWalletBoundAt:z.string().nullable().optional() });
 export const genesisMeResponse = z.object({ profile: profile.nullable(), application: application.nullable(), qualifiedReferrals: z.number().int().nonnegative(), referralUrl: z.string().url().nullable(), shareUrl: z.string().url().nullable(), nomination:z.object({id:z.string().uuid(),from:z.string(),accepted:z.boolean()}).nullable().optional(),nominationsOpen:z.boolean().optional() });
+export const genesisWalletChallengeResponse = z.object({
+  wallet: z.string().regex(/^0x[\da-f]{40}$/),
+  nonce: z.string().regex(/^[a-f0-9]{32}$/),
+  expectedRevision: z.number().int().positive(),
+  message: z.string().min(1).max(2000),
+}).strict();
 export const genesisCampaignResponse = z.object({ state: z.enum(['upcoming','open','closed']), capacity: z.literal(750), opensAt: z.string().nullable(), closesAt: z.string().nullable(), projectHandle: z.string().nullable(), version: z.number().int().positive() });
 export async function genesisRequest<T>(path: string, options: { body?: unknown; token?: string | null; sessionId?: string | null; signal?: AbortSignal; schema: z.ZodType<T> }): Promise<T> {
   const response = await customerFetch('/api/oneshot/genesis/' + path, {
@@ -25,6 +31,14 @@ export async function genesisAccountRequest(path: string, options: { body?: unkn
   const token = await options.getToken();
   if (scope !== options.scope()) throw new Error('Your account changed. Please try again.');
   const result = await genesisRequest(path, { schema: genesisMeResponse, token, sessionId: options.sessionId, body: options.body, signal: options.signal });
+  if (scope !== options.scope()) throw new Error('Your account changed. Please try again.');
+  return result;
+}
+export async function requestGenesisWalletChallenge(options: { wallet: string; getToken(): Promise<string | null>; sessionId?: string | null; scope(): string | null; signal?: AbortSignal }) {
+  const scope = options.scope(); if (!scope) throw new Error('Sign in to view your application.');
+  const token = await options.getToken();
+  if (scope !== options.scope()) throw new Error('Your account changed. Please try again.');
+  const result = await genesisRequest('wallet-challenge', { schema: genesisWalletChallengeResponse, token, sessionId: options.sessionId, body: { wallet: options.wallet }, signal: options.signal });
   if (scope !== options.scope()) throw new Error('Your account changed. Please try again.');
   return result;
 }

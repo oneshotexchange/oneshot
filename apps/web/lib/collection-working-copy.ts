@@ -10,7 +10,7 @@ const text = (maximum: number) => z.string().max(maximum);
 
 /** Editing permits incomplete and temporarily invalid values; launch validation remains separate. */
 export const collectionWorkingTermsSchema = z.object({
-  pricingNetwork: z.enum(['zero', 'base-sepolia']).optional(),
+  pricingNetwork: z.enum(['zero', 'zero-testnet', 'zero-mainnet', 'base-sepolia']).optional(),
   name: text(100), symbol: text(20), description: text(2048),
   supply: text(118), royalty: text(118), price: text(118), limit: text(118),
   metadataMode: z.enum(['upload', 'url']), metadataUrl: text(2048), fileNames: z.array(text(255)).max(1000),

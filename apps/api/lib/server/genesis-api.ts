@@ -3,7 +3,7 @@ import { type NextRequest } from 'next/server';
 import { json, boundedBody, rateLimit, ApiError } from './http';
 import { genesisAuth } from './genesis-auth';
 import { genesis } from './genesis-service';
-import { genesisEnrollSchema, genesisRevisionSchema, genesisVerifySchema } from '../../../web/lib/genesis-schema';
+import { genesisEnrollSchema, genesisRevisionSchema, genesisVerifySchema, genesisWalletBindSchema, genesisWalletChallengeSchema } from '../../../web/lib/genesis-schema';
 import { genesisShareResponse } from './genesis-share';
 
 export async function genesisApi(request: NextRequest): Promise<Response> {
@@ -33,6 +33,8 @@ export async function genesisApi(request: NextRequest): Promise<Response> {
     if (operation === 'share') { const input = genesisRevisionSchema.extend({ enabled: z.boolean() }).strict().parse(body); return json(await genesis.share(session, input.enabled, input.expectedRevision)); }
     if (operation === 'nominations') { const input = z.object({ username: z.string().regex(/^[A-Za-z0-9_]{1,15}$/) }).strict().parse(body); return json(await genesis.nominate(session, input.username)); }
     if (operation === 'nominations/accept') { const input = z.object({ id: z.string().uuid() }).strict().parse(body); return json(await genesis.acceptNomination(session, input.id)); }
+    if (operation === 'wallet-challenge') { const input = genesisWalletChallengeSchema.parse(body); return json(await genesis.walletChallenge(session, input.wallet)); }
+    if (operation === 'wallet') { const input = genesisWalletBindSchema.parse(body); return json(await genesis.bindWallet(session, input)); }
   }
   throw new ApiError(404, 'NOT_FOUND', 'This application action is unavailable.');
 }

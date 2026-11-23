@@ -9,6 +9,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {OneshotNFTFactory} from "./OneshotNFTFactory.sol";
 import {OneshotCollection} from "./OneshotCollection.sol";
+import {OneshotChainPolicy} from "./OneshotChainPolicy.sol";
 
 /// @notice Testnet escrow marketplace requiring a server-authorized price for every new listing.
 /// @dev Authorization controls admission only. Settlement, seller exits and claims never depend on it.
@@ -95,7 +96,7 @@ contract OneshotGuardedMarketplace is IERC721Receiver, ReentrancyGuard, EIP712 {
     constructor(OneshotNFTFactory factory_, address listingAuthority_, bytes32 deploymentSalt_)
         EIP712("OneshotGuardedMarketplace", "1")
     {
-        if (block.chainid != 31337 && block.chainid != 84532) revert UnsupportedTestChain(block.chainid);
+        if (!OneshotChainPolicy.isSupportedChain(block.chainid)) revert UnsupportedTestChain(block.chainid);
         deploymentChainId = block.chainid;
         if (listingAuthority_ == address(0)) revert InvalidListingAuthority();
         if (deploymentSalt_ == bytes32(0)) revert InvalidDeploymentSalt();

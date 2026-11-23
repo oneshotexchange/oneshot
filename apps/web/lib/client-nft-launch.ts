@@ -36,6 +36,7 @@ export type PublicNftCollection = {
 export type NftLaunchReceipt = { status: 'pending' | 'confirmed' | 'reverted'; collection?: string; hash?: string; blockNumber?: string; [key: string]: unknown };
 export type EvmWalletTransaction = {
   chainId: NftChainId; from: string; to: string; data: string; value: string; expectedIdentityScope: string; expiresAt: string;
+  nonce?: string;
 };
 export type NftLaunchContext = { identityScope: string | null; address: string | null; chainId: number | null; draftId: string; revision: number; prepared: boolean; deploymentId?: string | null; scope?: 'draft'|'public'; userId?: string | null; selectionKey?: string; termsHash?: string | null; marketplace?: NftMarketplaceCapabilities | null;
   expectedListings?: NftCartItem[]; expectedOffer?: {id:string;unitPriceRaw:string;escrowRaw:string;bidder:string;recipient:string}; };
@@ -302,15 +303,20 @@ export async function sendReviewedEvmTransaction(options: {
   };
   assertCurrent();
   if (!isSupportedNftChainId(tx.chainId) || !addressPattern.test(tx.from) || !addressPattern.test(tx.to) || !/^0x(?:[\da-f]{2})*$/i.test(tx.data) || !unsignedPattern.test(tx.value) || BigInt(tx.value) >= 2n ** 256n) throw new NftLaunchError('Only reviewed test ETH transactions are supported.', 'INVALID_REVIEW');
+  if (tx.nonce !== undefined && (typeof tx.nonce !== 'string' || tx.nonce.length > 20 || !unsignedPattern.test(tx.nonce) || BigInt(tx.nonce) >= 2n ** 64n)) throw new NftLaunchError('The reviewed transaction nonce is invalid. Prepare a new review.', 'INVALID_REVIEW');
   const provider = await options.getProvider(); assertCurrent();
   const chainId = await provider.request({ method: 'eth_chainId' }); assertCurrent();
   if (typeof chainId !== 'string' || !/^0x[\da-f]+$/i.test(chainId) || BigInt(chainId) !== BigInt(tx.chainId)) throw new NftLaunchError('Switch your wallet to the reviewed test network and prepare a new review.', 'IDENTITY_CHANGED');
   const accounts = await provider.request({ method: 'eth_accounts' }); assertCurrent();
   if (!Array.isArray(accounts) || !accounts.some(account => typeof account === 'string' && account.toLowerCase() === tx.from.toLowerCase())) throw new NftLaunchError('The reviewed sender is no longer available in your wallet.', 'IDENTITY_CHANGED');
+  if (tx.nonce !== undefined) {
+    const nonce = await provider.request({ method: 'eth_getTransactionCount', params: [tx.from, 'pending'] }); assertCurrent();
+    if (typeof nonce !== 'string' || !/^0x(?:0|[1-9a-f][\da-f]{0,15})$/i.test(nonce) || BigInt(nonce) !== BigInt(tx.nonce)) throw new NftLaunchError('Your wallet transactions changed. Prepare a new review.', 'NONCE_CHANGED');
+  }
   // Recheck the network after account discovery before the only signing request.
   const finalChainId = await provider.request({ method: 'eth_chainId' }); assertCurrent();
   if (finalChainId !== chainId) throw new NftLaunchError('Your wallet network changed. Prepare a new review.', 'IDENTITY_CHANGED');
-  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, chainId: `0x${BigInt(tx.chainId).toString(16)}` }] });
+  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, chainId: `0x${BigInt(tx.chainId).toString(16)}`, ...(tx.nonce === undefined ? {} : { nonce: `0x${BigInt(tx.nonce).toString(16)}` }) }] });
   // Once submitted, retain the hash even if an already-open wallet prompt crossed expiry.
   if (typeof hash !== 'string' || !hashPattern.test(hash)) throw new NftLaunchError('The wallet did not return a valid transaction hash.', 'INVALID_HASH');
   // The controller stores this broadcast under the captured owner before suppressing stale UI.

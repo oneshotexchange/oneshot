@@ -11,7 +11,7 @@ const hash = z.string().regex(/^0x[\da-f]{64}$/).refine(value => !/^0x0{64}$/.te
 const uint = z.string().max(78).regex(/^(0|[1-9]\d*)$/).refine(value => BigInt(value) < 2n ** 256n);
 const digest = z.string().regex(/^[\da-f]{64}$/);
 const id = z.string().uuid();
-const reviewSchema = z.object({ id, reviewHash: digest, expiresAt: z.string().datetime(), action: z.enum(['launch', 'approve', 'buy', 'sell', 'claim']),
+const reviewSchema = z.object({ id, reviewHash: digest, expiresAt: z.string().datetime(), action: z.enum(['launch', 'approve', 'buy', 'sell', 'claim', 'maintain']),
   chainId: z.union([z.literal(31337), z.literal(84532)]), deploymentId: digest, network: z.custom<TokenExecutionReview['network']>(isNftExecutionNetwork),
   from: address, to: address, value: uint, data: z.string().max(32770).regex(/^0x(?:[\da-f]{2})+$/), summary: z.record(z.string().max(64), z.string().max(2048)),
   simulation: z.object({ blockNumber: uint, blockHash: hash, gasEstimate: uint.refine(value => value !== '0') }).strict(),
@@ -50,6 +50,7 @@ const errors: Record<string, string> = {
   TOKEN_APPROVAL_REQUIRED: 'Approve this token amount, then prepare a new sale review.', TOKEN_BALANCE_LOW: 'This wallet does not have enough tokens for this sale.',
   TOKEN_NOTHING_TO_CLAIM: 'This wallet has no proceeds to claim from this market.', TOKEN_RECIPIENT_INVALID: 'Choose a wallet that can receive this asset.',
   TOKEN_QUOTE_UNAVAILABLE: 'A quote is unavailable for this amount. Refresh or try a smaller amount.', TOKEN_QUOTE_EXPIRED: 'This review expired. Prepare a new review.',
+  TOKEN_MAINTENANCE_NOT_READY: 'Fee processing is not ready yet. Pending fees stay safe until the 5-minute price window, deviation guard and minimum budget are met.',
   TOKEN_REVIEW_CHANGED: 'The network or market changed. Prepare a new review.', TOKEN_SIMULATION_FAILED: 'The transaction could not complete with the current balance, price or market state. Check your balance and prepare a new review.',
   TOKEN_AMOUNT_INVALID: 'Enter a positive amount with no more than 18 decimals for test ETH or 8 decimals for this token.', TOKEN_AMOUNT: 'Enter a positive amount within this asset’s supported precision.',
   TOKEN_TERMS: 'Check the token name, symbol, fee and test ETH opening valuation.', TOKEN_QUOTE: 'A current quote is unavailable. Try a new review.', TOKEN_EXPIRED: 'The quote expired. Try a new review.',
@@ -94,7 +95,7 @@ export function assertTokenReview(reviewInput: unknown, context: TokenExecutionC
   const review = validateTokenExecutionReview(reviewInput), summary = review.summary;
   if (!context.identityScope || !context.userId || !context.from || !context.ready || !isSupportedNftChainId(context.chainId) || !context.deploymentId
     || review.chainId !== context.chainId || review.deploymentId !== context.deploymentId || !sameAddress(review.from, context.from)) throw changed();
-  if (!recovery && (Date.parse(review.expiresAt) <= now || Date.parse(review.expiresAt) > now + 120_000)) throw new TokenExecutionError('This review expired. Prepare a new review.', 'TOKEN_QUOTE_EXPIRED');
+  if (!recovery && (Date.parse(review.expiresAt) <= now || Date.parse(review.expiresAt) > now + (review.action === 'maintain' ? 60_000 : 120_000))) throw new TokenExecutionError('This review expired. Prepare a new review.', 'TOKEN_QUOTE_EXPIRED');
   if (intent && (review.action !== intent.action || !sameAddress(intent.from, review.from) || intent.expectedChainId !== review.chainId || intent.expectedDeploymentId !== review.deploymentId)) throw invalid();
   try {
     if (review.action === 'launch') {
@@ -121,6 +122,15 @@ export function assertTokenReview(reviewInput: unknown, context: TokenExecutionC
         if (review.action === 'claim') {
           if (call.functionName !== 'claimTo' || review.value !== '0' || summary.market !== context.market.toLowerCase() || !sameAddress(summary.recipient, call.args[0]) || positive(summary.claimableNativeRaw) <= 0n
             || intent?.action === 'claim' && !sameAddress(call.args[0], intent.recipient || intent.from)) throw invalid();
+        } else if (review.action === 'maintain') {
+          if (call.functionName !== 'process' || review.value !== '0' || summary.market !== context.market.toLowerCase() || summary.token !== context.token.toLowerCase()
+            || summary.executionFeeBps !== '0' || summary.maintenanceLifetimeSeconds !== '60' || !['creator', 'liquidity_burn'].includes(summary.feeMode)
+            || (context.feeMode !== undefined && summary.feeMode !== context.feeMode)
+            || positive(summary.maximumNativeBudgetRaw) !== call.args[0] || positive(summary.maximumTokenBudgetRaw) !== call.args[1]
+            || positive(summary.deadline) !== call.args[2] || Date.parse(review.expiresAt) > Number(call.args[2]) * 1000) throw invalid();
+          for (const key of ['pendingLpNativeRaw', 'pendingLpTokenRaw', 'pendingLiquidityNativeRaw', 'pendingLiquidityTokenRaw', 'pendingBurnNativeRaw']) raw(summary[key]);
+          if (intent?.action === 'maintain' && (call.args[0] !== parseAssetAmount(intent.maximumNativeBudget, review.network.nativeDecimals)
+            || call.args[1] !== parseAssetAmount(intent.maximumTokenBudget, 8))) throw invalid();
         } else {
           if (call.functionName !== review.action || summary.side !== review.action || summary.token !== context.token.toLowerCase() || summary.lpFeePips !== '2500'
             || summary.fullInputRequired !== 'true' || summary.protocolFeeMayApply !== 'true') throw invalid();

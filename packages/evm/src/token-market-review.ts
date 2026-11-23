@@ -9,13 +9,16 @@ const UINT256_MAX = (1n << 256n) - 1n;
 const encoder = new TextEncoder();
 /** Allows time to inspect immutable terms and complete pre-sign RPC checks. Maintenance remains capped at 60s on-chain. */
 export const TOKEN_REVIEW_LIFETIME_SECONDS = 120n;
+export const TOKEN_MAINTENANCE_LIFETIME_SECONDS = 60n;
 
 export class TokenMarketReviewError extends Error {
   constructor(readonly code: 'NETWORK' | 'IDENTITY' | 'TERMS' | 'AMOUNT' | 'QUOTE' | 'EXPIRED' | 'RECIPIENT') {
-    super({ NETWORK: 'This token uses an unsupported test network.', IDENTITY: 'Refresh this token’s market details before continuing.',
+    super({
+      NETWORK: 'This token uses an unsupported test network.', IDENTITY: 'Refresh this token’s market details before continuing.',
       TERMS: 'Review the token’s name, symbol, fee and test ETH valuation.', AMOUNT: 'Enter a positive amount within the token’s supported precision.',
       QUOTE: 'Get a new trade quote before continuing.', EXPIRED: 'This quote has expired. Get a new quote.',
-      RECIPIENT: 'Choose a wallet that can receive this asset.' }[code]);
+      RECIPIENT: 'Choose a wallet that can receive this asset.'
+    }[code]);
     this.name = 'TokenMarketReviewError';
   }
 }
@@ -66,10 +69,11 @@ export function tokenMarketReviewAnchor(input: TokenMarketReviewAnchor) {
   const sqrtLowerX96 = positive(input.sqrtLowerX96, UINT160_MAX); const sqrtUpperX96 = positive(input.sqrtUpperX96, UINT160_MAX);
   if (sqrtLowerX96 >= sqrtUpperX96) fail('IDENTITY');
   const poolId = keccak256(encodeAbiParameters([
-    {type:'address'}, {type:'address'}, {type:'uint24'}, {type:'int24'}, {type:'address'},
+    { type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' },
   ], [zeroAddress, token, 2500, 10, oracle]));
   if (hash(input.poolId) !== poolId) fail('IDENTITY');
-  return Object.freeze({ ...selected, factory, poolManager, oracle, market, token, poolId,
+  return Object.freeze({
+    ...selected, factory, poolManager, oracle, market, token, poolId,
     creator: address(input.creator), platformRecipient: address(input.platformRecipient),
     executionFeeBps: fee(input.executionFeeBps), feeMode: mode(input.feeMode), sqrtLowerX96, sqrtUpperX96,
     blockNumber: uint(input.blockNumber), blockHash: hash(input.blockHash), blockTimestamp: uint(input.blockTimestamp),
@@ -101,11 +105,14 @@ export function prepareTokenLaunchCall(input: {
     || positive(preview.sqrtLowerX96, UINT160_MAX) >= positive(preview.sqrtUpperX96, UINT160_MAX)
     || positive(preview.effectiveOpeningValuationNative, UINT256_MAX) < openingValuation || positive(preview.effectiveUpperValuationNative, UINT256_MAX) <= preview.effectiveOpeningValuationNative) fail('TERMS');
   const executionFeeBps = fee(draft.executionFeeBps); const feeMode = mode(draft.feeMode);
-  return Object.freeze({ ...selected, from: address(input.from), to: address(input.factory), value: 0n,
+  return Object.freeze({
+    ...selected, from: address(input.from), to: address(input.factory), value: 0n,
     data: encodeFunctionData({ abi: TOKEN_MARKET_FACTORY_ABI, functionName: 'createMarket', args: [name, symbol, executionFeeBps, feeMode === 'liquidity_burn', openingValuation] }),
-    terms: Object.freeze({ name, symbol, executionFeeBps, feeMode, openingValuationNative: openingValuation, initialSupplyRaw: TOKEN_SUPPLY_RAW, tokenDecimals: 8 as const,
+    terms: Object.freeze({
+      name, symbol, executionFeeBps, feeMode, openingValuationNative: openingValuation, initialSupplyRaw: TOKEN_SUPPLY_RAW, tokenDecimals: 8 as const,
       tickLower: preview.tickLower, tickUpper: preview.tickUpper, sqrtLowerX96: preview.sqrtLowerX96, sqrtUpperX96: preview.sqrtUpperX96,
-      effectiveOpeningValuationNative: preview.effectiveOpeningValuationNative, effectiveUpperValuationNative: preview.effectiveUpperValuationNative }),
+      effectiveOpeningValuationNative: preview.effectiveOpeningValuationNative, effectiveUpperValuationNative: preview.effectiveUpperValuationNative
+    }),
   });
 }
 
@@ -139,9 +146,11 @@ export function prepareTokenTradeCall(input: {
   const data = input.side === 'buy'
     ? encodeFunctionData({ abi: TOKEN_MARKET_ABI, functionName: 'buy', args: [minimumReceive, recipient, deadline, priceLimit] })
     : encodeFunctionData({ abi: TOKEN_MARKET_ABI, functionName: 'sell', args: [amount, minimumReceive, recipient, deadline, priceLimit] });
-  return Object.freeze({ network: anchor.network, genesisHash: anchor.genesisHash, blockNumber: anchor.blockNumber, blockHash: anchor.blockHash,
+  return Object.freeze({
+    network: anchor.network, genesisHash: anchor.genesisHash, blockNumber: anchor.blockNumber, blockHash: anchor.blockHash,
     from, to: anchor.market, value: input.side === 'buy' ? amount : 0n, data, deadline,
-    summary: Object.freeze({ side: input.side, token: anchor.token, recipient, amountRaw: amount, poolInputRaw: poolInput,
+    summary: Object.freeze({
+      side: input.side, token: anchor.token, recipient, amountRaw: amount, poolInputRaw: poolInput,
       quotedReceiveRaw: quotedReceive, minimumReceiveRaw: minimumReceive, grossNativeRaw: native.gross,
       quotedExecutionFeeRaw: native.fee, executionFeeBps: anchor.executionFeeBps, feeMode: anchor.feeMode,
       lpFeePips: 2500, protocolFeeMayApply: true, gasPaidSeparately: true, fullInputRequired: true,
@@ -153,8 +162,43 @@ export function prepareTokenTradeCall(input: {
 export function prepareTokenApprovalCall(anchorInput: TokenMarketReviewAnchor, fromInput: Address, tokenAmount: string) {
   const anchor = tokenMarketReviewAnchor(anchorInput); let amount: bigint;
   try { amount = positive(parseAssetAmount(tokenAmount, 8)); } catch { fail('AMOUNT'); }
-  return Object.freeze({ network: anchor.network, genesisHash: anchor.genesisHash, from: address(fromInput), to: anchor.token, value: 0n,
+  return Object.freeze({
+    network: anchor.network, genesisHash: anchor.genesisHash, from: address(fromInput), to: anchor.token, value: 0n,
     data: encodeFunctionData({ abi: MARKET_TOKEN_ABI, functionName: 'approve', args: [anchor.market, amount] }),
     spender: anchor.market, allowanceRaw: amount,
+  });
+}
+
+/** Permissionless fee processing bounded by a 60-second deadline and explicit native/token spending caps. */
+export function prepareTokenMaintenanceCall(input: {
+  anchor: TokenMarketReviewAnchor; from: Address; maximumNativeBudget: string; maximumTokenBudget: string;
+  nativeDecimals?: number; now: bigint;
+}) {
+  const anchor = tokenMarketReviewAnchor(input.anchor);
+  const now = uint(input.now); const deadline = anchor.blockTimestamp + TOKEN_MAINTENANCE_LIFETIME_SECONDS;
+  if (now < anchor.blockTimestamp || now >= deadline) fail('EXPIRED');
+  const nativeDecimals = input.nativeDecimals ?? anchor.network.nativeDecimals;
+  let maximumNativeBudgetRaw: bigint; let maximumTokenBudgetRaw: bigint;
+  try {
+    maximumNativeBudgetRaw = positive(parseAssetAmount(input.maximumNativeBudget, nativeDecimals));
+    maximumTokenBudgetRaw = positive(parseAssetAmount(input.maximumTokenBudget, 8));
+  } catch { fail('AMOUNT'); }
+  const data = encodeFunctionData({
+    abi: TOKEN_MARKET_ABI,
+    functionName: 'process',
+    args: [maximumNativeBudgetRaw, maximumTokenBudgetRaw, deadline],
+  });
+  return Object.freeze({
+    network: anchor.network, genesisHash: anchor.genesisHash, blockNumber: anchor.blockNumber, blockHash: anchor.blockHash,
+    from: address(input.from), to: anchor.market, value: 0n, data, deadline,
+    summary: Object.freeze({
+      market: anchor.market, token: anchor.token, feeMode: anchor.feeMode,
+      maximumNativeBudgetRaw: maximumNativeBudgetRaw.toString(),
+      maximumTokenBudgetRaw: maximumTokenBudgetRaw.toString(),
+      deadline: deadline.toString(),
+      maintenanceLifetimeSeconds: TOKEN_MAINTENANCE_LIFETIME_SECONDS.toString(),
+      executionFeeBps: '0',
+      gasPaidSeparately: 'true',
+    }),
   });
 }

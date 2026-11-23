@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { customerNetwork, customerNetworkBanner } from './customer-network';
-import { SettingsNetwork } from '../components/workspace-pages';
+import { AdminDiagnostics, SettingsNetwork } from '../components/workspace-pages';
 
 describe('customer configured network labels', () => {
   it.each(['Base Sepolia', 'Base Sepolia testnet', 'base-sepolia'])('recognizes the actual Base network name %s without claiming transaction availability', network => {
@@ -35,6 +35,38 @@ describe('customer configured network labels', () => {
     for (const text of ['Base Sepolia testnet (84532)', 'with each token or collection', 'href="/tokens"', 'href="/nfts"']) expect(html).toContain(text);
     expect(html).not.toMatch(/Currently unavailable|NFT minting|Token trading|RPC|configuration/);
     const zero = render({ network: 'Zero', chainId: null }); expect(zero).toContain('Zero (planned)'); expect(zero).not.toContain('Base Sepolia');
+    expect(customerNetwork({ network: 'Zero Testnet', chainId: 33001, nativeSymbol: 'ZRO' })).toMatchObject({ kind: 'zero-testnet', label: 'Zero Testnet (33001)' });
+    expect(customerNetwork({ network: 'Zero Mainnet', chainId: 33000, nativeSymbol: 'ZRO' })).toMatchObject({ kind: 'zero-mainnet', label: 'Zero Mainnet (33000)' });
+    expect(customerNetwork({ network: 'Zero Testnet', chainId: 543210, nativeSymbol: 'ZRO' }).kind).toBe('unknown');
+    expect(customerNetworkBanner({ network: 'Zero Mainnet', chainId: 33000, nativeSymbol: 'ZRO' }, false, false)).toContain('real ZRO');
     const failure = render(null, true); expect(failure).toContain('Try again'); expect(failure).not.toContain('Base Sepolia');
+  });
+
+  it('renders active-network titles and mainnet warnings inside AdminDiagnostics', () => {
+    const baseHtml = renderToStaticMarkup(createElement(AdminDiagnostics, {
+      status: {
+        executionScope: 'Base Sepolia',
+        nativeSymbol: 'ETH',
+        reviewedNfts: { readsEnabled: true, executionEnabled: true },
+        tokenAnalytics: { readsEnabled: true },
+        networkConfig: { name: 'Base Sepolia testnet', mode: 'base-sepolia', chainId: 84532, nativeDecimals: 18, isTestnet: true, configurationReady: true, missing: [] },
+      },
+      readiness: null,
+    }));
+    expect(baseHtml).toContain('Base Sepolia execution');
+    expect(baseHtml).toContain('Base Sepolia contract deployment');
+    expect(baseHtml).toContain('Base Sepolia documentation');
+    expect(baseHtml).toContain('Reviewed NFTs checkout');
+
+    const mainnetHtml = renderToStaticMarkup(createElement(AdminDiagnostics, {
+      status: {
+        executionScope: 'Zero Mainnet',
+        nativeSymbol: 'ZRO',
+        networkConfig: { name: 'Zero Mainnet', mode: 'zero-mainnet', chainId: 33000, nativeDecimals: 18, isTestnet: false, configurationReady: false, missing: ['Explicit mainnet opt-in'] },
+      },
+      readiness: null,
+    }));
+    expect(mainnetHtml).toContain('Zero Mainnet execution');
+    expect(mainnetHtml).toContain('Mainnet (real ZRO)');
   });
 });

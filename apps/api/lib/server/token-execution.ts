@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { z } from 'zod';
 import { decodeEventLog, decodeFunctionResult, encodeFunctionData, encodeFunctionResult, type Abi, type Address, type Hex } from 'viem';
-import { createVerifiedRpc, networkConfig, nftExecutionNetwork, prepareTokenApprovalCall, prepareTokenLaunchCall, prepareTokenTradeCall,
-  parseAssetAmount, splitExecutionFee, tokenDexSwapFee, TOKEN_REVIEW_LIFETIME_SECONDS, TOKEN_MARKET_FACTORY_ABI, TOKEN_MARKET_ABI, TOKEN_MARKET_QUOTER_ABI, MARKET_TOKEN_ABI,
+import { createVerifiedRpc, networkConfig, nftExecutionNetwork, prepareTokenApprovalCall, prepareTokenLaunchCall, prepareTokenMaintenanceCall, prepareTokenTradeCall,
+  parseAssetAmount, splitExecutionFee, tokenDexSwapFee, TOKEN_MAINTENANCE_LIFETIME_SECONDS, TOKEN_REVIEW_LIFETIME_SECONDS, TOKEN_MARKET_FACTORY_ABI, TOKEN_MARKET_ABI, TOKEN_MARKET_QUOTER_ABI, MARKET_TOKEN_ABI,
   type NetworkConfig, type TokenMarketReviewAnchor, type NftExecutionNetwork } from '@oneshot/evm';
 import { parseTokenManifest, tokenManifestId, type TokenManifest } from '../../../indexer/src/token-manifest';
 import { VerifiedTokenSource } from '../../../indexer/src/token-source';
@@ -22,6 +22,7 @@ export const tokenExecutionInput=z.discriminatedUnion('action',[
   z.object({...common,...marketFields,action:z.enum(['buy','sell']),amount,slippageBps:z.number().int().min(0).max(1000)}).strict(),
   z.object({...common,market:address,action:z.literal('approve'),amount}).strict(),
   z.object({...common,...marketFields,action:z.literal('claim')}).strict(),
+  z.object({...common,market:address,action:z.literal('maintain'),maximumNativeBudget:amount,maximumTokenBudget:amount}).strict(),
 ]);
 export type TokenExecutionInput=z.infer<typeof tokenExecutionInput>;
 type Rpc=Awaited<ReturnType<typeof createVerifiedRpc>>;
@@ -104,6 +105,15 @@ export function createTokenExecutionService(deps:Dependencies={}){
         const recipient=input.recipient??from;
         if([state.market,state.token,state.poolManager,state.factory,state.oracle].includes(recipient))throw new ApiError(400,'TOKEN_RECIPIENT_INVALID','Choose a wallet that can receive test ETH.');
         to=input.market;value=0n;data=encodeFunctionData({abi:TOKEN_MARKET_ABI,functionName:'claimTo',args:[recipient]});summary={market:to,recipient,claimableNativeRaw:pending.toString(),gasPaidSeparately:'true'};
+      }else if(input.action==='maintain'){
+        const pendingLpNativeRaw=raw(await call(chain,input.market,TOKEN_MARKET_ABI,'pendingLpNative')).toString();
+        const pendingLpTokenRaw=raw(await call(chain,input.market,TOKEN_MARKET_ABI,'pendingLpToken')).toString();
+        const pendingLiquidityNativeRaw=raw(await call(chain,input.market,TOKEN_MARKET_ABI,'pendingLiquidityNative')).toString();
+        const pendingLiquidityTokenRaw=raw(await call(chain,input.market,TOKEN_MARKET_ABI,'pendingLiquidityToken')).toString();
+        const pendingBurnNativeRaw=raw(await call(chain,input.market,TOKEN_MARKET_ABI,'pendingBurnNative')).toString();
+        const prepared=prepareTokenMaintenanceCall({anchor:state,from,maximumNativeBudget:input.maximumNativeBudget,maximumTokenBudget:input.maximumTokenBudget,nativeDecimals:chain.network.nativeDecimals,now:BigInt(Math.floor(now()/1000))});
+        ({to,data,value,deadline}=prepared);
+        summary={...prepared.summary,pendingLpNativeRaw,pendingLpTokenRaw,pendingLiquidityNativeRaw,pendingLiquidityTokenRaw,pendingBurnNativeRaw};
       }else{
         const amount=parseAssetAmount(input.amount,input.action==='buy'?18:8),poolInput=input.action==='buy'?splitExecutionFee(amount,state.executionFeeBps,state.feeMode).net:amount;
         if(input.action==='sell'){
@@ -121,11 +131,15 @@ export function createTokenExecutionService(deps:Dependencies={}){
         ({to,data,value,deadline}=prepared);summary=Object.fromEntries(Object.entries({...prepared.summary,...await dexFees(chain,input.market,input.action)}).map(([key,item])=>[key,String(item)]));
       }
     }
-    await canonical(chain);const expiresAt=Math.min(Number(deadline)*1000,now()+Number(TOKEN_REVIEW_LIFETIME_SECONDS)*1000);
+    await canonical(chain);const lifetimeSeconds=input.action==='maintain'?TOKEN_MAINTENANCE_LIFETIME_SECONDS:TOKEN_REVIEW_LIFETIME_SECONDS;
+    const expiresAt=Math.min(Number(deadline)*1000,now()+Number(lifetimeSeconds)*1000);
     if(!Number.isSafeInteger(expiresAt)||expiresAt<=now())throw new ApiError(409,'TOKEN_QUOTE_EXPIRED','This quote expired. Refresh and try again.');
     let simulation:Awaited<ReturnType<Rpc['simulateCall']>>;
     try{simulation=await chain.rpc.simulateCall({from,to,data,value:hex(value)},{number:hex(chain.block.number),hash:chain.block.hash});}
-    catch{throw new ApiError(409,'TOKEN_SIMULATION_FAILED','This transaction could not complete with the current balance, price or market state. Refresh its review and check your wallet balance.');}
+    catch{
+      if(input.action==='maintain')throw new ApiError(409,'TOKEN_MAINTENANCE_NOT_READY','Fee processing is not ready yet. Pending fees stay safe until the 5-minute price window, deviation guard and minimum budget are met.');
+      throw new ApiError(409,'TOKEN_SIMULATION_FAILED','This transaction could not complete with the current balance, price or market state. Refresh its review and check your wallet balance.');
+    }
     return{to,data,value:value.toString(),summary,expiresAt:new Date(expiresAt).toISOString(),simulation:{blockNumber:chain.block.number.toString(),blockHash:chain.block.hash,gasEstimate:simulation.gasEstimate}};
   }
   async function status(){try{const chain=await connect();return{enabled:true,network:chain.network,deploymentId:chain.deploymentId,factory:chain.manifest.factory.address,reason:null};}

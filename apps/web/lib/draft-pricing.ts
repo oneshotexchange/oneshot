@@ -9,3 +9,16 @@ export function collectionCopyForBase(draft: LocalCollectionDraft): LocalCollect
 export function tokenCopyForBase(draft: TokenDraft): TokenDraft {
   return tokenDraftSchema.parse({ ...draft, pricingNetwork: 'base-sepolia', openingValuation: '' });
 }
+
+export function collectionCopyForZero(
+  draft: LocalCollectionDraft,
+  target: 'zero-testnet' | 'zero-mainnet' = 'zero-testnet',
+): LocalCollectionDraft {
+  return { ...collectionWorkingTerms(draft), id: '', savedAt: '', pricingNetwork: target, price: '', allowlistPrice: '' };
+}
+export function tokenCopyForZero(
+  draft: TokenDraft,
+  target: 'zero-testnet' | 'zero-mainnet' = 'zero-testnet',
+): TokenDraft {
+  return tokenDraftSchema.parse({ ...draft, pricingNetwork: target, openingValuation: '' });
+}

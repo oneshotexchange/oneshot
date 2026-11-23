@@ -7,7 +7,56 @@ import { nftNetworkForChainId, type IndexedTokenContext, type IndexedTokenMarket
 import { TokenTable } from '../components/market-data';
 import { TokenMarketDetails } from '../components/token-terminal';
 import { TokenMarketsUnavailable } from '../components/token-market-context';
-import { readTokenMarket, readTokenMarkets, tokenDiscoveryQuery, tokenMarketsPath, tokenNativeAmount, tokenSupplyAmount, TokenMarketReadError, TokenMarketsLoader, validateTokenMarketResponse, validateTokenMarketsResponse } from './client-token-markets';
+import {
+  readTokenMarket,
+  readTokenMarkets,
+  tokenAnalyticsMarketsPath,
+  tokenDiscoveryQuery,
+  tokenDiscoverySort,
+  tokenMarketsPath,
+  tokenNativeAmount,
+  tokenSupplyAmount,
+  TokenMarketReadError,
+  TokenMarketsLoader,
+  validateTokenAnalyticsMarketsResponse,
+  validateTokenMarketResponse,
+  validateTokenMarketsResponse,
+} from './client-token-markets';
+
+describe('event-journal token discovery sorting and response checks', () => {
+  it('validates analytics list query helpers and sort options', () => {
+    expect(tokenDiscoverySort('?sort=volume')).toBe('volume');
+    expect(tokenDiscoverySort('')).toBe('newest');
+    expect(tokenAnalyticsMarketsPath('Orbit', 'holders', 10)).toBe('/api/oneshot/token-analytics/markets?limit=10&sort=holders&q=Orbit');
+    expect(() => tokenDiscoverySort('?sort=invalid')).toThrow(TokenMarketReadError);
+    expect(() => tokenDiscoverySort('?sort=volume&sort=holders')).toThrow(TokenMarketReadError);
+  });
+
+  it('rejects malformed analytics list payloads and accepts valid disabled responses', () => {
+    const disabled = {
+      context: {
+        schemaVersion: 1,
+        kind: 'canonical-event-journal',
+        enabled: false,
+        available: false,
+        reason: 'Token activity is currently unavailable.',
+        deploymentId: null,
+        network: null,
+        source: null,
+        checkpoint: null,
+        observedHeadNumber: null,
+        lagBlocks: null,
+        readonly: true,
+        finalized: false,
+      },
+      sort: 'volume',
+      items: [],
+      nextCursor: null,
+    };
+    expect(validateTokenAnalyticsMarketsResponse(disabled)).toEqual(disabled);
+    expect(() => validateTokenAnalyticsMarketsResponse({ ...disabled, sort: 'bad' })).toThrow(TokenMarketReadError);
+  });
+});
 
 const addr = (n: string) => `0x${n.repeat(40)}`, hash = (n: string) => `0x${n.repeat(64)}`;
 const market = (changes: Partial<IndexedTokenMarket> = {}): IndexedTokenMarket => ({ schemaVersion: 1, market: addr('1'), token: addr('2'), creator: addr('3'), platformRecipient: addr('4'), name: 'Orbit', symbol: 'ORBIT', tokenDecimals: 8,

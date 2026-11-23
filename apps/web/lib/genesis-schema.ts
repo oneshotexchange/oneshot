@@ -33,6 +33,7 @@ export type GenesisApplication = {
   decision: GenesisDecision | null; publishedDecision: GenesisDecision | null;
   note: string; shareConsent: boolean; consentVersion: string;
   nominationQuota?: number; nominations?: GenesisNomination[];
+  mintWallet?: string | null; mintWalletBoundAt?: string | null; mintWalletChallengeNonce?: string | null;
 };
 export type GenesisPublicCampaign = {
   state: 'upcoming' | 'open' | 'closed'; capacity: number; opensAt: string | null; closesAt: string | null;
@@ -40,15 +41,33 @@ export type GenesisPublicCampaign = {
 };
 export type GenesisMe = {
   profile: GenesisProfile | null;
-  application: Omit<GenesisApplication, 'userId' | 'referrerId' | 'note' | 'decision' | 'consentVersion'> | null;
+  application: Omit<GenesisApplication, 'userId' | 'referrerId' | 'note' | 'decision' | 'consentVersion' | 'mintWalletChallengeNonce'> | null;
   qualifiedReferrals: number; referralUrl: string | null; shareUrl: string | null;
   nomination?: { id: string; from: string; accepted: boolean } | null;
   nominationsOpen?: boolean;
 };
+const genesisEvmAddress = z.string().regex(/^0x[\da-fA-F]{40}$/).transform(value => value.toLowerCase()).refine(value => !/^0x0{40}$/.test(value));
 export const genesisEnrollSchema = z.object({ consentVersion: z.literal(GENESIS_CONSENT_VERSION), referral: z.string().regex(/^[A-Za-z0-9_-]{16}$/).optional() }).strict();
 export const genesisVerifySchema = z.object({ task: genesisTaskSchema, postUrl: z.string().max(512).optional() }).strict();
 export const genesisRevisionSchema = z.object({ expectedRevision: z.number().int().positive() }).strict();
 export const genesisReviewSchema = genesisRevisionSchema.extend({ decision: z.enum(['selected', 'reserve', 'not_selected']).nullable(), note: z.string().max(2000), publish: z.boolean(), nominationQuota: z.number().int().min(0).max(20).optional() }).strict();
+export const genesisWalletChallengeSchema = z.object({ wallet: genesisEvmAddress }).strict();
+export const genesisWalletBindSchema = z.object({
+  wallet: genesisEvmAddress,
+  signature: z.string().regex(/^0x[\da-fA-F]{130}$/),
+  expectedRevision: z.number().int().positive(),
+}).strict();
+
+export function genesisWalletBindMessage(input: { origin: string; applicationId: string; xId: string; wallet: string; nonce: string }) {
+  return [
+    'oneshot Genesis mint wallet confirmation',
+    `Origin: ${input.origin}`,
+    `Application: ${input.applicationId}`,
+    `X ID: ${input.xId}`,
+    `Wallet: ${input.wallet.toLowerCase()}`,
+    `Nonce: ${input.nonce}`,
+  ].join('\n');
+}
 
 /** Parse only a post ID, never a fetchable user-controlled URL. */
 export function genesisPostId(value: string): string | null {

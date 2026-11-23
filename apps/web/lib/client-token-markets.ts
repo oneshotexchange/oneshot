@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { BASE_SEPOLIA_GENESIS_HASH, BASE_SEPOLIA_POOL_MANAGER, formatIndexedAmount, type IndexedTokenContext, type IndexedTokenMarket, type IndexedTokenMarketResponse, type IndexedTokenMarketsResponse, type IndexedTokenSource } from '@oneshot/evm';
+import {
+  BASE_SEPOLIA_GENESIS_HASH,
+  BASE_SEPOLIA_POOL_MANAGER,
+  formatIndexedAmount,
+  type IndexedTokenContext,
+  type IndexedTokenMarket,
+  type IndexedTokenMarketResponse,
+  type IndexedTokenMarketsResponse,
+  type IndexedTokenSource,
+  type TokenAnalytics,
+  type TokenAnalyticsMarketsResponse,
+  type TokenAnalyticsSort,
+} from '@oneshot/evm';
 import { apiUrl } from './api-url';
 import { customerErrorDetails, customerFetch, customerResponseJson } from './customer-http';
 import { readNftNetwork } from './nft-network';
@@ -76,6 +88,50 @@ export function tokenDiscoveryQuery(search: string) {
   if (params.getAll('q').length > 1) throw new TokenMarketReadError(400, 'INPUT_INVALID', 'Clear the search and enter one name, symbol or address.');
   const query = params.get('q') ?? ''; tokenMarketsPath(query); return query.trim();
 }
+const VALID_ANALYTICS_SORTS: readonly TokenAnalyticsSort[] = ['newest', 'volume', 'trades', 'holders'];
+export function tokenDiscoverySort(search: string): TokenAnalyticsSort {
+  const params = new URLSearchParams(search);
+  if (params.getAll('sort').length > 1) throw new TokenMarketReadError(400, 'INPUT_INVALID', 'Choose a single token market sort option.');
+  const sort = (params.get('sort') ?? 'newest') as TokenAnalyticsSort;
+  if (!VALID_ANALYTICS_SORTS.includes(sort)) throw new TokenMarketReadError(400, 'INPUT_INVALID', 'Choose a supported token market sort order.');
+  return sort;
+}
+export function tokenAnalyticsMarketsPath(query = '', sort: TokenAnalyticsSort = 'newest', limit = 25) {
+  if (query.length > 100 || /[\u0000-\u001f\u007f]/.test(query) || !VALID_ANALYTICS_SORTS.includes(sort) || !Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new TokenMarketReadError(400, 'INPUT_INVALID', 'Use a search of up to 100 characters and a valid sort option.');
+  }
+  const params = new URLSearchParams({ limit: String(limit), sort });
+  if (query.trim()) params.set('q', query.trim());
+  return `/api/oneshot/token-analytics/markets?${params}`;
+}
+function validAnalyticsContext(value: unknown): boolean {
+  if (!object(value) || value.schemaVersion !== 1 || value.readonly !== true || value.finalized !== false || value.kind !== 'canonical-event-journal'
+    || typeof value.enabled !== 'boolean' || typeof value.available !== 'boolean' || !(value.reason === null || typeof value.reason === 'string')) return false;
+  if (!value.available) return value.checkpoint === null;
+  const network = readNftNetwork(value.network), checkpoint = value.checkpoint;
+  return Boolean(network && validTokenSource(value.network, value.source) && typeof value.deploymentId === 'string' && /^[\da-f]{64}$/.test(value.deploymentId)
+    && object(checkpoint) && uint(checkpoint.number) && uint(checkpoint.timestamp) && nonzeroHash(checkpoint.hash) && hash(checkpoint.parentHash));
+}
+function validAnalyticsRecord(value: unknown): value is TokenAnalytics {
+  if (!object(value) || !['market', 'token', 'creator'].every(k => address(value[k])) || !nonzeroHash(value.poolId)
+    || value.tokenDecimals !== 8 || value.holderScope !== 'all-nonzero-balance-addresses'
+    || !['observedSupplyRaw', 'mintedRaw', 'burnedRaw', 'holderCount', 'poolSwaps', 'poolNativeVolumeRaw', 'poolTokenVolumeRaw', 'oneshotTrades', 'oneshotBuys', 'oneshotSells', 'oneshotGrossNativeVolumeRaw', 'oneshotExecutionFeesRaw'].every(k => uint(value[k]))
+    || !object(value.price) || !uint(value.price.sqrtPriceX96Raw) || typeof value.price.tick !== 'number'
+    || !uint(value.price.blockNumber) || !nonzeroHash(value.price.blockHash)
+    || !object(value.price.nativeRawPerWholeToken) || !uint(value.price.nativeRawPerWholeToken.numerator) || !uint(value.price.nativeRawPerWholeToken.denominator)) return false;
+  return BigInt(value.price.nativeRawPerWholeToken.denominator as string) > 0n;
+}
+export function validateTokenAnalyticsMarketsResponse(value: unknown): TokenAnalyticsMarketsResponse {
+  if (!object(value) || !validAnalyticsContext(value.context) || !VALID_ANALYTICS_SORTS.includes(value.sort as TokenAnalyticsSort)
+    || !Array.isArray(value.items) || value.items.length > 50
+    || !(value.nextCursor === null || typeof value.nextCursor === 'string' && value.nextCursor.length > 0 && value.nextCursor.length <= 4096)
+    || (!value.context || !(value.context as { available: boolean }).available) && (value.items.length !== 0 || value.nextCursor !== null)) throw invalid();
+  for (const item of value.items) {
+    if (!object(item) || !validTokenMarketRecord(item.market) || !validAnalyticsRecord(item.analytics)
+      || item.market.market.toLowerCase() !== item.analytics.market.toLowerCase()) throw invalid();
+  }
+  return value as TokenAnalyticsMarketsResponse;
+}
 
 async function read<T>(path: string, validate: (value: unknown) => T, signal?: AbortSignal, fetcher: typeof fetch = fetch): Promise<T> {
   const response = await customerFetch(apiUrl(path), { signal, credentials: 'omit', redirect: 'error', cache: 'no-store' }, fetcher);
@@ -136,6 +192,49 @@ export function useTokenMarkets(path: string | null) {
   const loader = useMemo(() => new TokenMarketsLoader(), []), state = useSyncExternalStore(loader.subscribe, loader.snapshot, loader.snapshot);
   useEffect(() => { void loader.open(path); return () => loader.cancel(); }, [loader, path]);
   return { ...(state.path === path ? state : empty(path)), refresh: loader.refresh, loadMore: loader.loadMore };
+}
+export const readTokenAnalyticsMarkets = (path: string, signal?: AbortSignal, fetcher?: typeof fetch) =>
+  read(path, validateTokenAnalyticsMarketsResponse, signal, fetcher);
+
+type AnalyticsPageState = { path: string | null; data: TokenAnalyticsMarketsResponse | null; loading: boolean; loadingMore: boolean; error: string | null; notice: string | null };
+const emptyAnalytics = (path: string | null): AnalyticsPageState => ({ path, data: null, loading: Boolean(path), loadingMore: false, error: null, notice: null });
+export class TokenAnalyticsMarketsLoader {
+  private state = emptyAnalytics(null); private generation = 0; private abort: AbortController | null = null; private listeners = new Set<() => void>();
+  constructor(private readonly fetcher = readTokenAnalyticsMarkets) {}
+  snapshot = () => this.state;
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private publish(state: AnalyticsPageState) { this.state = state; for (const listener of this.listeners) listener(); }
+  cancel() { this.generation++; this.abort?.abort(); this.abort = null; }
+  open = async (path: string | null, notice: string | null = null) => {
+    this.cancel(); const ticket = this.generation; this.publish({ ...emptyAnalytics(path), notice }); if (!path) return;
+    const abort = new AbortController(); this.abort = abort;
+    try { const data = validateTokenAnalyticsMarketsResponse(await this.fetcher(path, abort.signal)); if (ticket === this.generation) this.publish({ path, data, loading: false, loadingMore: false, error: null, notice }); }
+    catch (error) { if (ticket === this.generation) this.publish({ ...emptyAnalytics(path), loading: false, error: error instanceof TokenMarketReadError ? error.message : unavailable, notice }); }
+  };
+  refresh = () => this.open(this.state.path);
+  loadMore = async () => {
+    const previous = this.state;
+    if (!previous.path || !previous.data?.nextCursor || previous.loading || previous.loadingMore) return;
+    const ticket = this.generation, abort = new AbortController(); this.abort = abort; this.publish({ ...previous, loadingMore: true, error: null });
+    try {
+      const next = validateTokenAnalyticsMarketsResponse(await this.fetcher(`${previous.path}&cursor=${encodeURIComponent(previous.data.nextCursor)}`, abort.signal));
+      if (ticket !== this.generation) return;
+      if (JSON.stringify(previous.data.context.checkpoint) !== JSON.stringify(next.context.checkpoint) || previous.data.context.deploymentId !== next.context.deploymentId) {
+        await this.open(previous.path, 'Recent token activity changed. Markets have been refreshed.'); return;
+      }
+      const items = [...new Map([...previous.data.items, ...next.items].map(item => [item.market.market.toLowerCase(), item])).values()];
+      this.publish({ ...previous, data: { ...next, items }, loadingMore: false });
+    } catch (error) {
+      if (ticket !== this.generation) return;
+      if (error instanceof TokenMarketReadError && error.status === 409) await this.open(previous.path, 'Recent token activity changed. Markets have been refreshed.');
+      else this.publish({ ...previous, loadingMore: false, error: error instanceof TokenMarketReadError ? error.message : unavailable });
+    }
+  };
+}
+export function useTokenAnalyticsMarkets(path: string | null) {
+  const loader = useMemo(() => new TokenAnalyticsMarketsLoader(), []), state = useSyncExternalStore(loader.subscribe, loader.snapshot, loader.snapshot);
+  useEffect(() => { void loader.open(path); return () => loader.cancel(); }, [loader, path]);
+  return { ...(state.path === path ? state : emptyAnalytics(path)), refresh: loader.refresh, loadMore: loader.loadMore };
 }
 export function useTokenMarket(market: string) {
   const [version, setVersion] = useState(0);

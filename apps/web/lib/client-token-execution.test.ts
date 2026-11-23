@@ -98,6 +98,22 @@ describe('token review authority and exact calldata', () => {
     expect(() => assertTokenReview(launch, f.context(), now, { ...input, draft: { ...input.draft, pricingNetwork: 'zero' } })).toThrow(TokenExecutionError);
     expect(() => assertTokenReview({ ...launch, to: market }, f.context(), now, input)).toThrow(TokenExecutionError);
   });
+
+  it('verifies permissionless maintenance calldata, zero execution fee, and 60-second expiry', () => {
+    const f = harness(), input: TokenTransactionIntent = { ...common, action: 'maintain', market, maximumNativeBudget: '1', maximumTokenBudget: '250000' };
+    const maintain: TokenExecutionReview = {
+      ...review(), action: 'maintain', value: '0',
+      data: encodeFunctionData({ abi: TOKEN_MARKET_ABI, functionName: 'process', args: [1000000000000000000n, 25000000000000n, deadline] }),
+      summary: {
+        market, token, feeMode: 'creator', maximumNativeBudgetRaw: '1000000000000000000', maximumTokenBudgetRaw: '25000000000000',
+        deadline: deadline.toString(), maintenanceLifetimeSeconds: '60', executionFeeBps: '0', gasPaidSeparately: 'true',
+        pendingLpNativeRaw: '100', pendingLpTokenRaw: '200', pendingLiquidityNativeRaw: '300', pendingLiquidityTokenRaw: '400', pendingBurnNativeRaw: '500',
+      },
+    };
+    expect(assertTokenReview(maintain, f.context(), now, input)).toEqual(maintain);
+    expect(() => assertTokenReview({ ...maintain, expiresAt: new Date(now + 61_000).toISOString() }, f.context(), now, input)).toThrow(TokenExecutionError);
+    expect(() => assertTokenReview({ ...maintain, summary: { ...maintain.summary, executionFeeBps: '100' } }, f.context(), now, input)).toThrow(TokenExecutionError);
+  });
 });
 
 describe('token transaction races and recovery', () => {

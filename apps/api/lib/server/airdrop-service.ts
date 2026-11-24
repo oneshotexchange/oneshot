@@ -879,19 +879,30 @@ export function createAirdropService(options: {
       if (parsed.claimingOpen && parsed.state !== 'closed') {
         fail('AIRDROP_CONFIG_INVALID', 'Close the mission campaign before opening on-chain claims.');
       }
+      let resolvedProjectXId = parsed.projectXId;
+      let resolvedProjectHandle = parsed.projectHandle;
       if (parsed.state === 'open') {
         if (!genesisAuth.available()) {
           fail('AIRDROP_AUTH_UNAVAILABLE', 'Configure official X OAuth before opening the airdrop.', 503);
         }
-        if (!parsed.projectXId || !parsed.projectHandle) {
-          fail('AIRDROP_CONFIG_INVALID', 'Set the official X ID and handle before opening.');
+        if (!resolvedProjectHandle) {
+          fail('AIRDROP_CONFIG_INVALID', 'Set the official X handle before opening.');
         }
         if (parsed.opensAt && parsed.closesAt && Date.parse(parsed.closesAt) <= Date.parse(parsed.opensAt)) {
           fail('AIRDROP_CONFIG_INVALID', 'Campaign close time must be after open time.');
         }
-        const actual = await verifier.projectHandle(parsed.projectXId);
-        if (actual.toLowerCase() !== parsed.projectHandle.toLowerCase()) {
-          fail('AIRDROP_PROJECT_MISMATCH', 'The official X ID and handle do not match.');
+        if (!resolvedProjectXId) {
+          if (!verifier.resolveUserByHandle) {
+            fail('AIRDROP_CONFIG_INVALID', 'Set the official X ID and handle before opening.');
+          }
+          const resolved = await verifier.resolveUserByHandle(resolvedProjectHandle);
+          resolvedProjectXId = resolved.id;
+          resolvedProjectHandle = resolved.username;
+        } else {
+          const actual = await verifier.projectHandle(resolvedProjectXId);
+          if (actual.toLowerCase() !== resolvedProjectHandle.toLowerCase()) {
+            fail('AIRDROP_PROJECT_MISMATCH', 'The official X ID and handle do not match.');
+          }
         }
       }
       return store.transaction(async tx => {
@@ -924,9 +935,11 @@ export function createAirdropService(options: {
         ) {
           fail('AIRDROP_TERMS_LOCKED', 'Base share and slot cap cannot change after boxes are locked in.');
         }
-        const termsChanged = old.projectXId !== parsed.projectXId || old.projectHandle !== parsed.projectHandle;
+        const termsChanged = old.projectXId !== resolvedProjectXId || old.projectHandle !== resolvedProjectHandle;
         const next: AirdropCampaign = {
           ...parsed,
+          projectXId: resolvedProjectXId,
+          projectHandle: resolvedProjectHandle,
           version: old.version + (termsChanged ? 1 : 0),
           revision: old.revision + 1,
         };

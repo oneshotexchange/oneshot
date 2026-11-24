@@ -4,6 +4,7 @@ import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import type { Address, Hex } from 'viem';
 import { airdropService } from '../apps/api/lib/server/airdrop-service';
+import { airdropPostId } from '../apps/web/lib/airdrop-schema';
 import { database } from '../apps/api/lib/server/store';
 import {
   airdropOpsExportMerkle,
@@ -74,7 +75,9 @@ try {
       overrides: {
         ...(flags.has('--project-x-id') ? { projectXId: flags.get('--project-x-id')! } : {}),
         ...(flags.has('--project-handle') ? { projectHandle: flags.get('--project-handle')!.replace(/^@/, '') } : {}),
-        ...(flags.has('--announcement-post-id') ? { announcementPostId: flags.get('--announcement-post-id')! } : {}),
+        ...(flags.has('--announcement-post-id')
+          ? { announcementPostId: airdropPostId(flags.get('--announcement-post-id')!) ?? flags.get('--announcement-post-id')! }
+          : {}),
         ...(flags.has('--opens-at') ? { opensAt: flags.get('--opens-at')! } : {}),
         ...(flags.has('--closes-at') ? { closesAt: flags.get('--closes-at')! } : {}),
         ...(flags.has('--snapshot-cutoff') ? { snapshotCutoffAt: flags.get('--snapshot-cutoff')! } : {}),

@@ -16,6 +16,7 @@ import {
   AIRDROP_GENERAL_POOL,
   AIRDROP_GENERAL_SLOT_CAP,
   airdropCampaignSchema,
+  airdropPostId,
   detectSnapshotCsvHeader,
   type AirdropCampaign,
   type AirdropSnapshotTier,
@@ -592,21 +593,29 @@ export function AirdropAdmin({ token }: { token: string }) {
                   placeholder="oneshot"
                 />
               </Field>
-              <Field label="Official numeric X ID">
+              <Field label="Official numeric X ID (optional, auto-filled from handle on open)">
                 <input
                   value={campaign.projectXId}
                   onChange={e => patch({ projectXId: e.target.value })}
                   inputMode="numeric"
+                  placeholder="Auto-resolved from X handle"
                   maxLength={32}
                 />
               </Field>
-              <Field label="Announcement X post ID (for Like &amp; Repost)">
+              <Field label="Announcement X post URL or ID (for Like &amp; Repost)">
                 <input
                   value={campaign.announcementPostId}
-                  onChange={e => patch({ announcementPostId: e.target.value })}
-                  inputMode="numeric"
-                  maxLength={32}
+                  onChange={e => {
+                    const raw = e.target.value.trim();
+                    const extracted = airdropPostId(raw);
+                    patch({ announcementPostId: extracted ?? raw });
+                  }}
+                  placeholder="Paste X announcement URL or numeric post ID"
+                  maxLength={512}
                 />
+                {/^\d{1,32}$/.test(campaign.announcementPostId) && (
+                  <span className="genesis-helper">Post ID: {campaign.announcementPostId}</span>
+                )}
               </Field>
             </div>
 

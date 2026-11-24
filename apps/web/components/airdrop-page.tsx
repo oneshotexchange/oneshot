@@ -601,7 +601,19 @@ export function AirdropPage() {
   const displayedBaseTokens = participant?.wallet
     ? participant.baseGeneralTokens
     : eligibility?.baseGeneralTokens ?? 0;
-  const displayedBonusTokens = participant?.engagementBonusTokens ?? 0;
+  const estimatedBonusTokens = participant
+    ? participant.boxUnlockedAt
+      ? participant.engagementBonusTokens
+      : participant.tier === 'community'
+        ? 0
+        : Math.floor((participant.baseGeneralTokens * participant.engagementBonusBps) / 10_000)
+    : 0;
+  const estimatedGeneralTokens = participant
+    ? participant.boxUnlockedAt
+      ? participant.reservedGeneralTokens
+      : participant.baseGeneralTokens + estimatedBonusTokens
+    : 0;
+  const displayedBonusTokens = estimatedBonusTokens;
   const displayedTop500 = participant?.projectedTop500Tokens ?? 0;
   const requiredCompleted = participant ? computeRequiredProgressCount(participant) : 0;
   const isOpen = campaign?.state === 'open';
@@ -976,6 +988,9 @@ export function AirdropPage() {
                 </h3>
               </div>
               <p>Like and repost our announcement on X, then check your repost or paste your quote-post link.</p>
+              {isOpen && !campaign?.announcementPostId && (
+                <p className="genesis-helper">The announcement post link will appear here once published.</p>
+              )}
               {participant && (
                 <>
                   <div className="airdrop-actions">
@@ -1110,7 +1125,10 @@ export function AirdropPage() {
                   )}
                 </h3>
               </div>
-              <p>Launch a meme token on oneshot using your linked wallet.</p>
+              <p>
+                Launch a meme token on oneshot using your linked wallet once Zero token launches open. Finish your
+                social missions now to save your points and progress.
+              </p>
               {participant && (
                 <div className="airdrop-actions">
                   <Link href="/tokens/new" className="button button-secondary">
@@ -1221,9 +1239,10 @@ export function AirdropPage() {
                     <strong>{requiredCompleted} / 4 complete</strong>
                   </div>
                   <div className="info-row">
-                    <span>LayerZero allocation</span>
+                    <span>{participant.boxUnlockedAt ? 'Locked LayerZero allocation' : 'Estimated LayerZero share'}</span>
                     <strong>
-                      {participant.reservedGeneralTokens.toLocaleString()} {tokenSymbol}
+                      {estimatedGeneralTokens.toLocaleString()} {tokenSymbol}
+                      {!participant.boxUnlockedAt && estimatedGeneralTokens > 0 ? ' (locks after Mission 4)' : ''}
                     </strong>
                   </div>
                   <div className="info-row">
@@ -1268,7 +1287,7 @@ export function AirdropPage() {
                   <div className="info-row">
                     <span>Total estimated airdrop</span>
                     <strong>
-                      {participant.totalProjectedTokens.toLocaleString()} {tokenSymbol}
+                      {(estimatedGeneralTokens + participant.projectedTop500Tokens).toLocaleString()} {tokenSymbol}
                     </strong>
                   </div>
                 </div>

@@ -34,7 +34,7 @@ export const AIRDROP_TOP500_BRACKETS = [
 
 export const airdropEvmAddress = z
   .string()
-  .regex(/^0x[\da-fA-F]{40}$/)
+  .regex(/^0x[\da-fA-F]{40}$/, 'Enter a valid 0x wallet address.')
   .transform(value => value.toLowerCase())
   .refine(value => !/^0x0{40}$/.test(value), 'Must be a nonzero EVM address.');
 
@@ -314,11 +314,17 @@ export function airdropPostId(value: string): string | null {
       url.username ||
       url.password ||
       url.port ||
-      !['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(url.hostname)
+      !['x.com', 'www.x.com', 'mobile.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com'].includes(
+        url.hostname,
+      )
     ) {
       return null;
     }
-    return /^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/(\d{1,32})\/?$/.exec(url.pathname)?.[1] || null;
+    return (
+      /^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status(?:es)?\/(\d{1,32})(?:\/(?:photo|video)\/\d{1,3})?\/?$/i.exec(
+        url.pathname,
+      )?.[1] || null
+    );
   } catch {
     return null;
   }

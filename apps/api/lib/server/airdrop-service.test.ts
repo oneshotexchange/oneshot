@@ -89,6 +89,10 @@ function makeFixture(
       checkedAt: new Date(time).toISOString(),
       volumeNativeRaw: '20000000000000000',
     })),
+    resolveUserByHandle: vi.fn(async (userName: string) => ({
+      id: '100',
+      username: userName.replace(/^@/, ''),
+    })),
   };
 
   const service = createAirdropService({
@@ -564,5 +568,31 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
       code: 'AIRDROP_LAYERZERO_UNAVAILABLE',
       status: 503,
     });
+  });
+
+  it('auto-resolves official numeric X ID from projectHandle when opening campaign', async () => {
+    const f = makeFixture();
+    const prevClientId = process.env.X_OAUTH_CLIENT_ID;
+    process.env.X_OAUTH_CLIENT_ID = 'test-x-client-id';
+    try {
+      const current = (await f.service.adminSummary()).campaign;
+      const saved = await f.service.configure(
+        {
+          ...current,
+          state: 'open',
+          projectHandle: 'oneshot',
+          projectXId: '',
+        },
+        current.revision,
+        'admin:1',
+      );
+      expect(f.verifier.resolveUserByHandle).toHaveBeenCalledWith('oneshot');
+      expect(saved.state).toBe('open');
+      expect(saved.projectXId).toBe('100');
+      expect(saved.projectHandle).toBe('oneshot');
+    } finally {
+      if (prevClientId === undefined) delete process.env.X_OAUTH_CLIENT_ID;
+      else process.env.X_OAUTH_CLIENT_ID = prevClientId;
+    }
   });
 });

@@ -169,4 +169,27 @@ describe('Airdrop verifier security boundaries', () => {
     // 10*3 + 5*6 + 2*4 + 3*8 + 4*2 + floor(2000/20) = 30 + 30 + 8 + 24 + 8 + 100 = 200
     expect(post.engagementScore).toBe(200);
   });
+
+  it('resolves numeric X account ID by handle via /twitter/user/info', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe('/twitter/user/info');
+      expect(url.searchParams.get('userName')).toBe('oneshot');
+      return new Response(JSON.stringify({ data: { id: '123456789', userName: 'oneshot' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const verifier = createAirdropVerifier({
+      fetcher,
+      apiKey: () => 'test-key',
+      reserveRead: async () => true,
+    });
+
+    await expect(verifier.resolveUserByHandle!('@oneshot')).resolves.toEqual({
+      id: '123456789',
+      username: 'oneshot',
+    });
+  });
 });

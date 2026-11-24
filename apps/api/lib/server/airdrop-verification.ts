@@ -57,6 +57,7 @@ export type AirdropVerifier = {
   verifyCreatedToken(wallet: string): Promise<AirdropCheckResult & { tokenMarket?: string }>;
   verifyTradeVolume(wallet: string, minNativeRaw: string): Promise<AirdropCheckResult & { volumeNativeRaw?: string }>;
   projectHandle(xId: string): Promise<string>;
+  resolveUserByHandle?(userName: string): Promise<{ id: string; username: string }>;
 };
 
 export function createAirdropVerifier(options: {
@@ -123,6 +124,15 @@ export function createAirdropVerifier(options: {
     return parsed.data.data.userName;
   }
 
+  async function resolveUserByHandle(userName: string): Promise<{ id: string; username: string }> {
+    const cleanHandle = userName.replace(/^@/, '').trim();
+    const parsed = profileSchema.safeParse(await read('/twitter/user/info', { userName: cleanHandle }));
+    if (!parsed.success || parsed.data.data.userName.toLowerCase() !== cleanHandle.toLowerCase()) {
+      throw new AirdropProviderUnavailable('Could not verify the official X handle. Check the handle and try again.');
+    }
+    return { id: parsed.data.data.id, username: parsed.data.data.userName };
+  }
+
   async function fetchPost(postId: string) {
     const result = postSchema.safeParse(await read('/twitter/tweet/detail', { id: postId }));
     if (!result.success || result.data.data.id !== postId) throw new AirdropProviderUnavailable();
@@ -142,6 +152,7 @@ export function createAirdropVerifier(options: {
 
   return {
     projectHandle,
+    resolveUserByHandle,
 
     async verifyFollow(profile, campaign) {
       const checkedAt = new Date(now()).toISOString();

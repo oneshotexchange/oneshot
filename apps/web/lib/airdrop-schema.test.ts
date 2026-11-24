@@ -3,6 +3,8 @@ import {
   AIRDROP_MAX_POST_ENGAGEMENT_SCORE,
   AIRDROP_TOP500_BRACKETS,
   AIRDROP_TOP500_POOL,
+  airdropEvmAddress,
+  airdropPostId,
   computeBaseGeneralTokens,
   computeEngagementBonusBps,
   computeParticipantScore,
@@ -119,5 +121,20 @@ describe('Airdrop schema calculations and LayerZero snapshot parser', () => {
     expect(plainList).toEqual([
       { wallet: '0x6666666666666666666666666666666666666666', tier: 'lz_winner' },
     ]);
+  });
+
+  it('parses mobile and media X post URLs and returns a friendly wallet validation message', () => {
+    expect(airdropPostId('https://mobile.x.com/oneshot/status/1234567890123456789?s=20')).toBe('1234567890123456789');
+    expect(airdropPostId('https://mobile.twitter.com/oneshot/status/9876543210/photo/1')).toBe('9876543210');
+    expect(airdropPostId('https://x.com/oneshot/status/9876543210/video/2/')).toBe('9876543210');
+    expect(airdropPostId('https://x.com/i/web/statuses/555666777')).toBe('555666777');
+    expect(airdropPostId('https://evil.example/oneshot/status/123')).toBeNull();
+    expect(airdropPostId('https://x.com/oneshot')).toBeNull();
+
+    const invalidWallet = airdropEvmAddress.safeParse('bad');
+    expect(invalidWallet.success).toBe(false);
+    if (!invalidWallet.success) {
+      expect(invalidWallet.error.issues[0]?.message).toBe('Enter a valid 0x wallet address.');
+    }
   });
 });

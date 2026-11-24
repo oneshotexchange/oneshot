@@ -91,4 +91,28 @@ describe('AirdropVaultBox visual states', () => {
     expect(html).toContain('/airdrop/tier-contender-locked.webp');
     expect(html).toContain('data-tier="community"');
   });
+
+  it('keeps the mystery seal and hides tier and allocation numbers while checking', () => {
+    const html = renderToStaticMarkup(
+      <AirdropVaultBox
+        tokenSymbol="ONE"
+        tier="lz_winner"
+        baseTokens={40_000}
+        bonusTokens={10_000}
+        projectedTop500Tokens={0}
+        requiredCompleted={0}
+        slotNumber={null}
+        walletConnected={true}
+        unlocked={false}
+        peekTrigger={0}
+        checking={true}
+      />,
+    );
+    expect(html).toContain('airdrop-vault-checking');
+    expect(html).toContain('/airdrop/mystery-sealed.webp');
+    expect(html).toContain('Mystery Vault');
+    expect(html).toContain('Revealing…');
+    expect(html).not.toContain('Sovereign Vault');
+    expect(html).not.toContain('40,000');
+  });
 });

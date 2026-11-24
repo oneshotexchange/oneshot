@@ -137,6 +137,9 @@ export function AirdropVaultBox({
   const [localPeek, setLocalPeek] = useState(0);
   const totalShown = baseTokens + bonusTokens + projectedTop500Tokens;
   const [animatedCount, setAnimatedCount] = useState(totalShown);
+  const totalShownRef = useRef(totalShown);
+  totalShownRef.current = totalShown;
+  const lastTriggerRef = useRef(0);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const tiltRef = useRef<HTMLDivElement | null>(null);
@@ -147,11 +150,28 @@ export function AirdropVaultBox({
   const quickRotateX = useRef<((val: number) => gsap.core.Tween) | null>(null);
   const quickRotateY = useRef<((val: number) => gsap.core.Tween) | null>(null);
 
+  const stage: VaultVisualStage = unlocked
+    ? 'unlocked'
+    : checking
+      ? 'checking'
+      : revealPhase !== 'idle'
+        ? revealPhase
+        : requiredCompleted > 0
+          ? 'charging'
+          : walletConnected
+            ? 'relocked'
+            : 'sealed';
+
   const activeVisual = getAirdropBoxTierVisual(tier);
-  const accent = activeVisual?.accent ?? '#C2CBD6';
-  const glowRgb = activeVisual?.glowRgb ?? '194, 203, 214';
+  const hideIdentity =
+    !walletConnected || stage === 'sealed' || stage === 'checking' || stage === 'charging_open';
+  const visibleVisual = hideIdentity ? null : activeVisual;
+  const accent = visibleVisual?.accent ?? '#C2CBD6';
+  const glowRgb = visibleVisual?.glowRgb ?? '194, 203, 214';
   const glowRef = useRef(glowRgb);
   glowRef.current = glowRgb;
+  const burstGlowRef = useRef(activeVisual?.glowRgb ?? '194, 203, 214');
+  burstGlowRef.current = activeVisual?.glowRgb ?? '194, 203, 214';
 
   // Preload all 7 crisp WebP studio crate renders on mount so state swaps are instant
   useEffect(() => {
@@ -189,14 +209,21 @@ export function AirdropVaultBox({
   // Choreography timeline when checking finishes (peekTrigger) or user clicks Replay opening
   useEffect(() => {
     const triggerCount = peekTrigger + localPeek;
-    if (triggerCount <= 0 || unlocked || !walletConnected) {
+    if (!walletConnected || unlocked) {
+      lastTriggerRef.current = triggerCount;
       setRevealPhase('idle');
       return;
     }
+    if (triggerCount <= lastTriggerRef.current) {
+      return;
+    }
+    lastTriggerRef.current = triggerCount;
+
+    const targetTotal = totalShownRef.current;
 
     if (prefersReducedMotion()) {
       setRevealPhase('peek_open');
-      setAnimatedCount(totalShown);
+      setAnimatedCount(targetTotal);
       const t = window.setTimeout(() => setRevealPhase('idle'), 2400);
       return () => window.clearTimeout(t);
     }
@@ -221,7 +248,8 @@ export function AirdropVaultBox({
         tl.to({}, { duration: 0.46 });
       }
 
-      tl.call(() => {
+      tl.addLabel('revealOpen').call(() => {
+        glowRef.current = burstGlowRef.current;
         setRevealPhase('peek_open');
         burstQueueRef.current += 1;
       });
@@ -231,7 +259,7 @@ export function AirdropVaultBox({
           flashRef.current,
           { opacity: 0.95, scale: 0.55 },
           { opacity: 0, scale: 1.85, duration: 0.72, ease: 'power3.out' },
-          '<',
+          'revealOpen',
         );
       }
 
@@ -240,43 +268,30 @@ export function AirdropVaultBox({
           tiltRef.current,
           { scale: 0.92, y: 8 },
           { scale: 1.03, y: -4, duration: 0.44, ease: 'back.out(1.9)' },
-          '<',
+          'revealOpen',
         ).to(tiltRef.current, { scale: 1, y: 0, duration: 0.35, ease: 'power2.out' });
       }
 
-      if (hudRef.current) {
-        tl.fromTo(
-          hudRef.current,
-          { opacity: 0, y: 20, scale: 0.88 },
-          { opacity: 1, y: 0, scale: 1, duration: 0.48, ease: 'back.out(1.6)' },
-          '<+0.06',
-        );
-      }
-
-      if (totalShown > 0) {
+      if (targetTotal > 0) {
         tl.to(
           counter,
           {
-            value: totalShown,
+            value: targetTotal,
             duration: 0.85,
             ease: 'power2.out',
             onUpdate: () => setAnimatedCount(Math.round(counter.value)),
           },
-          '<',
+          'revealOpen+=0.06',
         );
       }
 
       // Hold the opened allocation showcase briefly, then lock the chest back down
-      tl.to({}, { duration: 1.95 })
-        .call(() => {
-          setRevealPhase('relocking');
-        });
+      tl.to({}, { duration: 1.95 }).call(() => {
+        setRevealPhase('relocking');
+      });
 
-      if (hudRef.current) {
-        tl.to(hudRef.current, { opacity: 0, y: 14, scale: 0.92, duration: 0.28, ease: 'power2.in' });
-      }
       if (tiltRef.current) {
-        tl.to(tiltRef.current, { scale: 0.95, y: 5, duration: 0.18, ease: 'power2.in' }, '<+0.12').to(
+        tl.to(tiltRef.current, { scale: 0.95, y: 5, duration: 0.18, ease: 'power2.in' }, '+=0.12').to(
           tiltRef.current,
           { scale: 1, y: 0, duration: 0.28, ease: 'bounce.out' },
         );
@@ -288,7 +303,25 @@ export function AirdropVaultBox({
     return () => {
       ctx.revert();
     };
-  }, [peekTrigger, localPeek, unlocked, walletConnected, totalShown]);
+  }, [peekTrigger, localPeek, unlocked, walletConnected]);
+
+  // Animate reveal HUD entrance and relock exit once it has mounted for its phase
+  useEffect(() => {
+    if (typeof window === 'undefined' || prefersReducedMotion() || !hudRef.current) return;
+    const ctx = gsap.context(() => {
+      if (!hudRef.current) return;
+      if (revealPhase === 'peek_open') {
+        gsap.fromTo(
+          hudRef.current,
+          { opacity: 0, y: 20, scale: 0.88 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.48, ease: 'back.out(1.6)' },
+        );
+      } else if (revealPhase === 'relocking') {
+        gsap.to(hudRef.current, { opacity: 0, y: 14, scale: 0.92, duration: 0.28, ease: 'power2.in' });
+      }
+    }, hudRef);
+    return () => ctx.revert();
+  }, [revealPhase]);
 
   // 60fps Canvas 2D ambient embers & reveal shockwave particle burst
   useEffect(() => {
@@ -450,19 +483,8 @@ export function AirdropVaultBox({
     quickRotateY.current?.(0);
   }
 
-  const stage: VaultVisualStage = unlocked
-    ? 'unlocked'
-    : checking
-      ? 'checking'
-      : revealPhase !== 'idle'
-        ? revealPhase
-        : requiredCompleted > 0
-          ? 'charging'
-          : walletConnected
-            ? 'relocked'
-            : 'sealed';
-
   const chestOpen = stage === 'peek_open' || stage === 'unlocked';
+  const revealingMystery = stage === 'checking' || stage === 'charging_open';
   const revealedLocked =
     walletConnected &&
     !unlocked &&
@@ -470,27 +492,25 @@ export function AirdropVaultBox({
     stage !== 'charging_open' &&
     stage !== 'peek_open';
 
-  const crateImage =
-    !walletConnected || !activeVisual || stage === 'checking' || stage === 'charging_open'
-      ? AIRDROP_BOX_MYSTERY_IMAGE
-      : chestOpen
-        ? activeVisual.openImage
-        : activeVisual.lockedImage;
+  const crateImage = !visibleVisual
+    ? AIRDROP_BOX_MYSTERY_IMAGE
+    : chestOpen
+      ? visibleVisual.openImage
+      : visibleVisual.lockedImage;
 
-  const crateAlt =
-    !walletConnected || !activeVisual
-      ? 'Sealed mystery airdrop vault'
-      : chestOpen
-        ? `${activeVisual.name} open with allocation revealed`
-        : `${activeVisual.name} locked`;
+  const crateAlt = !visibleVisual
+    ? 'Sealed mystery airdrop vault'
+    : chestOpen
+      ? `${visibleVisual.name} open with allocation revealed`
+      : `${visibleVisual.name} locked`;
 
-  const tierTitle = activeVisual ? `${activeVisual.name} · ${activeVisual.badge}` : 'Mystery Vault';
+  const tierTitle = visibleVisual ? `${visibleVisual.name} · ${visibleVisual.badge}` : 'Mystery Vault';
 
   const statusText =
     stage === 'unlocked'
       ? slotNumber
-        ? `${activeVisual?.name || 'Box'} unlocked · Spot #${slotNumber.toLocaleString()}`
-        : `${activeVisual?.name || 'Box'} unlocked · Top 500 ranked`
+        ? `${visibleVisual?.name || 'Box'} unlocked · Spot #${slotNumber.toLocaleString()}`
+        : `${visibleVisual?.name || 'Box'} unlocked · Top 500 ranked`
       : stage === 'checking'
         ? 'Inspecting wallet allocation…'
         : stage === 'charging_open'
@@ -500,9 +520,9 @@ export function AirdropVaultBox({
             : stage === 'relocking'
               ? 'Locking allocation inside vault…'
               : stage === 'charging'
-                ? `${activeVisual?.name || 'Box'} locked · ${requiredCompleted} of 4 missions complete`
+                ? `${visibleVisual?.name || 'Box'} locked · ${requiredCompleted} of 4 missions complete`
                 : stage === 'relocked'
-                  ? `${activeVisual?.name || 'Box'} locked · Finish 4 missions to unlock`
+                  ? `${visibleVisual?.name || 'Box'} locked · Finish 4 missions to unlock`
                   : 'Check your wallet to open your mystery box';
 
   const revealedDisplayValue =
@@ -525,7 +545,7 @@ export function AirdropVaultBox({
     <div
       className={`airdrop-vault airdrop-vault-${stage}`}
       data-testid="airdrop-vault-box"
-      data-tier={tier || 'mystery'}
+      data-tier={visibleVisual ? visibleVisual.tier : 'mystery'}
       data-stage={stage}
       style={
         {
@@ -577,10 +597,10 @@ export function AirdropVaultBox({
           />
         </div>
 
-        {(stage === 'peek_open' || stage === 'unlocked') && (
+        {(stage === 'peek_open' || stage === 'relocking' || stage === 'unlocked') && (
           <div ref={hudRef} className="vault-reveal-hud" role="status">
             <span className="vault-hud-kicker">
-              <Sparkles size={12} /> {activeVisual?.name || 'Allocation'}
+              <Sparkles size={12} /> {visibleVisual?.name || 'Allocation'}
             </span>
             <strong>{revealedDisplayValue}</strong>
             <small>{stage === 'unlocked' ? 'Unlocked & reserved' : 'Revealed · Relocking for missions'}</small>
@@ -616,18 +636,24 @@ export function AirdropVaultBox({
       <div className="airdrop-vault-summary">
         <div>
           <span>Box Tier</span>
-          <strong>{activeVisual ? activeVisual.name : 'Unchecked Mystery'}</strong>
+          <strong>
+            {revealingMystery ? 'Unlocking seal…' : visibleVisual ? visibleVisual.name : 'Unchecked Mystery'}
+          </strong>
         </div>
         <div>
           <span>LayerZero + Bonus</span>
           <strong>
-            {baseTokens.toLocaleString()} + {bonusTokens.toLocaleString()} {tokenSymbol}
+            {revealingMystery ? 'Revealing…' : `${baseTokens.toLocaleString()} + ${bonusTokens.toLocaleString()} ${tokenSymbol}`}
           </strong>
         </div>
         <div>
           <span>Top 500 Projected</span>
           <strong>
-            {projectedTop500Tokens > 0 ? `+${projectedTop500Tokens.toLocaleString()} ${tokenSymbol}` : 'Compete by rank'}
+            {revealingMystery
+              ? 'Revealing…'
+              : projectedTop500Tokens > 0
+                ? `+${projectedTop500Tokens.toLocaleString()} ${tokenSymbol}`
+                : 'Compete by rank'}
           </strong>
         </div>
       </div>

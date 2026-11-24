@@ -45,6 +45,7 @@ export interface AirdropTransaction {
   allParticipants(): Promise<AirdropParticipant[]>;
   countQualifiedReferrals(participantId: string): Promise<number>;
   qualifiedReferralCounts(): Promise<Record<string, number>>;
+  referralCounts(): Promise<Record<string, { total: number; qualified: number }>>;
   countReservedSlots(): Promise<{ slots: number; generalTokens: number }>;
   maxReservedSlotNumber(): Promise<number>;
   publishedMerkle(): Promise<AirdropPublishedMerkle | null>;
@@ -184,6 +185,18 @@ function localTransaction(state: LocalState): AirdropTransaction {
       for (const p of Object.values(state.participants)) {
         if (p.referrerId && isQualifiedReferral(p)) {
           counts[p.referrerId] = (counts[p.referrerId] || 0) + 1;
+        }
+      }
+      return counts;
+    },
+    referralCounts: async () => {
+      const counts: Record<string, { total: number; qualified: number }> = {};
+      for (const p of Object.values(state.participants)) {
+        if (!p.referrerId) continue;
+        const entry = (counts[p.referrerId] ||= { total: 0, qualified: 0 });
+        entry.total += 1;
+        if (isQualifiedReferral(p)) {
+          entry.qualified += 1;
         }
       }
       return counts;
@@ -427,6 +440,31 @@ export function createAirdropStore(pool: () => Pool | null = database): AirdropS
             const counts: Record<string, number> = {};
             for (const row of res.rows) {
               if (row.referrer_id) counts[String(row.referrer_id)] = Number(row.total || 0);
+            }
+            return counts;
+          },
+          referralCounts: async () => {
+            const res = await client.query(
+              `SELECT
+                 referrer_id,
+                 count(*)::int AS total,
+                 count(*) FILTER (
+                   WHERE wallet IS NOT NULL
+                     AND value->'checks'->'follow'->>'state'='verified'
+                     AND jsonb_array_length(COALESCE(value->'posts','[]')) >= 1
+                 )::int AS qualified
+               FROM oneshot_airdrop_participants
+               WHERE referrer_id IS NOT NULL
+               GROUP BY referrer_id`,
+            );
+            const counts: Record<string, { total: number; qualified: number }> = {};
+            for (const row of res.rows) {
+              if (row.referrer_id) {
+                counts[String(row.referrer_id)] = {
+                  total: Number(row.total || 0),
+                  qualified: Number(row.qualified || 0),
+                };
+              }
             }
             return counts;
           },

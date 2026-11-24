@@ -176,6 +176,7 @@ describe.skipIf(!connectionString)('Airdrop PostgreSQL persistence, snapshot ded
 
       expect(await store.transaction(tx => tx.countQualifiedReferrals(p1Id))).toBe(1);
       expect(await store.transaction(tx => tx.qualifiedReferralCounts())).toEqual({ [p1Id]: 1 });
+      expect(await store.transaction(tx => tx.referralCounts())).toEqual({ [p1Id]: { total: 2, qualified: 1 } });
       expect(await store.transaction(tx => tx.countReservedSlots())).toEqual({ slots: 1, generalTokens: 50_000 });
       expect(await store.transaction(tx => tx.maxReservedSlotNumber())).toBe(1);
       expect((await store.transaction(tx => tx.participantByPostId('999001')))?.id).toBe(p1Id);

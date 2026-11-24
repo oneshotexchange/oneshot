@@ -33,6 +33,8 @@ const postSchema = z.object({
     likes: z.number(),
     reposts: z.number(),
     replies: z.number(),
+    quotes: z.number().optional(),
+    bookmarks: z.number().optional(),
     views: z.number(),
   }),
   engagementScore: z.number(),
@@ -66,6 +68,7 @@ const participantSchema = z.object({
   baseGeneralTokens: z.number(),
   engagementBonusTokens: z.number(),
   reservedGeneralTokens: z.number(),
+  invitedReferrals: z.number().int().nonnegative(),
   qualifiedReferrals: z.number().int().nonnegative(),
   engagementScore: z.number().nonnegative(),
   engagementBonusBps: z.number().int().nonnegative(),
@@ -155,6 +158,17 @@ export const airdropWalletChallengeResponseSchema = z.object({
   message: z.string().min(1).max(2000),
 });
 
+export class AirdropApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AirdropApiError';
+  }
+}
+
 export async function airdropRequest<T>(
   path: string,
   options: {
@@ -178,7 +192,12 @@ export async function airdropRequest<T>(
   });
   const body = await customerResponseJson(response, { signal: options.signal });
   if (!response.ok) {
-    throw new Error(customerErrorDetails(body).message || 'Could not load airdrop details. Try again.');
+    const details = customerErrorDetails(body);
+    throw new AirdropApiError(
+      response.status,
+      details.code,
+      details.message || 'Could not load airdrop details. Try again.',
+    );
   }
   const parsed = options.schema.safeParse(body);
   if (!parsed.success) {
@@ -261,7 +280,12 @@ export function createAirdropEnrollment() {
         onStart(): void;
       },
       retry = false,
-    ): Promise<{ state: 'skipped' } | { state: 'saved'; scope: string; data: AirdropMeResponse } | { state: 'failed' | 'stale'; scope: string }> {
+    ): Promise<
+      | { state: 'skipped' }
+      | { state: 'saved'; scope: string; data: AirdropMeResponse }
+      | { state: 'stale'; scope: string }
+      | { state: 'failed'; scope: string; code?: string; message?: string }
+    > {
       const { scope, account, campaign } = input;
       if (
         !scope ||
@@ -299,8 +323,15 @@ export function createAirdropEnrollment() {
           throw new Error('Could not initialize your airdrop box.');
         }
         return input.currentScope() === scope ? { state: 'saved', scope, data } : { state: 'stale', scope };
-      } catch {
-        return { state: input.currentScope() === scope ? 'failed' : 'stale', scope };
+      } catch (error) {
+        const code = error instanceof AirdropApiError ? error.code : undefined;
+        const message = error instanceof Error && error.message ? error.message : undefined;
+        if (code === 'AIRDROP_REFERRAL_INVALID' || code === 'AIRDROP_REFERRAL_SELF') {
+          attempted.delete(scope);
+        }
+        return input.currentScope() === scope
+          ? { state: 'failed', scope, code, message }
+          : { state: 'stale', scope };
       } finally {
         active.delete(scope);
       }
@@ -310,35 +341,76 @@ export function createAirdropEnrollment() {
 
 const referralKey = 'oneshot.airdrop.invitation';
 
+export type ReferralStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type ReferralStorageInput = ReferralStorage | readonly ReferralStorage[];
+
+export function airdropReferralStorages(): ReferralStorage[] {
+  const stores: ReferralStorage[] = [];
+  if (typeof window === 'undefined') return stores;
+  for (const kind of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      const store = window[kind];
+      if (store) stores.push(store);
+    } catch {
+      /* Storage access may be unavailable in restricted browser modes. */
+    }
+  }
+  return stores;
+}
+
+function toStorageList(storage?: ReferralStorageInput): readonly ReferralStorage[] {
+  if (!storage) return [];
+  return 'getItem' in storage ? [storage] : storage;
+}
+
 export function readAirdropReferral(
   search: string,
-  storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+  storage?: ReferralStorageInput,
 ): string | null {
+  const stores = toStorageList(storage);
   const value = new URLSearchParams(search).get('ref');
   if (value !== null) {
     if (!/^[A-Za-z0-9_-]{16}$/.test(value)) {
       clearAirdropReferral(storage);
       return null;
     }
-    try {
-      storage?.setItem(referralKey, value);
-    } catch {
-      /* URL preserves attribution */
+    for (const store of stores) {
+      try {
+        store.setItem(referralKey, value);
+      } catch {
+        /* URL preserves attribution */
+      }
     }
     return value;
   }
-  try {
-    const saved = storage?.getItem(referralKey);
-    return saved && /^[A-Za-z0-9_-]{16}$/.test(saved) ? saved : null;
-  } catch {
-    return null;
+  for (const store of stores) {
+    try {
+      const saved = store.getItem(referralKey);
+      if (saved && /^[A-Za-z0-9_-]{16}$/.test(saved)) {
+        for (const target of stores) {
+          if (target !== store) {
+            try {
+              if (target.getItem(referralKey) !== saved) target.setItem(referralKey, saved);
+            } catch {
+              /* Optional sibling storage */
+            }
+          }
+        }
+        return saved;
+      }
+    } catch {
+      /* Optional storage */
+    }
   }
+  return null;
 }
 
-export function clearAirdropReferral(storage?: Pick<Storage, 'removeItem'>) {
-  try {
-    storage?.removeItem(referralKey);
-  } catch {
-    /* Optional storage */
+export function clearAirdropReferral(storage?: ReferralStorageInput) {
+  for (const store of toStorageList(storage)) {
+    try {
+      store.removeItem(referralKey);
+    } catch {
+      /* Optional storage */
+    }
   }
 }

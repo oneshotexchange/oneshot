@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { z } from 'zod';
 import { customerFetch, customerResponseJson, customerErrorDetails } from '../lib/customer-http';
 import { readGenesisReferral } from '../lib/client-genesis-api';
-import { readAirdropReferral } from '../lib/client-airdrop-api';
+import { readAirdropReferral, airdropReferralStorages } from '../lib/client-airdrop-api';
 
 const statusSchema = z.object({ available: z.boolean(), user: z.object({ userId:z.string(),sessionId:z.string(),expiresAt:z.number(),profile:z.object({id:z.string().regex(/^\d{1,32}$/),username:z.string(),name:z.string(),avatarUrl:z.string().nullable()}) }).nullable() });
 type Status = z.infer<typeof statusSchema>;
@@ -22,7 +22,7 @@ export function GenesisAuthProvider({children}:{children:ReactNode}) {
     let storage:Storage|undefined;try{storage=window.sessionStorage;}catch{/* Referral can travel through server OAuth state. */}
     const target = options?.returnTo || (window.location.pathname === '/airdrop' ? '/airdrop' : undefined);
     const referral = target === '/airdrop'
-      ? (readAirdropReferral(window.location.search, storage) || readGenesisReferral(window.location.search, storage))
+      ? readAirdropReferral(window.location.search, airdropReferralStorages())
       : readGenesisReferral(window.location.search, storage);
     const payload = { ...(referral ? { referral } : {}), ...(target ? { returnTo: target } : {}) };
     const value=z.object({url:z.string().url()}).parse(await request('start',payload));const url=new URL(value.url);

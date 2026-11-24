@@ -12,6 +12,7 @@ import {
   AIRDROP_CONSENT_VERSION,
   AIRDROP_GENERAL_POOL,
   airdropCampaignSchema,
+  computePostEngagementScore,
 } from '../../../web/lib/airdrop-schema';
 
 function verifyProof(proof: readonly Hex[], root: Hex, leaf: Hex): boolean {
@@ -63,7 +64,7 @@ function makeFixture(
     verifyPost: vi.fn(async (profile, _campaign, postUrl) => {
       const postId = postUrl.split('/').pop()!;
       const metrics = metricsByPost.get(postId) ?? { likes: 10, reposts: 2, replies: 1, views: 300 };
-      const engagementScore = metrics.likes * 2 + metrics.reposts * 4 + metrics.replies * 3 + Math.floor(metrics.views / 100);
+      const engagementScore = computePostEngagementScore(metrics);
       return {
         postId,
         postUrl: `https://x.com/${profile.username}/status/${postId}`,
@@ -73,7 +74,7 @@ function makeFixture(
     }),
     refreshPost: vi.fn(async postId => {
       const metrics = metricsByPost.get(postId) ?? { likes: 10, reposts: 2, replies: 1, views: 300 };
-      const engagementScore = metrics.likes * 2 + metrics.reposts * 4 + metrics.replies * 3 + Math.floor(metrics.views / 100);
+      const engagementScore = computePostEngagementScore(metrics);
       return { metrics, engagementScore };
     }),
     verifyCreatedToken: vi.fn(async () => ({
@@ -188,6 +189,16 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
     const refCode = enrolledWinner.participant!.code;
     await f.service.enroll(sComm, AIRDROP_CONSENT_VERSION, refCode);
 
+    // Self-referral across a distinct userId holding the same X identity is rejected cleanly
+    await expect(
+      f.service.enroll({ ...createSession(1), userId: 'x:1-alt-session' }, AIRDROP_CONSENT_VERSION, refCode),
+    ).rejects.toMatchObject({ code: 'AIRDROP_REFERRAL_SELF', status: 409 });
+
+    // Invited referral is tracked immediately before qualification
+    const invitedBeforeQualify = await f.service.me(sWinner);
+    expect(invitedBeforeQualify.participant?.invitedReferrals).toBe(1);
+    expect(invitedBeforeQualify.participant?.qualifiedReferrals).toBe(0);
+
     await bind(f.service, sWinner, accWinner);
     await bind(f.service, sComm, accCommunity);
 
@@ -220,8 +231,9 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
     expect(unlockedComm.participant?.rank).toBe(2);
     expect(unlockedComm.participant?.projectedTop500Tokens).toBe(1_500_000);
 
-    // Winner now has 1 qualified referral
+    // Winner now has 1 invited and 1 qualified referral
     const refreshedWinner = await f.service.me(sWinner);
+    expect(refreshedWinner.participant?.invitedReferrals).toBe(1);
     expect(refreshedWinner.participant?.qualifiedReferrals).toBe(1);
 
     // Duplicate post submission across users blocked; >5 posts blocked; trade_token blocked while disabled

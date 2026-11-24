@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AIRDROP_MAX_POST_ENGAGEMENT_SCORE,
   AIRDROP_TOP500_BRACKETS,
   AIRDROP_TOP500_POOL,
   computeBaseGeneralTokens,
@@ -30,10 +31,21 @@ describe('Airdrop schema calculations and LayerZero snapshot parser', () => {
     expect(computeBaseGeneralTokens('community', 40_000)).toBe(0);
 
     const score = computePostEngagementScore({ likes: 100, reposts: 20, replies: 10, views: 5_000 });
-    // 100*2 + 20*4 + 10*3 + 50 = 360
-    expect(score).toBe(360);
-    expect(computeEngagementBonusBps(360)).toBe(1800);
-    expect(computeEngagementBonusBps(10_000)).toBe(5000);
+    // 100*3 + 20*6 + 10*4 + floor(5000/20) = 710
+    expect(score).toBe(710);
+    expect(
+      computePostEngagementScore({
+        likes: 100,
+        reposts: 20,
+        replies: 10,
+        quotes: 5,
+        bookmarks: 15,
+        views: 5_000,
+      }),
+    ).toBe(780);
+    expect(computePostEngagementScore({ likes: 10_000, views: 500_000 })).toBe(AIRDROP_MAX_POST_ENGAGEMENT_SCORE);
+    expect(computeEngagementBonusBps(710)).toBe(3550);
+    expect(computeEngagementBonusBps(AIRDROP_MAX_POST_ENGAGEMENT_SCORE)).toBe(5000);
     expect(tokensToRaw8(40_000)).toBe(4_000_000_000_000n);
   });
 

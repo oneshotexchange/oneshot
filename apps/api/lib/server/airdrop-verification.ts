@@ -29,11 +29,15 @@ const postSchema = z.object({
     likeCount: metric,
     retweetCount: metric,
     replyCount: metric,
+    quoteCount: metric,
+    bookmarkCount: metric,
     viewCount: metric,
   }),
 });
 
 const retweetersSchema = z.object({
+  has_more: z.boolean().optional(),
+  next_cursor: z.string().nullable().optional(),
   users: z.array(z.object({ id: id.optional(), userName: handle.optional() })).optional(),
   data: z.array(z.object({ id: id.optional(), userName: handle.optional() })).optional(),
 });
@@ -130,6 +134,8 @@ export function createAirdropVerifier(options: {
       likes: post.likeCount ?? 0,
       reposts: post.retweetCount ?? 0,
       replies: post.replyCount ?? 0,
+      quotes: post.quoteCount ?? 0,
+      bookmarks: post.bookmarkCount ?? 0,
       views: post.viewCount ?? 0,
     };
   }
@@ -216,16 +222,36 @@ export function createAirdropVerifier(options: {
       if (!campaign.announcementPostId) {
         throw new AirdropProviderUnavailable('Repost verification is temporarily unavailable. Try again shortly.');
       }
-      const parsed = retweetersSchema.safeParse(
-        await read('/twitter/tweet/retweeters', { tweetId: campaign.announcementPostId }),
-      );
-      if (!parsed.success) throw new AirdropProviderUnavailable();
-      const users = [...(parsed.data.users || []), ...(parsed.data.data || [])];
-      const matched = users.some(user =>
-        user.id
-          ? user.id === profile.id
-          : Boolean(user.userName && user.userName.toLowerCase() === profile.username.toLowerCase()),
-      );
+      const MAX_RETWEETER_PAGES = 6;
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      let matched = false;
+      for (let page = 0; page < MAX_RETWEETER_PAGES; page++) {
+        const parsed = retweetersSchema.safeParse(
+          await read('/twitter/tweet/retweeters', {
+            id: campaign.announcementPostId,
+            ...(cursor ? { cursor } : {}),
+          }),
+        );
+        if (!parsed.success) throw new AirdropProviderUnavailable();
+        const users = [...(parsed.data.users || []), ...(parsed.data.data || [])];
+        if (
+          users.some(user =>
+            user.id
+              ? user.id === profile.id
+              : Boolean(user.userName && user.userName.toLowerCase() === profile.username.toLowerCase()),
+          )
+        ) {
+          matched = true;
+          break;
+        }
+        const nextCursor = parsed.data.next_cursor?.trim();
+        if (!parsed.data.has_more || !nextCursor || seenCursors.has(nextCursor)) {
+          break;
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
       if (!matched) {
         throw new AirdropEvidenceError(
           'Repost the announcement on X first, or paste your quote-post link and check again.',

@@ -62,6 +62,7 @@ const savedMe: AirdropMeResponse = {
     baseGeneralTokens: 0,
     engagementBonusTokens: 0,
     reservedGeneralTokens: 0,
+    invitedReferrals: 0,
     qualifiedReferrals: 0,
     engagementScore: 0,
     engagementBonusBps: 0,
@@ -95,6 +96,32 @@ describe('Airdrop client helpers and enrollment', () => {
     readAirdropReferral('?ref=abcdefghijklmnop', storage);
     clearAirdropReferral(storage);
     expect(readAirdropReferral('', storage)).toBeNull();
+  });
+
+  it('syncs referral codes across multi-storage lists with fallback', () => {
+    const createMemoryStore = () => {
+      const map = new Map<string, string>();
+      return {
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          map.set(k, v);
+        },
+        removeItem: (k: string) => {
+          map.delete(k);
+        },
+      };
+    };
+    const local = createMemoryStore();
+    const session = createMemoryStore();
+
+    expect(readAirdropReferral('?ref=abcdefghijklmnop', [local, session])).toBe('abcdefghijklmnop');
+    // Second tab loses sessionStorage but still recovers from localStorage and backfills sessionStorage
+    const freshSession = createMemoryStore();
+    expect(readAirdropReferral('', [local, freshSession])).toBe('abcdefghijklmnop');
+    expect(freshSession.getItem('oneshot.airdrop.invitation')).toBe('abcdefghijklmnop');
+
+    clearAirdropReferral([local, freshSession]);
+    expect(readAirdropReferral('', [local, freshSession])).toBeNull();
   });
 
   it('rejects non-JSON campaign responses rather than silently passing', async () => {
@@ -132,5 +159,49 @@ describe('Airdrop client helpers and enrollment', () => {
     const res2 = await enrollment.start(input);
     expect(res2).toEqual({ state: 'skipped' });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows immediate re-enrollment after clearing an invalid or self referral error', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'AIRDROP_REFERRAL_INVALID', message: 'This invitation link is invalid or expired.' } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json(savedMe));
+    vi.stubGlobal('fetch', fetcher);
+
+    const enrollment = createAirdropEnrollment();
+    const baseInput = {
+      scope: 'x:123:s1',
+      currentScope: () => 'x:123:s1',
+      authReady: true,
+      verifiedProfileId: '123',
+      campaign: campaignOpen,
+      campaignLoading: false,
+      campaignError: false,
+      account: { scope: 'x:123:s1', data: emptyMe },
+      accountLoading: false,
+      accountError: false,
+      busy: false,
+      sessionId: 's1',
+      onStart: vi.fn(),
+    };
+
+    const failed = await enrollment.start({ ...baseInput, referral: 'badreferralcode1' });
+    expect(failed).toEqual({
+      state: 'failed',
+      scope: 'x:123:s1',
+      code: 'AIRDROP_REFERRAL_INVALID',
+      message: 'This invitation link is invalid or expired.',
+    });
+
+    const recovered = await enrollment.start({ ...baseInput, referral: null });
+    expect(recovered).toEqual({ state: 'saved', scope: 'x:123:s1', data: savedMe });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(String(fetcher.mock.calls[1][1]?.body));
+    expect(secondBody).toEqual({ consentVersion: AIRDROP_CONSENT_VERSION });
   });
 });

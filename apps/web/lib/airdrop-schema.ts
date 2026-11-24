@@ -12,6 +12,9 @@ export const AIRDROP_TREASURY_POOL = 50_000_000;
 export const AIRDROP_GENERAL_SLOT_CAP = 10_000;
 export const AIRDROP_DEFAULT_WINNER_TOKENS = 40_000;
 export const AIRDROP_MAX_POSTS = 5;
+export const AIRDROP_POST_BASE_POINTS = 100;
+export const AIRDROP_REFERRAL_POINTS = 150;
+export const AIRDROP_MAX_POST_ENGAGEMENT_SCORE = 5_000;
 export const AIRDROP_MAX_ENGAGEMENT_BONUS_BPS = 5000;
 export const AIRDROP_FDV_USD = 960_000;
 export const AIRDROP_LOCK_DAYS = 7;
@@ -63,6 +66,8 @@ export type AirdropPostMetrics = {
   reposts: number;
   replies: number;
   views: number;
+  quotes?: number;
+  bookmarks?: number;
 };
 
 export type AirdropVerifiedPost = {
@@ -192,6 +197,7 @@ export type AirdropParticipantSummary = Omit<
   AirdropParticipant,
   'userId' | 'referrerId' | 'walletChallengeNonce' | 'consentVersion'
 > & {
+  invitedReferrals: number;
   qualifiedReferrals: number;
   engagementScore: number;
   engagementBonusBps: number;
@@ -329,8 +335,12 @@ export function computePostEngagementScore(metrics: Partial<AirdropPostMetrics> 
   const likes = Math.max(0, Math.floor(metrics.likes ?? 0));
   const reposts = Math.max(0, Math.floor(metrics.reposts ?? 0));
   const replies = Math.max(0, Math.floor(metrics.replies ?? 0));
+  const quotes = Math.max(0, Math.floor(metrics.quotes ?? 0));
+  const bookmarks = Math.max(0, Math.floor(metrics.bookmarks ?? 0));
   const views = Math.max(0, Math.floor(metrics.views ?? 0));
-  return likes * 2 + reposts * 4 + replies * 3 + Math.floor(views / 100);
+  const raw =
+    likes * 3 + reposts * 6 + replies * 4 + quotes * 8 + bookmarks * 2 + Math.floor(views / 20);
+  return Math.min(AIRDROP_MAX_POST_ENGAGEMENT_SCORE, raw);
 }
 
 export function computeEngagementBonusBps(totalEngagementScore: number): number {
@@ -386,9 +396,9 @@ export function computeParticipantScore(
   if (participant.checks.repost?.state === 'verified') score += 50;
   if (participant.checks.create_token?.state === 'verified') score += 200;
   if (participant.checks.trade_token?.state === 'verified') score += 150;
-  score += Math.min(AIRDROP_MAX_POSTS, participant.posts.length) * 100;
+  score += Math.min(AIRDROP_MAX_POSTS, participant.posts.length) * AIRDROP_POST_BASE_POINTS;
   score += computeParticipantEngagementScore(participant);
-  score += Math.max(0, Math.floor(qualifiedReferrals)) * 150;
+  score += Math.max(0, Math.floor(qualifiedReferrals)) * AIRDROP_REFERRAL_POINTS;
   if (participant.tier === 'lz_winner') score += 100;
   else if (participant.tier === 'lz_user_5tx') score += 50;
   return score;

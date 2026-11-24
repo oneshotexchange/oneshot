@@ -132,6 +132,7 @@ function requireOwner(participant: AirdropParticipant | null, session: GenesisSe
 
 type RankedRow = {
   participant: AirdropParticipant;
+  invitedReferrals: number;
   qualifiedReferrals: number;
   engagementScore: number;
   totalScore: number;
@@ -140,13 +141,16 @@ type RankedRow = {
 };
 
 async function computeRankings(tx: AirdropTransaction): Promise<Map<string, RankedRow>> {
-  const [all, referralCounts] = await Promise.all([tx.allParticipants(), tx.qualifiedReferralCounts()]);
+  const [all, referralMap] = await Promise.all([tx.allParticipants(), tx.referralCounts()]);
   const rows: RankedRow[] = all.map(participant => {
-    const qualifiedReferrals = referralCounts[participant.id] ?? 0;
+    const referralStats = referralMap[participant.id];
+    const invitedReferrals = referralStats?.total ?? 0;
+    const qualifiedReferrals = referralStats?.qualified ?? 0;
     const engagementScore = computeParticipantEngagementScore(participant);
     const totalScore = computeParticipantScore(participant, qualifiedReferrals);
     return {
       participant,
+      invitedReferrals,
       qualifiedReferrals,
       engagementScore,
       totalScore,
@@ -312,6 +316,7 @@ export function createAirdropService(options: {
       profile: session.xAccount || null,
       participant: {
         ...rest,
+        invitedReferrals: row.invitedReferrals,
         qualifiedReferrals: row.qualifiedReferrals,
         engagementScore: row.engagementScore,
         engagementBonusBps,
@@ -421,12 +426,15 @@ export function createAirdropService(options: {
           return buildMe(tx, session);
         }
         await assertWritableCampaign(tx, now());
-        if (await tx.participant('xId', identity.id)) {
-          fail('AIRDROP_IDENTITY_USED', 'This X account is already linked to an airdrop box.');
-        }
         const referrer = referral ? await tx.participant('code', referral) : null;
         if (referral && !referrer) {
           fail('AIRDROP_REFERRAL_INVALID', 'This invitation link is invalid or expired.');
+        }
+        if (referrer && (referrer.userId === session.userId || referrer.profile.id === identity.id)) {
+          fail('AIRDROP_REFERRAL_SELF', 'You cannot use your own invitation link.');
+        }
+        if (await tx.participant('xId', identity.id)) {
+          fail('AIRDROP_IDENTITY_USED', 'This X account is already linked to an airdrop box.');
         }
         const createdAt = new Date(now()).toISOString();
         const participant: AirdropParticipant = {

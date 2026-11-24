@@ -35,6 +35,8 @@ import {
   AIRDROP_GENERAL_POOL,
   AIRDROP_LIQUIDITY_POOL,
   AIRDROP_MAX_POSTS,
+  AIRDROP_POST_BASE_POINTS,
+  AIRDROP_REFERRAL_POINTS,
   AIRDROP_TEAM_POOL,
   AIRDROP_TOP500_BRACKETS,
   AIRDROP_TOP500_POOL,
@@ -49,6 +51,7 @@ import {
 } from '../lib/airdrop-schema';
 import {
   airdropAccountRequest,
+  airdropReferralStorages,
   checkWalletEligibility,
   clearAirdropReferral,
   createAirdropEnrollment,
@@ -73,14 +76,6 @@ type OnChainSchedule = {
   unlockedAmount: bigint;
   withdrawable: bigint;
 };
-
-function sessionStorageIfAvailable() {
-  try {
-    return window.sessionStorage;
-  } catch {
-    return undefined;
-  }
-}
 
 function formatWalletProviderError(reason: unknown, fallback: string): string {
   const code =
@@ -135,8 +130,22 @@ export function AirdropPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [referral, setReferral] = useState(() =>
-    readAirdropReferral(window.location.search, sessionStorageIfAvailable()),
+    readAirdropReferral(window.location.search, airdropReferralStorages()),
   );
+  const refParam = searchParams.get('ref');
+
+  useEffect(() => {
+    const stores = airdropReferralStorages();
+    if (refParam !== null) {
+      const next = readAirdropReferral(`?ref=${encodeURIComponent(refParam)}`, stores);
+      setReferral(prev => (prev === next ? prev : next));
+      return;
+    }
+    const stored = readAirdropReferral('', stores);
+    if (stored) {
+      setReferral(prev => prev ?? stored);
+    }
+  }, [refParam]);
 
   const [leaderboard, setLeaderboard] = useState<{ totalRanked: number; entries: AirdropLeaderboardEntry[] } | null>(
     null,
@@ -266,6 +275,20 @@ export function AirdropPage() {
     return () => controller.abort();
   }, [identity, refreshAccount]);
 
+  const removeInvitation = useCallback(() => {
+    clearAirdropReferral(airdropReferralStorages());
+    setReferral(null);
+    setSearchParams(
+      params => {
+        if (!params.has('ref')) return params;
+        const next = new URLSearchParams(params);
+        next.delete('ref');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   const enrollParticipant = useCallback(
     async (retry = false) => {
       const scope = identity;
@@ -298,10 +321,19 @@ export function AirdropPage() {
         setAccount({ scope: result.scope, data: result.data });
         setAccountLoading(false);
         setEnrollmentError(null);
-        clearAirdropReferral(sessionStorageIfAvailable());
-        setReferral(null);
+        removeInvitation();
       } else if (result.state === 'failed') {
-        setEnrollmentError('Your X account is connected, but your airdrop box could not be created. Please try again.');
+        if (result.code === 'AIRDROP_REFERRAL_INVALID' || result.code === 'AIRDROP_REFERRAL_SELF') {
+          removeInvitation();
+          setEnrollmentError(null);
+          setNotice(
+            result.message || 'That invitation link could not be applied, so your box opened without a referral.',
+          );
+        } else {
+          setEnrollmentError(
+            result.message || 'Your X account is connected, but your airdrop box could not be created. Please try again.',
+          );
+        }
       }
       setBusy(prev => (prev === 'enroll' ? null : prev));
     },
@@ -319,24 +351,13 @@ export function AirdropPage() {
       accountError,
       busy,
       referral,
+      removeInvitation,
     ],
   );
 
   useEffect(() => {
     void enrollParticipant(false);
   }, [enrollParticipant]);
-
-  function removeInvitation() {
-    clearAirdropReferral(sessionStorageIfAvailable());
-    setReferral(null);
-    setSearchParams(
-      params => {
-        params.delete('ref');
-        return params;
-      },
-      { replace: true },
-    );
-  }
 
   const me = account?.scope === identity ? account.data : null;
   const participant = me?.participant || null;
@@ -1006,7 +1027,9 @@ export function AirdropPage() {
               </div>
               <p>
                 Publish 1 original post mentioning @{campaign?.projectHandle || 'oneshot'} to unlock your box. You can
-                verify up to 5 posts—engagement adds up to a <strong>+50% bonus</strong> and raises your Top 500 rank.
+                verify up to {AIRDROP_MAX_POSTS} posts (+{AIRDROP_POST_BASE_POINTS} base pts each). Views (1 pt per 20
+                views), likes (+3), reposts (+6), replies (+4), quotes (+8), and bookmarks (+2) add up to a{' '}
+                <strong>+50% box bonus</strong> and lift your Top 500 rank.
               </p>
               {participant && (
                 <>
@@ -1059,8 +1082,11 @@ export function AirdropPage() {
                               Post #{idx + 1} <ArrowUpRight size={12} />
                             </a>
                             <div className="airdrop-post-metrics">
-                              {post.metrics.likes} likes · {post.metrics.reposts} reposts · {post.metrics.replies} replies ·{' '}
-                              {post.metrics.views.toLocaleString()} views · <strong>+{post.engagementScore} pts</strong>
+                              {post.metrics.views.toLocaleString()} views · {post.metrics.likes} likes ·{' '}
+                              {post.metrics.reposts} reposts · {post.metrics.replies} replies
+                              {(post.metrics.quotes ?? 0) > 0 ? ` · ${post.metrics.quotes} quotes` : ''}
+                              {(post.metrics.bookmarks ?? 0) > 0 ? ` · ${post.metrics.bookmarks} saves` : ''} ·{' '}
+                              <strong>+{post.engagementScore.toLocaleString()} pts</strong>
                             </div>
                           </div>
                         );
@@ -1117,8 +1143,9 @@ export function AirdropPage() {
                 </h3>
               </div>
               <p>
-                Share your invitation link. Each friend who connects X, links a wallet, follows, and verifies 1 post
-                earns you <strong>+150 points</strong> toward the Top 500 leaderboard.
+                Share your invitation link. Friends who join through your link are tracked right away, and each friend
+                who connects X, links a wallet, follows, and verifies 1 post earns you{' '}
+                <strong>+{AIRDROP_REFERRAL_POINTS} points</strong> toward the Top 500 leaderboard.
               </p>
               {me?.referralUrl && (
                 <div className="airdrop-input-row">
@@ -1133,7 +1160,9 @@ export function AirdropPage() {
               )}
               {participant && (
                 <p className="genesis-helper">
-                  Qualified friends: <strong>{participant.qualifiedReferrals}</strong>
+                  Invited friends: <strong>{participant.invitedReferrals}</strong> · Qualified:{' '}
+                  <strong>{participant.qualifiedReferrals}</strong> (+
+                  {(participant.qualifiedReferrals * AIRDROP_REFERRAL_POINTS).toLocaleString()} pts)
                 </p>
               )}
             </div>
@@ -1198,9 +1227,28 @@ export function AirdropPage() {
                     </strong>
                   </div>
                   <div className="info-row">
+                    <span>Verified posts</span>
+                    <strong>
+                      {participant.posts.length} / {AIRDROP_MAX_POSTS} (+
+                      {(participant.posts.length * AIRDROP_POST_BASE_POINTS).toLocaleString()} pts)
+                    </strong>
+                  </div>
+                  <div className="info-row">
+                    <span>Post engagement</span>
+                    <strong>+{participant.engagementScore.toLocaleString()} pts</strong>
+                  </div>
+                  <div className="info-row">
+                    <span>Referrals</span>
+                    <strong>
+                      {participant.invitedReferrals} invited · {participant.qualifiedReferrals} qualified (+
+                      {(participant.qualifiedReferrals * AIRDROP_REFERRAL_POINTS).toLocaleString()} pts)
+                    </strong>
+                  </div>
+                  <div className="info-row">
                     <span>Engagement boost</span>
                     <strong>
-                      +{(participant.engagementBonusBps / 100).toFixed(1)}% ({participant.engagementScore} score)
+                      +{(participant.engagementBonusBps / 100).toFixed(1)}% ({participant.engagementScore.toLocaleString()}{' '}
+                      score)
                     </strong>
                   </div>
                   <div className="info-row">

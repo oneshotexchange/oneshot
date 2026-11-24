@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AirdropVaultBox } from './airdrop-vault-box';
 
 describe('AirdropVaultBox visual states', () => {
-  it('renders sealed state with zero progress fill before wallet check', () => {
+  it('renders sealed mystery crate before wallet check', () => {
     const html = renderToStaticMarkup(
       <AirdropVaultBox
         tokenSymbol="ONE"
@@ -18,13 +18,15 @@ describe('AirdropVaultBox visual states', () => {
         peekTrigger={0}
       />,
     );
-    expect(html).toContain('Check your wallet to preview your box');
+    expect(html).toContain('Check your wallet to open your mystery box');
     expect(html).toContain('airdrop-vault-sealed');
-    expect(html).toContain('class="vault-charge-bar"');
-    expect(html).toContain('width="0"');
+    expect(html).toContain('data-tier="mystery"');
+    expect(html).toContain('/airdrop/mystery-sealed.webp');
+    expect(html).toContain('Mystery Vault');
+    expect(html).toContain('data-progress="0"');
   });
 
-  it('renders charging state with lit seals and allocation breakdown', () => {
+  it('renders Sovereign Vault in locked mission state for top-tier LayerZero winners', () => {
     const html = renderToStaticMarkup(
       <AirdropVaultBox
         tokenSymbol="ONE"
@@ -39,12 +41,16 @@ describe('AirdropVaultBox visual states', () => {
         peekTrigger={0}
       />,
     );
-    expect(html).toContain('2 of 4 missions complete');
-    expect(html).toContain('LayerZero winner (100%)');
-    expect(html).toContain('40,000 + 10,000 ONE');
+    expect(html).toContain('Sovereign Vault');
+    expect(html).toContain('/airdrop/tier-sovereign-locked.webp');
+    expect(html).toContain('data-tier="lz_winner"');
+    expect(html).toContain('data-progress="2"');
+    expect(html).toContain('vault-lock-bar');
+    expect(html).toContain('40,000');
+    expect(html).toContain('10,000');
   });
 
-  it('renders unlocked state with reserved general spot number', () => {
+  it('renders Vanguard Crate open and unlocked with reserved general spot number', () => {
     const html = renderToStaticMarkup(
       <AirdropVaultBox
         tokenSymbol="ONE"
@@ -59,8 +65,30 @@ describe('AirdropVaultBox visual states', () => {
         peekTrigger={0}
       />,
     );
-    expect(html).toContain('Box unlocked · Spot #42');
+    expect(html).toContain('Vanguard Crate unlocked');
+    expect(html).toContain('Spot #42');
     expect(html).toContain('airdrop-vault-unlocked');
-    expect(html).toContain('vault-svg-open');
+    expect(html).toContain('vault-crate-open');
+    expect(html).toContain('/airdrop/tier-vanguard-open.webp');
+  });
+
+  it('renders Contender Case for the community Top 500 track', () => {
+    const html = renderToStaticMarkup(
+      <AirdropVaultBox
+        tokenSymbol="ONE"
+        tier="community"
+        baseTokens={0}
+        bonusTokens={0}
+        projectedTop500Tokens={120_000}
+        requiredCompleted={1}
+        slotNumber={null}
+        walletConnected={true}
+        unlocked={false}
+        peekTrigger={0}
+      />,
+    );
+    expect(html).toContain('Contender Case');
+    expect(html).toContain('/airdrop/tier-contender-locked.webp');
+    expect(html).toContain('data-tier="community"');
   });
 });

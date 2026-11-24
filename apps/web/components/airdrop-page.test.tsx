@@ -29,6 +29,11 @@ describe('AirdropPage public customer UI and strict pre-claim disclosure', () =>
     expect(html).toContain('Unlock your');
     expect(html).toContain('Claim tokens');
     expect(html).toContain('Top 500 Leaderboard');
+    expect(html).toContain('Supply Distribution');
+    expect(html).toContain('Sovereign Vault');
+    expect(html).toContain('Vanguard Crate');
+    expect(html).toContain('Contender Case');
+    expect(html).toContain('/airdrop/mystery-sealed.webp');
 
     for (const forbidden of [
       '7-day',
@@ -41,6 +46,16 @@ describe('AirdropPage public customer UI and strict pre-claim disclosure', () =>
       '8 decimals',
       '/tokens/new',
       'Uniswap v4',
+      'FDV',
+      'fdv',
+      '960,000',
+      '960k',
+      'single-sided',
+      'Single-Sided',
+      'one-sided',
+      'One-Sided',
+      'Tokenomics',
+      'tokenomics',
     ]) {
       expect(html).not.toContain(forbidden);
     }

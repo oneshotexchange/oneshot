@@ -29,10 +29,9 @@ import { OneshotLogo } from './brand';
 import { ThemePicker } from './theme-picker';
 import { useGenesisAuth } from './genesis-auth';
 import { Badge, Button, ErrorState } from './ui';
-import { AirdropVaultBox } from './airdrop-vault-box';
+import { AIRDROP_BOX_TIERS, AirdropVaultBox } from './airdrop-vault-box';
 import {
   AIRDROP_ECOSYSTEM_POOL,
-  AIRDROP_FDV_USD,
   AIRDROP_GENERAL_POOL,
   AIRDROP_LIQUIDITY_POOL,
   AIRDROP_MAX_POSTS,
@@ -624,8 +623,8 @@ export function AirdropPage() {
           <a href="#airdrop-leaderboard" className="airdrop-header-anchor">
             Top 500
           </a>
-          <a href="#airdrop-tokenomics" className="airdrop-header-anchor">
-            Tokenomics
+          <a href="#airdrop-distribution" className="airdrop-header-anchor">
+            Distribution
           </a>
           <Link href="/">
             Back to app <ArrowUpRight size={14} />
@@ -722,6 +721,7 @@ export function AirdropPage() {
             walletConnected={Boolean(participant?.wallet || eligibility)}
             unlocked={Boolean(participant?.boxUnlockedAt)}
             peekTrigger={peekTrigger}
+            checking={checkingWallet !== null}
           />
         </section>
 
@@ -746,9 +746,49 @@ export function AirdropPage() {
             <small>Open to all participants</small>
           </div>
           <div className="airdrop-metric-card">
-            <span>Opening Liquidity (25%)</span>
-            <strong>${AIRDROP_FDV_USD.toLocaleString()} FDV</strong>
-            <small>{AIRDROP_LIQUIDITY_POOL.toLocaleString()} {tokenSymbol} locked at launch</small>
+            <span>Total Fixed Supply</span>
+            <strong>{AIRDROP_TOTAL_SUPPLY.toLocaleString()}</strong>
+            <small>Fixed supply · No further minting</small>
+          </div>
+        </section>
+
+        <section className="airdrop-tiers-strip" aria-label="Airdrop box tiers">
+          <div className="airdrop-tiers-head">
+            <h2>Mystery Crate Tiers</h2>
+            <span>
+              Your box stays sealed as a Mystery Vault until you check your wallet — then opens to reveal your allocation
+              before locking for mission verification.
+            </span>
+          </div>
+          <div className="airdrop-tiers-grid">
+            {AIRDROP_BOX_TIERS.map((item) => {
+              const active = displayedTier === item.tier;
+              return (
+                <article
+                  key={item.tier}
+                  data-tier={item.tier}
+                  className={`airdrop-tier-card ${active ? 'airdrop-tier-card-active' : ''}`}
+                >
+                  <div className="airdrop-tier-thumb">
+                    <img
+                      src={item.lockedImage}
+                      alt={`${item.name} (${item.badge})`}
+                      width={78}
+                      height={78}
+                      loading="lazy"
+                    />
+                  </div>
+                  <div className="airdrop-tier-meta">
+                    <div className="airdrop-tier-meta-top">
+                      <strong>{item.name}</strong>
+                      <span className="airdrop-tier-chip">{item.badge}</span>
+                    </div>
+                    <span className="airdrop-tier-qual">{item.qualification}</span>
+                    <p>{item.shareLabel}</p>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 
@@ -1371,27 +1411,27 @@ export function AirdropPage() {
           ) : null}
         </section>
 
-        {/* Tokenomics & FAQ */}
-        <section id="airdrop-tokenomics" className="airdrop-section airdrop-panel">
+        {/* Supply Distribution & FAQ */}
+        <section id="airdrop-distribution" className="airdrop-section airdrop-panel">
           <h2>
             <Sparkles size={17} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-            {tokenSymbol} Tokenomics
+            {tokenSymbol} Supply Distribution
           </h2>
           <p className="genesis-helper">
-            Fixed supply of <strong>{AIRDROP_TOTAL_SUPPLY.toLocaleString()} {tokenSymbol}</strong>, launching with
-            single-sided locked liquidity at <strong>${AIRDROP_FDV_USD.toLocaleString()} FDV</strong>.
+            Fixed total supply of <strong>{AIRDROP_TOTAL_SUPPLY.toLocaleString()} {tokenSymbol}</strong>, distributed across
+            community airdrop rewards, market liquidity, contributors, ecosystem growth, and protocol reserves.
           </p>
 
-          <div className="airdrop-tokenomics-bar" role="img" aria-label="Tokenomics distribution bar">
+          <div className="airdrop-distribution-bar" role="img" aria-label="Supply distribution bar">
             <div style={{ width: '41%', background: 'var(--accent)' }} title="41% LayerZero Airdrop" />
             <div style={{ width: '10%', background: 'var(--positive)' }} title="10% Top 500 Leaderboard" />
-            <div style={{ width: '25%', background: 'var(--amber)' }} title="25% Single-Sided Launch Liquidity" />
-            <div style={{ width: '10%', background: 'var(--subtle)' }} title="10% Team (24-month daily linear)" />
-            <div style={{ width: '9%', background: 'var(--muted)' }} title="9% Ecosystem & Rewards" />
-            <div style={{ width: '5%', background: 'var(--line-strong, var(--line))' }} title="5% Treasury & Reserve" />
+            <div style={{ width: '25%', background: 'var(--amber)' }} title="25% Market Liquidity" />
+            <div style={{ width: '10%', background: 'var(--subtle)' }} title="10% Core Contributors (24-month daily linear)" />
+            <div style={{ width: '9%', background: 'var(--muted)' }} title="9% Ecosystem Development" />
+            <div style={{ width: '5%', background: 'var(--line-strong, var(--line))' }} title="5% Protocol Treasury" />
           </div>
 
-          <div className="airdrop-tokenomics-grid">
+          <div className="airdrop-distribution-grid">
             <div className="info-row">
               <span>
                 <i className="airdrop-swatch" style={{ background: 'var(--accent)' }} />
@@ -1413,7 +1453,7 @@ export function AirdropPage() {
             <div className="info-row">
               <span>
                 <i className="airdrop-swatch" style={{ background: 'var(--amber)' }} />
-                25% Single-Sided Liquidity ($960k FDV)
+                25% Market Liquidity
               </span>
               <strong>
                 {AIRDROP_LIQUIDITY_POOL.toLocaleString()} {tokenSymbol}
@@ -1422,7 +1462,7 @@ export function AirdropPage() {
             <div className="info-row">
               <span>
                 <i className="airdrop-swatch" style={{ background: 'var(--subtle)' }} />
-                10% Team (Daily linear over 24 months)
+                10% Core Contributors (Daily linear over 24 months)
               </span>
               <strong>
                 {AIRDROP_TEAM_POOL.toLocaleString()} {tokenSymbol}
@@ -1431,7 +1471,7 @@ export function AirdropPage() {
             <div className="info-row">
               <span>
                 <i className="airdrop-swatch" style={{ background: 'var(--muted)' }} />
-                9% Ecosystem &amp; Rewards
+                9% Ecosystem Development
               </span>
               <strong>
                 {AIRDROP_ECOSYSTEM_POOL.toLocaleString()} {tokenSymbol}
@@ -1440,7 +1480,7 @@ export function AirdropPage() {
             <div className="info-row">
               <span>
                 <i className="airdrop-swatch" style={{ background: 'var(--line-strong, var(--line))' }} />
-                5% Treasury &amp; Liquidity Reserve
+                5% Protocol Treasury
               </span>
               <strong>
                 {AIRDROP_TREASURY_POOL.toLocaleString()} {tokenSymbol}

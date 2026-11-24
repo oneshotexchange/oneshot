@@ -16,9 +16,18 @@ export type GenesisAuthDiagnostic = Readonly<{
 }>;
 const sessionCookie = 'oneshot_genesis_session';
 const browserCookie = 'oneshot_genesis_oauth';
+const sessionPath = '/api/oneshot';
+const legacySessionPath = '/api/oneshot/genesis';
 const opaque = /^[A-Za-z0-9_-]{43}$/;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const sessionLifetime = 30 * 86_400_000;
+function formatCookieHeader(name: string, value: string, opts: { path: string; maxAge: number; secure: boolean }) {
+  return `${name}=${value}; Path=${opts.path}; Max-Age=${opts.maxAge}; HttpOnly; SameSite=lax${opts.secure ? '; Secure' : ''}`;
+}
+function appendDualSessionCookies(headers: Headers, value: string, maxAge: number, secure: boolean) {
+  headers.append('Set-Cookie', formatCookieHeader(sessionCookie, value, { path: sessionPath, maxAge, secure }));
+  headers.append('Set-Cookie', formatCookieHeader(sessionCookie, '', { path: legacySessionPath, maxAge: 0, secure }));
+}
 const message = 'X sign-in could not finish. Please connect X again.';
 const identitySchema = z.object({ data: z.object({ id: z.string().regex(/^\d{1,32}$/), username: z.string().regex(/^[A-Za-z0-9_]{1,15}$/), name: z.string().max(200).optional(), profile_image_url: z.string().optional() }) });
 type Environment = Record<string, string | undefined>;
@@ -52,25 +61,45 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
     catch { /* Diagnostics must never change authentication or recovery. */ }
   }
   function config() { const value = configuration(environment()); if (!value) throw new ApiError(503, 'GENESIS_AUTH_UNAVAILABLE', 'X sign-in is temporarily unavailable. Please try again later.'); return value; }
-  async function authenticate(request: NextRequest): Promise<GenesisSession> {
-    const token = request.cookies.get(sessionCookie)?.value;
-    if (!token) {
+  async function authenticateWithToken(request: NextRequest): Promise<{ session: GenesisSession; rawToken: string | null }> {
+    const rawValues = request.cookies.getAll(sessionCookie).map(c => c.value);
+    const tokens = [...new Set(rawValues)].filter(token => opaque.test(token));
+    if (!tokens.length) {
       // Existing Privy applications retain their authenticated API access. A direct
       // X session never authorizes wallet or creator APIs elsewhere in oneshot.
-      if (/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/i.test(request.headers.get('authorization') || '')) return requireOneshotSession(request);
+      if (!rawValues.length && /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/i.test(request.headers.get('authorization') || '')) {
+        return { session: await requireOneshotSession(request), rawToken: null };
+      }
       throw denied();
     }
-    if (!opaque.test(token)) throw denied();
-    const result = await store.transaction(async tx => {
-      const session = await tx.session(hash(token));
-      if (!session || session.expiresAt <= now()) throw denied();
-      const identity = await tx.identity(session.xId); if (!identity) throw denied();
-      return { session, identity };
-    });
-    // Recover an existing application by its verified X ID, preserving its original
-    // owner and saved progress without granting access to the old owner's wallets.
-    const app = await applications.transaction(tx => tx.application('xId', result.identity.id));
-    return { provider: 'x', userId: app?.userId || `x:${result.identity.id}`, sessionId: hash(token).slice(0,32), expiresAt: Math.floor(result.session.expiresAt / 1000), linkedAddresses: [], xAccount: result.identity };
+    for (const token of tokens) {
+      const result = await store.transaction(async tx => {
+        const session = await tx.session(hash(token));
+        if (!session || session.expiresAt <= now()) return null;
+        const identity = await tx.identity(session.xId);
+        if (!identity) return null;
+        return { session, identity };
+      });
+      if (!result) continue;
+      // Recover an existing application by its verified X ID, preserving its original
+      // owner and saved progress without granting access to the old owner's wallets.
+      const app = await applications.transaction(tx => tx.application('xId', result.identity.id));
+      return {
+        session: {
+          provider: 'x',
+          userId: app?.userId || `x:${result.identity.id}`,
+          sessionId: hash(token).slice(0, 32),
+          expiresAt: Math.floor(result.session.expiresAt / 1000),
+          linkedAddresses: [],
+          xAccount: result.identity,
+        },
+        rawToken: token,
+      };
+    }
+    throw denied();
+  }
+  async function authenticate(request: NextRequest): Promise<GenesisSession> {
+    return (await authenticateWithToken(request)).session;
   }
   function assertOrigin(request: NextRequest) {
     if (request.headers.get('origin') !== webOrigin('http://127.0.0.1:3000', environment())) throw new ApiError(403, 'ORIGIN_MISMATCH', 'Return to oneshot and try again.');
@@ -124,13 +153,25 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
     async route(request: NextRequest): Promise<Response | null> {
       const path = request.nextUrl.pathname.replace(/\/$/,'').split('/auth/')[1]; if (!path) return null;
       const secure = environment().NODE_ENV === 'production';
-      const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/api/oneshot' };
+      const cookieOptions = { httpOnly: true, secure, sameSite: 'lax' as const, path: sessionPath };
       if (path === 'session' && request.method === 'GET') {
         rateLimit('genesis:auth:session',300);
         let session: GenesisSession | null = null;
-        try { if (request.cookies.has(sessionCookie)) session = await authenticate(request); }
+        let rawToken: string | null = null;
+        try {
+          if (request.cookies.has(sessionCookie)) {
+            const authResult = await authenticateWithToken(request);
+            session = authResult.session;
+            rawToken = authResult.rawToken;
+          }
+        }
         catch (error) { if (!(error instanceof ApiError) || error.status !== 401) throw error; }
-        return json({ available: this.available(), user: session ? { userId: session.userId, sessionId: session.sessionId, expiresAt: session.expiresAt, profile: session.xAccount } : null });
+        const response = json({ available: this.available(), user: session ? { userId: session.userId, sessionId: session.sessionId, expiresAt: session.expiresAt, profile: session.xAccount } : null });
+        if (session?.provider === 'x' && rawToken) {
+          const remaining = Math.max(1, session.expiresAt - Math.floor(now() / 1000));
+          appendDualSessionCookies(response.headers, rawToken, remaining, secure);
+        }
+        return response;
       }
       if (path === 'start' && request.method === 'POST') {
         assertOrigin(request); rateLimit('genesis:auth:start',120);
@@ -154,13 +195,25 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
         } catch { if (callbackFailure) reportFailure(callbackFailure); destination.searchParams.set('x_login','failed'); }
         const response = NextResponse.redirect(destination,303); response.headers.set('Cache-Control','no-store'); response.headers.set('Referrer-Policy','no-referrer');
         response.cookies.set(browserCookie,'',{...cookieOptions,path:'/api/oneshot/genesis/auth',maxAge:0});
-        if (result) response.cookies.set(sessionCookie,result.cookie,{...cookieOptions,maxAge:sessionLifetime/1000}); return response;
+        if (result) appendDualSessionCookies(response.headers, result.cookie, sessionLifetime / 1000, secure);
+        return response;
       }
       if (path === 'logout' && request.method === 'POST') {
-        assertOrigin(request); const token = request.cookies.get(sessionCookie)?.value;
-        if (token && opaque.test(token) && request.headers.get('X-Genesis-Session') !== hash(token).slice(0,32)) throw new ApiError(401,'GENESIS_AUTH_CHANGED','Your X sign-in changed. Refresh the page before continuing.');
-        if (token && opaque.test(token)) await store.transaction(tx => tx.revoke(hash(token)));
-        const response = NextResponse.json({ok:true},{headers:{'Cache-Control':'no-store'}}); response.cookies.set(sessionCookie,'',{...cookieOptions,maxAge:0}); return response;
+        assertOrigin(request);
+        const rawValues = request.cookies.getAll(sessionCookie).map(c => c.value);
+        const tokens = [...new Set(rawValues)].filter(token => opaque.test(token));
+        if (tokens.length) {
+          const header = request.headers.get('X-Genesis-Session');
+          if (!tokens.some(token => header === hash(token).slice(0, 32))) {
+            throw new ApiError(401,'GENESIS_AUTH_CHANGED','Your X sign-in changed. Refresh the page before continuing.');
+          }
+          await store.transaction(async tx => {
+            for (const token of tokens) await tx.revoke(hash(token));
+          });
+        }
+        const response = NextResponse.json({ok:true},{headers:{'Cache-Control':'no-store'}});
+        appendDualSessionCookies(response.headers, '', 0, secure);
+        return response;
       }
       throw new ApiError(404,'NOT_FOUND','This sign-in action is unavailable.');
     },

@@ -60,7 +60,15 @@ export async function airdropApi(request: NextRequest): Promise<Response> {
   }
 
   genesisAuth.assertWrite(request);
-  const session = await genesisAuth.authenticate(request);
+  let session;
+  try {
+    session = await genesisAuth.authenticate(request);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'GENESIS_AUTH_REQUIRED') {
+      throw new ApiError(401, 'GENESIS_AUTH_REQUIRED', 'Connect X to access your airdrop box.');
+    }
+    throw error;
+  }
   if (session.provider === 'x' && request.headers.get('X-Genesis-Session') !== session.sessionId) {
     throw new ApiError(401, 'GENESIS_AUTH_CHANGED', 'Your X sign-in changed. Refresh the page before continuing.');
   }

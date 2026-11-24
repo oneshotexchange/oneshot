@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { ApiError } from './http';
 
 const mocks = vi.hoisted(() => ({
   campaign: vi.fn(),
@@ -62,6 +63,17 @@ describe('Airdrop API public and authenticated boundaries', () => {
         airdropApi(new NextRequest(`https://api.oneshot.example/api/oneshot/airdrop/${path}`, { method })),
       ).rejects.toBe(denied);
     }
+
+    mocks.requireSession.mockRejectedValue(
+      new ApiError(401, 'GENESIS_AUTH_REQUIRED', 'Connect X to view your application.'),
+    );
+    await expect(
+      airdropApi(new NextRequest('https://api.oneshot.example/api/oneshot/airdrop/me', { method: 'GET' })),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: 'GENESIS_AUTH_REQUIRED',
+      message: 'Connect X to access your airdrop box.',
+    });
     expect(mocks.me).not.toHaveBeenCalled();
   });
 

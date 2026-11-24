@@ -135,18 +135,31 @@ describe('official X OAuth and saved Genesis sessions',()=>{
     expect(session.userId).toBe('did:privy:original');expect(session.provider).toBe('x');expect(session.linkedAddresses).toEqual([]);
     expect((await service.me(session)).application?.id).toBe(saved.application?.id);
   });
-  it('sets HttpOnly first-party cookies, returns no session secrets, and revokes on sign-out',async()=>{
+  it('sets HttpOnly first-party cookies, migrates legacy cookie path, and clears both paths on logout',async()=>{
     const f=fixture();const start=await f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/start',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'}));
     const browser=/oneshot_genesis_oauth=([^;]+)/.exec(start!.headers.get('set-cookie')!)![1];const state=new URL((await start!.json()).url).searchParams.get('state')!;
     const callback=await f.auth.route(new NextRequest(origin+`/api/oneshot/genesis/auth/callback?code=code&state=${state}`,{headers:{Cookie:`oneshot_genesis_oauth=${browser}`}}));
     expect(callback?.status).toBe(303);expect(callback?.headers.get('location')).toBe(origin+'/whitelist');
-    const cookies=callback!.headers.getSetCookie();const sessionCookie=cookies.find(cookie=>cookie.startsWith('oneshot_genesis_session='))!;
-    expect(sessionCookie).toContain('HttpOnly');expect(sessionCookie).toContain('Secure');expect(sessionCookie).toContain('SameSite=lax');expect(sessionCookie).not.toContain('Domain=');
+    const cookies=callback!.headers.getSetCookie();const sessionCookies=cookies.filter(cookie=>cookie.startsWith('oneshot_genesis_session='));
+    expect(sessionCookies).toHaveLength(2);
+    const sessionCookie=sessionCookies[0];
+    expect(sessionCookie).toContain('Path=/api/oneshot;');expect(sessionCookie).toContain('HttpOnly');expect(sessionCookie).toContain('Secure');expect(sessionCookie).toContain('SameSite=lax');expect(sessionCookie).not.toContain('Domain=');
+    expect(sessionCookies[1]).toContain('Path=/api/oneshot/genesis; Max-Age=0');
     const cookie=/oneshot_genesis_session=([^;]+)/.exec(sessionCookie)![1];
-    const status=await f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/session',{headers:{Cookie:`oneshot_genesis_session=${cookie}`}}));
+    const status=await f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/session',{headers:{Cookie:`oneshot_genesis_session=staleinvalid; oneshot_genesis_session=${cookie}`}}));
     const body=await status!.text();expect(body).toContain('person');expect(body).not.toContain(cookie);expect(body).not.toContain('discarded-x-token');
+    const migratedCookies=status!.headers.getSetCookie().filter(c=>c.startsWith('oneshot_genesis_session='));
+    expect(migratedCookies).toHaveLength(2);
+    expect(migratedCookies[0]).toContain(`oneshot_genesis_session=${cookie}; Path=/api/oneshot;`);
+    expect(migratedCookies[1]).toContain('Path=/api/oneshot/genesis; Max-Age=0');
+    const multiSession=await f.auth.authenticate(new NextRequest(origin+'/api/oneshot/airdrop/me',{headers:{Cookie:`oneshot_genesis_session=stale123; oneshot_genesis_session=${cookie}`}}));
+    expect(multiSession.xAccount?.username).toBe('person');
     await expect(f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/logout',{method:'POST',headers:{Origin:origin,Cookie:`oneshot_genesis_session=${cookie}`,'X-Genesis-Session':'old-session'}}))).rejects.toMatchObject({code:'GENESIS_AUTH_CHANGED'});
-    await f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/logout',{method:'POST',headers:{Origin:origin,Cookie:`oneshot_genesis_session=${cookie}`,'X-Genesis-Session':createHash('sha256').update(cookie).digest('hex').slice(0,32)}}));
+    const loggedOut=await f.auth.route(new NextRequest(origin+'/api/oneshot/genesis/auth/logout',{method:'POST',headers:{Origin:origin,Cookie:`oneshot_genesis_session=${cookie}`,'X-Genesis-Session':createHash('sha256').update(cookie).digest('hex').slice(0,32)}}));
+    const clearedCookies=loggedOut!.headers.getSetCookie().filter(c=>c.startsWith('oneshot_genesis_session='));
+    expect(clearedCookies).toHaveLength(2);
+    expect(clearedCookies[0]).toContain('Path=/api/oneshot; Max-Age=0');
+    expect(clearedCookies[1]).toContain('Path=/api/oneshot/genesis; Max-Age=0');
     await expect(f.auth.authenticate(f.request(cookie))).rejects.toMatchObject({status:401});
   });
   it('preserves the invitation in server state when browser storage cannot carry it',async()=>{

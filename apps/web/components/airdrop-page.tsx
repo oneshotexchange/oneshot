@@ -810,7 +810,14 @@ export function AirdropPage() {
             {campaignError && <ErrorState message={campaignError} retry={() => void loadCampaign()} />}
             {auth.error && <ErrorState message={auth.error} retry={() => void auth.refresh()} />}
             {xLoginFailed && <ErrorState message="X sign-in did not finish. Please connect X again." />}
-            {accountError && <ErrorState message={accountError} retry={() => void refreshAccount()} />}
+            {accountError && (
+              <ErrorState
+                message={accountError}
+                retry={() => {
+                  void auth.refresh().then(() => refreshAccount());
+                }}
+              />
+            )}
             {enrollmentError && <ErrorState message={enrollmentError} retry={() => void enrollParticipant(true)} />}
             {(accountLoading || busy === 'enroll') && (
               <p className="genesis-loading" role="status">
@@ -853,7 +860,16 @@ export function AirdropPage() {
                     Connect X <ArrowUpRight size={14} />
                   </Button>
                 ) : (
-                  <Badge tone="mint">X: @{auth.xAccount.username}</Badge>
+                  <>
+                    <Badge tone="mint">X: @{auth.xAccount.username}</Badge>
+                    <Button
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => void auth.disconnect()}
+                    >
+                      Disconnect X
+                    </Button>
+                  </>
                 )}
                 {participant && (
                   <Button
@@ -871,6 +887,16 @@ export function AirdropPage() {
                   </Button>
                 )}
               </div>
+              {auth.xAccount && !participant && !accountLoading && !accountError && !enrollmentError && !campaignLoading && !campaignError && (
+                campaign?.state === 'upcoming' ? (
+                  <p className="genesis-helper">
+                    Your X account is connected. Wallet linking and quest verification will unlock here once the mission
+                    window opens.
+                  </p>
+                ) : campaign?.state === 'closed' ? (
+                  <p className="genesis-helper">Missions have closed for new participants.</p>
+                ) : null
+              )}
               {walletLockedForClaims && participant?.wallet && (
                 <p className="genesis-helper">Wallet is locked for claiming.</p>
               )}

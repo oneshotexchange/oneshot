@@ -4,6 +4,7 @@ import { buildAirdropMerkleTree, AIRDROP_TOKENOMICS } from '@oneshot/evm';
 import { ApiError } from './errors';
 import { webOrigin } from './origins';
 import { genesisAuth, type GenesisSession } from './genesis-auth';
+import { safeRecordAnalyticsEvent, type AnalyticsMetric } from './analytics-store';
 import { airdropStore, type AirdropStore, type AirdropTransaction } from './airdrop-store';
 import {
   layerZeroEligibilityResolver,
@@ -256,10 +257,19 @@ export function createAirdropService(options: {
   layerZeroResolver?: LayerZeroEligibilityResolver | null;
   now?: () => number;
   webOrigin: () => string;
+  recordEvent?: (metric: AnalyticsMetric) => Promise<void> | void;
 }) {
   const store = options.store || airdropStore;
   const layerZeroResolver = options.layerZeroResolver ?? null;
   const now = options.now || Date.now;
+  const recordEvent = options.recordEvent ?? (options.store ? undefined : safeRecordAnalyticsEvent);
+  async function emitEvent(metric: AnalyticsMetric) {
+    try {
+      await recordEvent?.(metric);
+    } catch {
+      /* Telemetry must never affect airdrop flows. */
+    }
+  }
   const verifier =
     options.verifier ||
     createAirdropVerifier({
@@ -390,6 +400,14 @@ export function createAirdropService(options: {
       const maxBonusTokens = Math.floor(baseGeneralTokens / 2);
       const slotsRemaining = Math.max(0, initial.campaign.maxGeneralSlots - initial.reserved.slots);
       const generalPoolExhausted = slotsRemaining === 0 || initial.reserved.generalTokens >= AIRDROP_GENERAL_POOL;
+      await emitEvent('eligibility_checks');
+      await emitEvent(
+        tier === 'lz_winner'
+          ? 'eligibility_lz_winner'
+          : tier === 'lz_user_5tx'
+            ? 'eligibility_lz_user_5tx'
+            : 'eligibility_community',
+      );
       return {
         wallet,
         tier,
@@ -439,7 +457,8 @@ export function createAirdropService(options: {
 
     async enroll(session: GenesisSession, consentVersion: string, referral?: string): Promise<AirdropMeResponse> {
       const identity = requireXProfile(session);
-      return store.transaction(async tx => {
+      let created = false;
+      const me = await store.transaction(async tx => {
         const existing = await tx.participant('userId', session.userId);
         if (existing) {
           const p = requireOwner(existing, session);
@@ -484,8 +503,11 @@ export function createAirdropService(options: {
         };
         await tx.saveParticipant(participant);
         await tx.audit({ at: createdAt, actor: session.userId, action: 'enroll', participantId: participant.id });
+        created = true;
         return buildMe(tx, session);
       });
+      if (created) await emitEvent('airdrop_enrolled');
+      return me;
     },
 
     async walletChallenge(session: GenesisSession, walletInput: string) {
@@ -570,7 +592,8 @@ export function createAirdropService(options: {
         }
       }
 
-      return store.transaction(async tx => {
+      let newlyBound = false;
+      const me = await store.transaction(async tx => {
         const campaign = await assertWritableCampaign(tx, now());
         const participant = requireOwner(await tx.participant('userId', session.userId), session);
         if (
@@ -598,6 +621,7 @@ export function createAirdropService(options: {
           );
         }
         const lz = await tx.lookupSnapshot(parsed.wallet);
+        newlyBound = !participant.wallet;
         const switchedWallet = participant.wallet && participant.wallet.toLowerCase() !== parsed.wallet.toLowerCase();
         if (switchedWallet) {
           delete participant.checks.create_token;
@@ -619,6 +643,8 @@ export function createAirdropService(options: {
         });
         return buildMe(tx, session);
       });
+      if (newlyBound) await emitEvent('wallet_linked');
+      return me;
     },
 
     async verifyMission(
@@ -678,16 +704,20 @@ export function createAirdropService(options: {
             checkedAt: at,
           };
         }
-        return store.transaction(async tx => {
+        let verifiedNow = false;
+        const me = await store.transaction(async tx => {
           const campaign = await assertWritableCampaign(tx, now());
           const participant = requireOwner(await tx.participant('userId', session.userId), session);
           if (participant.checks.follow?.state === 'verified') return buildMe(tx, session);
           participant.checks.follow = checkResult;
+          verifiedNow = checkResult.state === 'verified';
           participant.revision++;
           await recomputeAllocationAndLock(tx, participant, campaign, at);
           await tx.saveParticipant(participant);
           return buildMe(tx, session);
         });
+        if (verifiedNow) await emitEvent('mission_follow_verified');
+        return me;
       }
 
       if (task === 'repost') {
@@ -701,16 +731,20 @@ export function createAirdropService(options: {
             checkedAt: at,
           };
         }
-        return store.transaction(async tx => {
+        let verifiedNow = false;
+        const me = await store.transaction(async tx => {
           const campaign = await assertWritableCampaign(tx, now());
           const participant = requireOwner(await tx.participant('userId', session.userId), session);
           if (participant.checks.repost?.state === 'verified') return buildMe(tx, session);
           participant.checks.repost = checkResult;
+          verifiedNow = checkResult.state === 'verified';
           participant.revision++;
           await recomputeAllocationAndLock(tx, participant, campaign, at);
           await tx.saveParticipant(participant);
           return buildMe(tx, session);
         });
+        if (verifiedNow) await emitEvent('mission_repost_verified');
+        return me;
       }
 
       if (task === 'post') {
@@ -723,7 +757,7 @@ export function createAirdropService(options: {
           }
           fail('AIRDROP_PROVIDER_UNAVAILABLE', (err as Error).message, 503);
         }
-        return store.transaction(async tx => {
+        const me = await store.transaction(async tx => {
           const campaign = await assertWritableCampaign(tx, now());
           const participant = requireOwner(await tx.participant('userId', session.userId), session);
           if (participant.posts.length >= AIRDROP_MAX_POSTS) {
@@ -753,11 +787,14 @@ export function createAirdropService(options: {
           });
           return buildMe(tx, session);
         });
+        await emitEvent('mission_post_verified');
+        return me;
       }
 
       if (task === 'create_token') {
         const result = await verifier.verifyCreatedToken(pre.participant.wallet!);
-        return store.transaction(async tx => {
+        let verifiedNow = false;
+        const me = await store.transaction(async tx => {
           const campaign = await assertWritableCampaign(tx, now());
           const participant = requireOwner(await tx.participant('userId', session.userId), session);
           if (participant.wallet?.toLowerCase() !== pre.participant.wallet!.toLowerCase()) {
@@ -768,15 +805,19 @@ export function createAirdropService(options: {
             ...result,
             ...(result.evidenceId ? { tokenMarket: result.evidenceId } : {}),
           };
+          verifiedNow = result.state === 'verified';
           participant.revision++;
           await recomputeAllocationAndLock(tx, participant, campaign, at);
           await tx.saveParticipant(participant);
           return buildMe(tx, session);
         });
+        if (verifiedNow) await emitEvent('mission_create_token_verified');
+        return me;
       }
 
       const tradeResult = await verifier.verifyTradeVolume(pre.participant.wallet!, pre.campaign.minTradeNativeRaw);
-      return store.transaction(async tx => {
+      let tradeVerifiedNow = false;
+      const me = await store.transaction(async tx => {
         const campaign = await assertWritableCampaign(tx, now());
         const participant = requireOwner(await tx.participant('userId', session.userId), session);
         if (!campaign.tradeMissionEnabled) {
@@ -787,11 +828,14 @@ export function createAirdropService(options: {
         }
         if (participant.checks.trade_token?.state === 'verified') return buildMe(tx, session);
         participant.checks.trade_token = tradeResult;
+        tradeVerifiedNow = tradeResult.state === 'verified';
         participant.revision++;
         await recomputeAllocationAndLock(tx, participant, campaign, at);
         await tx.saveParticipant(participant);
         return buildMe(tx, session);
       });
+      if (tradeVerifiedNow) await emitEvent('mission_trade_token_verified');
+      return me;
     },
 
     async refreshEngagement(session: GenesisSession): Promise<AirdropMeResponse> {

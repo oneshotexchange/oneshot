@@ -10,6 +10,7 @@ import { genesisCampaignSchema, genesisReviewSchema } from '../../../web/lib/gen
 import { airdropService } from './airdrop-service';
 import { airdropCampaignSchema, airdropMerkleExportSchema, airdropSnapshotImportSchema } from '../../../web/lib/airdrop-schema';
 import { externalNftAdminApi } from './external-nft-admin-api';
+import { analyticsStore } from './analytics-store';
 
 const credentials = z.object({ password: z.string().max(1024) }).strict();
 
@@ -25,6 +26,11 @@ export const adminApi = api(async request => {
   }
   adminAuthenticator.requireSession(request);
   rateLimit('oneshot:admin:read', 120);
+  if (path === '/api/admin/analytics' && request.method === 'GET') {
+    const rawDays = request.nextUrl.searchParams.get('days');
+    const days = rawDays !== null ? z.coerce.number().int().min(1).max(90).parse(rawDays) : 14;
+    return json(await analyticsStore.getSummary(days));
+  }
   if (path.startsWith('/api/admin/external-nfts')) return externalNftAdminApi(request);
   if (path.startsWith('/api/admin/airdrop')) {
     const actor = 'admin:' + (await import('node:crypto')).createHash('sha256').update(request.headers.get('authorization') || '').digest('hex').slice(0, 16);

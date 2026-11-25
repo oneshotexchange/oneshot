@@ -37,6 +37,9 @@ describe.skipIf(!connectionString)('concurrent PostgreSQL schema initialization'
         'oneshot_airdrop_merkle',
         'oneshot_airdrop_budget',
         'oneshot_airdrop_audit',
+        'oneshot_analytics_daily',
+        'oneshot_analytics_visitors',
+        'oneshot_analytics_daily_visitors',
       ]));
     } finally {
       await pool?.end();

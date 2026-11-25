@@ -4,7 +4,8 @@ import { ApiError } from './errors';
 import { requireOneshotSession } from './oneshot-auth';
 import { archiveOneshotDraft, createOneshotDraft, getOneshotDraft, listOneshotDrafts, prepareOneshotDraft, readOneshotMetadata, updateOneshotDraft } from './oneshot-drafts';
 import { storeImage } from './media';
-import { apiOrigin } from './origins';
+import { apiOrigin, webOrigin } from './origins';
+import { analyticsStore, hashVisitorId } from './analytics-store';
 import { indexedNftRead } from './indexed-nfts';
 import { indexedTokenRead } from './indexed-tokens';
 import { tokenAnalyticsRead } from './token-analytics';
@@ -41,6 +42,20 @@ export const oneshotApi = api(async request => {
   }
   if (resource === 'genesis') return genesisApi(request);
   if (resource === 'airdrop') return airdropApi(request);
+  if (resource === 'analytics' && segments.length === 2 && id === 'visit' && request.method === 'POST') {
+    if (request.headers.get('origin') !== webOrigin(request.nextUrl.origin)) {
+      throw new ApiError(403, 'ORIGIN_MISMATCH', 'This request must originate from oneshot.');
+    }
+    const body = JSON.parse(new TextDecoder().decode(await boundedBody(request, 1024)));
+    const input = z.object({
+      visitorId: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
+      path: z.string().min(1).max(256),
+    }).strict().parse(body);
+    rateLimit('oneshot:analytics:visit:global', 600, 60_000);
+    rateLimit(`oneshot:analytics:visit:${hashVisitorId(input.visitorId)}`, 30, 60_000);
+    const result = await analyticsStore.recordVisit(input.visitorId, input.path);
+    return json({ ok: true, recorded: result.recorded });
+  }
   if (resource === 'profiles') return walletProfilesApi(request);
   if (resource === 'following') return walletFollowingApi(request);
   if (resource === 'token-execution') return tokenExecutionApi(request);

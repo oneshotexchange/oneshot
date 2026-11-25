@@ -6,6 +6,7 @@ import { webOrigin } from './origins';
 import { genesisAuthStore, type GenesisAuthStore } from './genesis-auth-store';
 import { genesisStore, type GenesisStore } from './genesis-store';
 import { requireOneshotSession, type OneshotSession } from './oneshot-auth';
+import { safeRecordAnalyticsEvent, type AnalyticsMetric } from './analytics-store';
 import type { GenesisProfile } from '../../../web/lib/genesis-schema';
 
 export type GenesisSession = Omit<OneshotSession, 'provider'> & { provider: 'privy' | 'x' };
@@ -51,9 +52,14 @@ async function readJson(response: Response) {
   const data = await boundedBody(response, 65_536);
   try { return JSON.parse(new TextDecoder().decode(data)) as unknown; } catch { throw new ApiError(503, 'GENESIS_AUTH_UNAVAILABLE', message); }
 }
-export function createGenesisAuth(options: { store?: GenesisAuthStore; applications?: GenesisStore; environment?: () => Environment; fetcher?: typeof fetch; now?: () => number; diagnostic?: (failure: GenesisAuthDiagnostic) => void } = {}) {
+export function createGenesisAuth(options: { store?: GenesisAuthStore; applications?: GenesisStore; environment?: () => Environment; fetcher?: typeof fetch; now?: () => number; diagnostic?: (failure: GenesisAuthDiagnostic) => void; recordEvent?: (metric: AnalyticsMetric) => Promise<void> | void } = {}) {
   const store = options.store || genesisAuthStore; const applications = options.applications || genesisStore;
   const environment = options.environment || (() => process.env); const fetcher = options.fetcher || fetch; const now = options.now || Date.now;
+  const recordEvent = options.recordEvent ?? (options.store ? undefined : safeRecordAnalyticsEvent);
+  async function emitEvent(metric: AnalyticsMetric) {
+    try { await recordEvent?.(metric); }
+    catch { /* Telemetry must never affect X sign-in. */ }
+  }
   function reportFailure(failure: GenesisAuthDiagnostic) {
     // Only fixed stage/reason values and a bounded HTTP status reach diagnostics.
     // Provider errors, response bodies and OAuth/browser/account data stay private.
@@ -114,6 +120,7 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
       await store.transaction(async tx => { await tx.prune(now()); await tx.state(hash(state), { verifier, browserHash: hash(browser), expiresAt: now() + 600_000, ...(referral?{referral}:{}), ...(returnTo?{returnTo}:{}) }); });
       const url = new URL('https://x.com/i/oauth2/authorize');
       Object.entries({ response_type: 'code', client_id: conf.clientId, redirect_uri: conf.redirectUri, scope: 'users.read tweet.read', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).forEach(([key,value]) => url.searchParams.set(key,value));
+      await emitEvent('connect_x_started');
       return { url: url.href, browser };
     },
     async callback(code: string, state: string, browser: string) {
@@ -147,8 +154,9 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
         await store.transaction(async tx => { await tx.saveIdentity(identity); await tx.saveSession(hash(cookie), { xId: identity.id, expiresAt }); });
         // X access tokens are discarded. Only a hash of the opaque oneshot session is
         // persisted; the session secret is delivered in a host-only HttpOnly cookie.
+        await emitEvent('connect_x_succeeded');
         return { cookie, expiresAt, referral: saved.referral, returnTo: saved.returnTo };
-      } catch (error) { reportFailure(failure); throw error; }
+      } catch (error) { reportFailure(failure); await emitEvent('connect_x_failed'); throw error; }
     },
     async route(request: NextRequest): Promise<Response | null> {
       const path = request.nextUrl.pathname.replace(/\/$/,'').split('/auth/')[1]; if (!path) return null;
@@ -192,7 +200,7 @@ export function createGenesisAuth(options: { store?: GenesisAuthStore; applicati
           result = await this.callback(query.get('code') || '', query.get('state') || '', request.cookies.get(browserCookie)?.value || '');
           if (result.returnTo) destination.pathname = result.returnTo;
           if(result.referral)destination.searchParams.set('ref',result.referral);
-        } catch { if (callbackFailure) reportFailure(callbackFailure); destination.searchParams.set('x_login','failed'); }
+        } catch { if (callbackFailure) { reportFailure(callbackFailure); await emitEvent('connect_x_failed'); } destination.searchParams.set('x_login','failed'); }
         const response = NextResponse.redirect(destination,303); response.headers.set('Cache-Control','no-store'); response.headers.set('Referrer-Policy','no-referrer');
         response.cookies.set(browserCookie,'',{...cookieOptions,path:'/api/oneshot/genesis/auth',maxAge:0});
         if (result) appendDualSessionCookies(response.headers, result.cookie, sessionLifetime / 1000, secure);

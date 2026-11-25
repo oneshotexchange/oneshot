@@ -12,6 +12,7 @@ import { Loading } from '../components/ui';
 import WorkspaceError from '../app/error';
 import NotFound from '../app/not-found';
 import { workspaceNavigationKey } from '../lib/workspace-navigation';
+import { trackPageVisit } from '../lib/client-analytics';
 import '../app/globals.css';
 import '../app/themes.css';
 import '../app/theme-picker.css';
@@ -66,6 +67,7 @@ function Workspace() {
   const location = useLocation();
   const navigationKey = workspaceNavigationKey(location.pathname, location.search);
   useEffect(() => { window.scrollTo(0, 0); }, [navigationKey]);
+  useEffect(() => { trackPageVisit(location.pathname); }, [location.pathname]);
   const content = <PageBoundary key={navigationKey}><Suspense fallback={<Loading rows={4} />}><Routes>
     <Route path="/airdrop" element={<AirdropPage />} />
     <Route path="/whitelist" element={<WhitelistRedirect />} />

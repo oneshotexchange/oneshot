@@ -96,4 +96,32 @@ CREATE TABLE IF NOT EXISTS oneshot_airdrop_audit (
   value JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Privacy-safe visitor traffic & product funnel analytics
+CREATE TABLE IF NOT EXISTS oneshot_analytics_daily (
+  day DATE NOT NULL,
+  metric TEXT NOT NULL CHECK (char_length(metric) BETWEEN 1 AND 80),
+  count BIGINT NOT NULL DEFAULT 0 CHECK (count >= 0),
+  PRIMARY KEY (day, metric)
+);
+CREATE INDEX IF NOT EXISTS oneshot_analytics_daily_metric
+  ON oneshot_analytics_daily(metric, day DESC);
+
+CREATE TABLE IF NOT EXISTS oneshot_analytics_visitors (
+  visitor_hash TEXT PRIMARY KEY CHECK (visitor_hash ~ '^[a-f0-9]{64}$'),
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  first_path TEXT NOT NULL CHECK (char_length(first_path) BETWEEN 1 AND 32),
+  visits INTEGER NOT NULL DEFAULT 1 CHECK (visits >= 1)
+);
+CREATE INDEX IF NOT EXISTS oneshot_analytics_visitors_last_seen
+  ON oneshot_analytics_visitors(last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS oneshot_analytics_daily_visitors (
+  day DATE NOT NULL,
+  visitor_hash TEXT NOT NULL CHECK (visitor_hash ~ '^[a-f0-9]{64}$'),
+  PRIMARY KEY (day, visitor_hash)
+);
+CREATE INDEX IF NOT EXISTS oneshot_analytics_daily_visitors_day
+  ON oneshot_analytics_daily_visitors(day DESC);
 COMMIT;

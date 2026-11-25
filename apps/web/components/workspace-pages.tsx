@@ -11,6 +11,7 @@ import { ThemePicker } from './theme-picker';
 import { WalletButton } from './wallet-button';
 import { GenesisAdmin } from './genesis-admin';
 import { AirdropAdmin } from './airdrop-admin';
+import { AnalyticsAdmin } from './analytics-admin';
 import { ExternalNftAdmin } from './external-nft-admin';
 
 type AdminStatus = SystemStatus & {
@@ -124,7 +125,7 @@ export function AdminPage() {
       <LockKeyhole size={24} /><h2>Admin sign in</h2><p>Enter your administrator password to view platform configuration.</p>
       <Field label="Admin password" required><input type="password" name="admin-password" autoComplete="current-password" required maxLength={1024} value={password} onChange={event => setPassword(event.target.value)} /></Field>
       <Button type="submit" loading={busy}>Sign in</Button>
-    </form> : status ? <><ExternalNftAdmin token={session.token}/><AirdropAdmin token={session.token}/><GenesisAdmin token={session.token}/><AdminDiagnostics status={status} readiness={readiness} /></> : <p>Loading platform configuration…</p>}
+    </form> : status ? <><AnalyticsAdmin token={session.token}/><AirdropAdmin token={session.token}/><ExternalNftAdmin token={session.token}/><GenesisAdmin token={session.token}/><AdminDiagnostics status={status} readiness={readiness} /></> : <p>Loading platform configuration…</p>}
   </>;
 }
 

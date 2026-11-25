@@ -4,7 +4,11 @@ import { keccak256, concatHex, type Hex } from 'viem';
 import { airdropClaimLeaf } from '@oneshot/evm';
 import { memoryAirdropStore } from './airdrop-store';
 import { createAirdropService } from './airdrop-service';
-import type { AirdropVerifier } from './airdrop-verification';
+import {
+  AirdropEvidenceError,
+  AirdropProviderUnavailable,
+  type AirdropVerifier,
+} from './airdrop-verification';
 import type { LayerZeroEligibilityResolver } from './layerzero-eligibility';
 import type { GenesisSession } from './genesis-auth';
 import { ApiError } from './errors';
@@ -590,6 +594,40 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
       expect(saved.state).toBe('open');
       expect(saved.projectXId).toBe('100');
       expect(saved.projectHandle).toBe('oneshot');
+    } finally {
+      if (prevClientId === undefined) delete process.env.X_OAUTH_CLIENT_ID;
+      else process.env.X_OAUTH_CLIENT_ID = prevClientId;
+    }
+  });
+
+  it('maps X handle lookup failures cleanly in configure instead of bubbling raw provider errors', async () => {
+    const f = makeFixture();
+    const prevClientId = process.env.X_OAUTH_CLIENT_ID;
+    process.env.X_OAUTH_CLIENT_ID = 'test-x-client-id';
+    try {
+      const current = (await f.service.adminSummary()).campaign;
+
+      vi.mocked(f.verifier.resolveUserByHandle!).mockRejectedValueOnce(
+        new AirdropEvidenceError('Account @oneshot not found.'),
+      );
+      await expect(
+        f.service.configure(
+          { ...current, state: 'open', projectHandle: 'oneshot', projectXId: '' },
+          current.revision,
+          'admin:1',
+        ),
+      ).rejects.toMatchObject({ code: 'AIRDROP_PROJECT_NOT_FOUND', status: 400 });
+
+      vi.mocked(f.verifier.resolveUserByHandle!).mockRejectedValueOnce(
+        new AirdropProviderUnavailable('GetX is temporarily unavailable.'),
+      );
+      await expect(
+        f.service.configure(
+          { ...current, state: 'open', projectHandle: 'OneshotExchange', projectXId: '' },
+          current.revision,
+          'admin:1',
+        ),
+      ).rejects.toMatchObject({ code: 'AIRDROP_PROVIDER_UNAVAILABLE', status: 503 });
     } finally {
       if (prevClientId === undefined) delete process.env.X_OAUTH_CLIENT_ID;
       else process.env.X_OAUTH_CLIENT_ID = prevClientId;

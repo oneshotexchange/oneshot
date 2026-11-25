@@ -11,6 +11,7 @@ import {
 } from './layerzero-eligibility';
 import {
   AirdropEvidenceError,
+  AirdropProviderUnavailable,
   createAirdropVerifier,
   type AirdropVerifier,
 } from './airdrop-verification';
@@ -891,18 +892,32 @@ export function createAirdropService(options: {
         if (parsed.opensAt && parsed.closesAt && Date.parse(parsed.closesAt) <= Date.parse(parsed.opensAt)) {
           fail('AIRDROP_CONFIG_INVALID', 'Campaign close time must be after open time.');
         }
-        if (!resolvedProjectXId) {
-          if (!verifier.resolveUserByHandle) {
-            fail('AIRDROP_CONFIG_INVALID', 'Set the official X ID and handle before opening.');
+        try {
+          if (!resolvedProjectXId) {
+            if (!verifier.resolveUserByHandle) {
+              fail('AIRDROP_CONFIG_INVALID', 'Set the official X ID and handle before opening.');
+            }
+            const resolved = await verifier.resolveUserByHandle(resolvedProjectHandle);
+            resolvedProjectXId = resolved.id;
+            resolvedProjectHandle = resolved.username;
+          } else {
+            const actual = await verifier.projectHandle(resolvedProjectXId);
+            if (actual.toLowerCase() !== resolvedProjectHandle.toLowerCase()) {
+              fail('AIRDROP_PROJECT_MISMATCH', 'The official X ID and handle do not match.');
+            }
           }
-          const resolved = await verifier.resolveUserByHandle(resolvedProjectHandle);
-          resolvedProjectXId = resolved.id;
-          resolvedProjectHandle = resolved.username;
-        } else {
-          const actual = await verifier.projectHandle(resolvedProjectXId);
-          if (actual.toLowerCase() !== resolvedProjectHandle.toLowerCase()) {
-            fail('AIRDROP_PROJECT_MISMATCH', 'The official X ID and handle do not match.');
+        } catch (err) {
+          if (err instanceof AirdropEvidenceError) {
+            fail('AIRDROP_PROJECT_NOT_FOUND', err.message, 400);
           }
+          if (err instanceof AirdropProviderUnavailable) {
+            fail(
+              'AIRDROP_PROVIDER_UNAVAILABLE',
+              err.message || 'Could not verify the official X handle right now. Try again shortly.',
+              503,
+            );
+          }
+          throw err;
         }
       }
       return store.transaction(async tx => {

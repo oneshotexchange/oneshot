@@ -588,9 +588,17 @@ export function AirdropAdmin({ token }: { token: string }) {
               <Field label="Official X handle">
                 <input
                   value={campaign.projectHandle}
-                  onChange={e => patch({ projectHandle: e.target.value.replace(/^@/, '') })}
-                  maxLength={15}
-                  placeholder="oneshot"
+                  onChange={e => {
+                    const cleaned = e.target.value
+                      .trim()
+                      .replace(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\//i, '')
+                      .replace(/^@+/, '')
+                      .split(/[/?#]/)[0]!
+                      .slice(0, 15);
+                    patch({ projectHandle: cleaned });
+                  }}
+                  maxLength={128}
+                  placeholder="OneshotExchange"
                 />
               </Field>
               <Field label="Official numeric X ID (optional, auto-filled from handle on open)">

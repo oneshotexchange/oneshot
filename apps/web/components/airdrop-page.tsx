@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   Check,
+  Clock,
   Copy,
   Gift,
   Heart,
@@ -29,6 +30,7 @@ import { OneshotLogo } from './brand';
 import { ThemePicker } from './theme-picker';
 import { useGenesisAuth } from './genesis-auth';
 import { Badge, Button, ErrorState } from './ui';
+import { tokenEnabled, useApi, type SystemStatus } from '../lib/client-api';
 import { AIRDROP_BOX_TIERS, AirdropVaultBox } from './airdrop-vault-box';
 import {
   AIRDROP_ECOSYSTEM_POOL,
@@ -617,6 +619,14 @@ export function AirdropPage() {
   const displayedTop500 = participant?.projectedTop500Tokens ?? 0;
   const requiredCompleted = participant ? computeRequiredProgressCount(participant) : 0;
   const isOpen = campaign?.state === 'open';
+  const statusQuery = useApi<SystemStatus>('/api/status');
+  const tokenLaunchLive = tokenEnabled(statusQuery.data);
+  const setupReady = Boolean(auth.xAccount && participant?.wallet);
+  const followVerified = participant?.checks.follow?.state === 'verified';
+  const repostVerified = participant?.checks.repost?.state === 'verified';
+  const postsVerified = (participant?.posts.length || 0) >= 1;
+  const createTokenVerified = participant?.checks.create_token?.state === 'verified';
+  const tradeTokenVerified = participant?.checks.trade_token?.state === 'verified';
   const hasClaimed = Boolean(onChainSchedule && onChainSchedule.claimedAt > 0);
   const walletLockedForClaims = Boolean(campaign?.merkleRoot);
 
@@ -872,12 +882,18 @@ export function AirdropPage() {
             )}
 
             {/* Step 0: Connect X & Link Wallet */}
-            <div className="airdrop-mission">
+            <div className={`airdrop-mission${setupReady ? ' airdrop-mission-verified' : ''}`}>
               <div className="airdrop-mission-head">
                 <h3>
-                  <span className="airdrop-step-num">Start</span>
+                  <span className={`airdrop-step-num${setupReady ? ' airdrop-step-num-done' : ''}`}>
+                    {setupReady ? <Check size={13} strokeWidth={3} /> : 'Start'}
+                  </span>
                   Connect X and your wallet
-                  {auth.xAccount && participant?.wallet && <Badge tone="mint">Ready</Badge>}
+                  {setupReady && (
+                    <Badge tone="mint">
+                      <Check size={11} strokeWidth={2.75} /> Ready
+                    </Badge>
+                  )}
                 </h3>
               </div>
               <p>
@@ -936,105 +952,139 @@ export function AirdropPage() {
             </div>
 
             {/* Mission 1: Follow */}
-            <div className="airdrop-mission">
+            <div className={`airdrop-mission${followVerified ? ' airdrop-mission-verified' : ''}`}>
               <div className="airdrop-mission-head">
                 <h3>
-                  <span className="airdrop-step-num">1</span>
+                  <span className={`airdrop-step-num${followVerified ? ' airdrop-step-num-done' : ''}`}>
+                    {followVerified ? <Check size={13} strokeWidth={3} /> : '1'}
+                  </span>
                   Follow @{campaign?.projectHandle || 'oneshot'}
-                  {participant?.checks.follow?.state === 'verified' ? (
-                    <Badge tone="mint">Verified</Badge>
+                  {followVerified ? (
+                    <Badge tone="mint">
+                      <Check size={11} strokeWidth={2.75} /> Verified
+                    </Badge>
                   ) : (
                     <Badge tone="amber">Required</Badge>
                   )}
                 </h3>
               </div>
               <p>Follow @{campaign?.projectHandle || 'oneshot'} on X for launch and claim updates.</p>
-              {participant && (
-                <div className="airdrop-actions">
-                  {campaign?.projectHandle && (
-                    <a
-                      className="button button-secondary"
-                      href={`https://x.com/${campaign.projectHandle}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open X <ArrowUpRight size={14} />
-                    </a>
-                  )}
-                  <Button
-                    variant="ghost"
-                    loading={busy === 'follow'}
-                    disabled={!isOpen || Boolean(busy)}
-                    onClick={() => void runAction('follow', 'verify', { task: 'follow' }, 'Follow verified.')}
-                  >
-                    Check follow
-                  </Button>
+              {followVerified ? (
+                <div className="airdrop-verified-banner" role="status">
+                  <Check size={14} strokeWidth={2.75} />
+                  <span>
+                    {participant!.checks.follow!.message} · <strong>+50 pts</strong>
+                  </span>
                 </div>
+              ) : (
+                <>
+                  {participant && (
+                    <div className="airdrop-actions">
+                      {campaign?.projectHandle && (
+                        <a
+                          className="button button-secondary"
+                          href={`https://x.com/${campaign.projectHandle}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open X <ArrowUpRight size={14} />
+                        </a>
+                      )}
+                      <Button
+                        variant="ghost"
+                        loading={busy === 'follow'}
+                        disabled={!isOpen || Boolean(busy)}
+                        onClick={() => void runAction('follow', 'verify', { task: 'follow' }, 'Follow verified.')}
+                      >
+                        Check follow
+                      </Button>
+                    </div>
+                  )}
+                  {participant?.checks.follow && <p className="genesis-helper">{participant.checks.follow.message}</p>}
+                </>
               )}
-              {participant?.checks.follow && <p className="genesis-helper">{participant.checks.follow.message}</p>}
             </div>
 
             {/* Mission 2: Like & Repost */}
-            <div className="airdrop-mission">
+            <div className={`airdrop-mission${repostVerified ? ' airdrop-mission-verified' : ''}`}>
               <div className="airdrop-mission-head">
                 <h3>
-                  <span className="airdrop-step-num">2</span>
+                  <span className={`airdrop-step-num${repostVerified ? ' airdrop-step-num-done' : ''}`}>
+                    {repostVerified ? <Check size={13} strokeWidth={3} /> : '2'}
+                  </span>
                   Like and repost announcement
-                  {participant?.checks.repost?.state === 'verified' ? (
-                    <Badge tone="mint">Verified</Badge>
+                  {repostVerified ? (
+                    <Badge tone="mint">
+                      <Check size={11} strokeWidth={2.75} /> Verified
+                    </Badge>
                   ) : (
                     <Badge tone="amber">Required</Badge>
                   )}
                 </h3>
               </div>
               <p>Like and repost our announcement on X, then check your repost or paste your quote-post link.</p>
-              {isOpen && !campaign?.announcementPostId && (
-                <p className="genesis-helper">The announcement post link will appear here once published.</p>
-              )}
-              {participant && (
+              {repostVerified ? (
+                <div className="airdrop-verified-banner" role="status">
+                  <Check size={14} strokeWidth={2.75} />
+                  <span>
+                    {participant!.checks.repost!.message} · <strong>+50 pts</strong>
+                  </span>
+                </div>
+              ) : (
                 <>
-                  <div className="airdrop-actions">
-                    <a className="button button-secondary" href={announcementUrl} target="_blank" rel="noreferrer">
-                      <Heart size={14} /> <Repeat2 size={14} /> Like &amp; Repost on X
-                    </a>
-                    <Button
-                      variant="ghost"
-                      loading={busy === 'repost'}
-                      disabled={!isOpen || Boolean(busy)}
-                      onClick={() =>
-                        void runAction(
-                          'repost',
-                          'verify',
-                          { task: 'repost', ...(quotePostUrl.trim() ? { postUrl: quotePostUrl.trim() } : {}) },
-                          'Repost verified.',
-                        )
-                      }
-                    >
-                      Check repost
-                    </Button>
-                  </div>
-                  <div className="airdrop-input-row">
-                    <input
-                      aria-label="Optional quote-post link"
-                      placeholder="Optional quote-post link (https://x.com/...)"
-                      value={quotePostUrl}
-                      onChange={e => setQuotePostUrl(e.target.value)}
-                      maxLength={512}
-                    />
-                  </div>
+                  {isOpen && !campaign?.announcementPostId && (
+                    <p className="genesis-helper">The announcement post link will appear here once published.</p>
+                  )}
+                  {participant && (
+                    <>
+                      <div className="airdrop-actions">
+                        <a className="button button-secondary" href={announcementUrl} target="_blank" rel="noreferrer">
+                          <Heart size={14} /> <Repeat2 size={14} /> Like &amp; Repost on X
+                        </a>
+                        <Button
+                          variant="ghost"
+                          loading={busy === 'repost'}
+                          disabled={!isOpen || Boolean(busy)}
+                          onClick={() =>
+                            void runAction(
+                              'repost',
+                              'verify',
+                              { task: 'repost', ...(quotePostUrl.trim() ? { postUrl: quotePostUrl.trim() } : {}) },
+                              'Repost verified.',
+                            )
+                          }
+                        >
+                          Check repost
+                        </Button>
+                      </div>
+                      <div className="airdrop-input-row">
+                        <input
+                          aria-label="Optional quote-post link"
+                          placeholder="Optional quote-post link (https://x.com/...)"
+                          value={quotePostUrl}
+                          onChange={e => setQuotePostUrl(e.target.value)}
+                          maxLength={512}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {participant?.checks.repost && <p className="genesis-helper">{participant.checks.repost.message}</p>}
                 </>
               )}
-              {participant?.checks.repost && <p className="genesis-helper">{participant.checks.repost.message}</p>}
             </div>
 
             {/* Mission 3: Posts (1 required, up to 5) */}
-            <div className="airdrop-mission">
+            <div className={`airdrop-mission${postsVerified ? ' airdrop-mission-verified' : ''}`}>
               <div className="airdrop-mission-head">
                 <h3>
-                  <span className="airdrop-step-num">3</span>
+                  <span className={`airdrop-step-num${postsVerified ? ' airdrop-step-num-done' : ''}`}>
+                    {postsVerified ? <Check size={13} strokeWidth={3} /> : '3'}
+                  </span>
                   Post about oneshot ({participant?.posts.length || 0} / {AIRDROP_MAX_POSTS})
-                  {(participant?.posts.length || 0) >= 1 ? (
-                    <Badge tone="mint">Verified</Badge>
+                  {postsVerified ? (
+                    <Badge tone="mint">
+                      <Check size={11} strokeWidth={2.75} /> Verified ({participant?.posts.length}/{AIRDROP_MAX_POSTS})
+                    </Badge>
                   ) : (
                     <Badge tone="amber">1 Required · Up to 5</Badge>
                   )}
@@ -1092,9 +1142,10 @@ export function AirdropPage() {
                           ? post.postUrl
                           : `https://x.com/i/web/status/${post.postId}`;
                         return (
-                          <div key={post.postId} className="airdrop-post-card">
+                          <div key={post.postId} className="airdrop-post-card airdrop-post-card-verified">
                             <a href={safePostHref} target="_blank" rel="noreferrer" className="text-link">
-                              Post #{idx + 1} <ArrowUpRight size={12} />
+                              <Check size={13} strokeWidth={2.75} className="airdrop-post-check" /> Post #{idx + 1}{' '}
+                              <ArrowUpRight size={12} />
                             </a>
                             <div className="airdrop-post-metrics">
                               {post.metrics.views.toLocaleString()} views · {post.metrics.likes} likes ·{' '}
@@ -1113,41 +1164,77 @@ export function AirdropPage() {
             </div>
 
             {/* Mission 4: Create a meme token */}
-            <div className="airdrop-mission">
+            <div
+              className={`airdrop-mission${
+                createTokenVerified
+                  ? ' airdrop-mission-verified'
+                  : !tokenLaunchLive
+                    ? ' airdrop-mission-upcoming'
+                    : ''
+              }`}
+            >
               <div className="airdrop-mission-head">
                 <h3>
-                  <span className="airdrop-step-num">4</span>
+                  <span className={`airdrop-step-num${createTokenVerified ? ' airdrop-step-num-done' : ''}`}>
+                    {createTokenVerified ? <Check size={13} strokeWidth={3} /> : '4'}
+                  </span>
                   Create a meme token
-                  {participant?.checks.create_token?.state === 'verified' ? (
-                    <Badge tone="mint">Verified</Badge>
+                  {createTokenVerified ? (
+                    <Badge tone="mint">
+                      <Check size={11} strokeWidth={2.75} /> Verified
+                    </Badge>
+                  ) : !tokenLaunchLive ? (
+                    <Badge tone="neutral">Upcoming</Badge>
                   ) : (
                     <Badge tone="amber">Required</Badge>
                   )}
                 </h3>
               </div>
-              <p>
-                Launch a meme token on oneshot using your linked wallet once Zero token launches open. Finish your
-                social missions now to save your points and progress.
-              </p>
-              {participant && (
-                <div className="airdrop-actions">
-                  <Link href="/tokens/new" className="button button-secondary">
-                    Launch a token <ArrowUpRight size={14} />
-                  </Link>
-                  <Button
-                    variant="ghost"
-                    loading={busy === 'create_token'}
-                    disabled={!isOpen || !participant.wallet || Boolean(busy)}
-                    onClick={() =>
-                      void runAction('create_token', 'verify', { task: 'create_token' }, 'Token launch verified.')
-                    }
-                  >
-                    Verify token launch
-                  </Button>
-                </div>
-              )}
-              {participant?.checks.create_token && (
-                <p className="genesis-helper">{participant.checks.create_token.message}</p>
+              {createTokenVerified ? (
+                <>
+                  <p>Launch a meme token on oneshot using your linked wallet.</p>
+                  <div className="airdrop-verified-banner" role="status">
+                    <Check size={14} strokeWidth={2.75} />
+                    <span>
+                      {participant!.checks.create_token!.message} · <strong>+200 pts</strong>
+                    </span>
+                  </div>
+                </>
+              ) : !tokenLaunchLive ? (
+                <>
+                  <p>
+                    Opens when Zero mainnet launches. Complete your social missions now to save your points and
+                    progress.
+                  </p>
+                  <div className="airdrop-upcoming-note">
+                    <Clock size={13} />
+                    <span>Upcoming · Opens automatically once Zero mainnet is live.</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>Launch a meme token on oneshot using your linked wallet.</p>
+                  {participant && (
+                    <div className="airdrop-actions">
+                      <Link href="/tokens/new" className="button button-secondary">
+                        Launch a token <ArrowUpRight size={14} />
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        loading={busy === 'create_token'}
+                        disabled={!isOpen || !participant.wallet || Boolean(busy)}
+                        onClick={() =>
+                          void runAction('create_token', 'verify', { task: 'create_token' }, 'Token launch verified.')
+                        }
+                      >
+                        Verify token launch
+                      </Button>
+                    </div>
+                  )}
+                  {participant?.checks.create_token && (
+                    <p className="genesis-helper">{participant.checks.create_token.message}</p>
+                  )}
+                </>
               )}
             </div>
 
@@ -1187,13 +1274,17 @@ export function AirdropPage() {
 
             {/* Mission 6: Rendered ONLY when enabled by admin */}
             {campaign?.tradeMissionEnabled && (
-              <div className="airdrop-mission">
+              <div className={`airdrop-mission${tradeTokenVerified ? ' airdrop-mission-verified' : ''}`}>
                 <div className="airdrop-mission-head">
                   <h3>
-                    <span className="airdrop-step-num">+</span>
+                    <span className={`airdrop-step-num${tradeTokenVerified ? ' airdrop-step-num-done' : ''}`}>
+                      {tradeTokenVerified ? <Check size={13} strokeWidth={3} /> : '+'}
+                    </span>
                     Trade meme tokens
-                    {participant?.checks.trade_token?.state === 'verified' ? (
-                      <Badge tone="mint">Verified</Badge>
+                    {tradeTokenVerified ? (
+                      <Badge tone="mint">
+                        <Check size={11} strokeWidth={2.75} /> Verified
+                      </Badge>
                     ) : (
                       <Badge tone="amber">Bonus</Badge>
                     )}
@@ -1203,22 +1294,31 @@ export function AirdropPage() {
                   Buy or sell at least {formatIndexedAmount(campaign.minTradeNativeRaw, 18)} native volume on oneshot
                   token markets.
                 </p>
-                {participant && (
-                  <div className="airdrop-actions">
-                    <Link href="/tokens" className="button button-secondary">
-                      Trade tokens <ArrowUpRight size={14} />
-                    </Link>
-                    <Button
-                      variant="ghost"
-                      loading={busy === 'trade_token'}
-                      disabled={!isOpen || !participant.wallet || Boolean(busy)}
-                      onClick={() =>
-                        void runAction('trade_token', 'verify', { task: 'trade_token' }, 'Trading volume verified.')
-                      }
-                    >
-                      Check trade volume
-                    </Button>
+                {tradeTokenVerified ? (
+                  <div className="airdrop-verified-banner" role="status">
+                    <Check size={14} strokeWidth={2.75} />
+                    <span>
+                      {participant!.checks.trade_token!.message} · <strong>+150 pts</strong>
+                    </span>
                   </div>
+                ) : (
+                  participant && (
+                    <div className="airdrop-actions">
+                      <Link href="/tokens" className="button button-secondary">
+                        Trade tokens <ArrowUpRight size={14} />
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        loading={busy === 'trade_token'}
+                        disabled={!isOpen || !participant.wallet || Boolean(busy)}
+                        onClick={() =>
+                          void runAction('trade_token', 'verify', { task: 'trade_token' }, 'Trading volume verified.')
+                        }
+                      >
+                        Check trade volume
+                      </Button>
+                    </div>
+                  )
                 )}
               </div>
             )}

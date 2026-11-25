@@ -89,6 +89,38 @@ function formatWalletProviderError(reason: unknown, fallback: string): string {
   return reason instanceof Error && reason.message ? reason.message : fallback;
 }
 
+function LeaderboardAvatar({
+  avatarUrl,
+  username,
+  name,
+}: {
+  avatarUrl: string | null;
+  username: string;
+  name: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const safeAvatar = avatarUrl && /^https:\/\/pbs\.twimg\.com\//.test(avatarUrl) ? avatarUrl : null;
+  if (safeAvatar && !failed) {
+    return (
+      <img
+        className="airdrop-lb-avatar"
+        src={safeAvatar}
+        alt={`@${username}`}
+        width={34}
+        height={34}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <span className="airdrop-lb-avatar airdrop-lb-avatar-fallback" aria-hidden="true">
+      {(username || name || '?').slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 export function AirdropPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const xLoginFailed = searchParams.get('x_login') === 'failed';
@@ -491,6 +523,7 @@ export function AirdropPage() {
         setPeekTrigger(prev => prev + 1);
         setNotice('Wallet linked. Revealing your airdrop box allocation before locking for missions.');
         void loadCampaign();
+        void loadLeaderboard(leaderboardOffset);
       }
     } catch (reason) {
       if (mounted.current) {
@@ -1376,7 +1409,7 @@ export function AirdropPage() {
                   </div>
                   <div className="info-row">
                     <span>Current rank</span>
-                    <strong>{participant.rank ? `#${participant.rank}` : 'Unlocks after 4 missions'}</strong>
+                    <strong>{participant.rank ? `#${participant.rank}` : 'Complete 1 mission to rank'}</strong>
                   </div>
                   <div className="info-row">
                     <span>Projected Top 500 reward</span>
@@ -1506,7 +1539,8 @@ export function AirdropPage() {
                 Top 500 Leaderboard ({AIRDROP_TOP500_POOL.toLocaleString()} {tokenSymbol})
               </h2>
               <p className="genesis-helper">
-                Open to all LayerZero and community participants. Unlock your box to join the live rankings.
+                Live Top 500 rankings based on mission points, post engagement, and referrals. Complete all required
+                missions when Zero mainnet launches to lock in final rewards.
               </p>
             </div>
             <Badge tone="mint">{leaderboard?.totalRanked ?? 0} ranked</Badge>
@@ -1534,7 +1568,7 @@ export function AirdropPage() {
             </p>
           ) : !leaderboardError && !leaderboard?.entries.length ? (
             <p className="genesis-helper">
-              No participants have unlocked their box yet. Complete the four required missions to claim Rank #1.
+              No participants ranked yet. Complete your first mission to claim Rank #1.
             </p>
           ) : leaderboard?.entries.length ? (
             <>
@@ -1555,9 +1589,32 @@ export function AirdropPage() {
                   <tbody>
                     {leaderboard.entries.map(row => (
                       <tr key={`${row.rank}-${row.username}`}>
-                        <td>#{row.rank}</td>
                         <td>
-                          <strong>@{row.username}</strong> <span className="muted">({row.walletMasked})</span>
+                          <span className={`airdrop-lb-rank${row.rank <= 3 ? ` airdrop-lb-rank-${row.rank}` : ''}`}>
+                            #{row.rank}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="airdrop-lb-user">
+                            <LeaderboardAvatar avatarUrl={row.avatarUrl} username={row.username} name={row.name} />
+                            <div className="airdrop-lb-meta">
+                              {/^[A-Za-z0-9_]{1,15}$/.test(row.username) ? (
+                                <a
+                                  className="airdrop-lb-handle"
+                                  href={`https://x.com/${row.username}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  @{row.username}
+                                </a>
+                              ) : (
+                                <strong className="airdrop-lb-handle">@{row.username}</strong>
+                              )}
+                              <span className="airdrop-lb-sub">
+                                {row.walletMasked !== 'Unbound' ? row.walletMasked : row.name}
+                              </span>
+                            </div>
+                          </div>
                         </td>
                         <td>
                           {row.tier === 'lz_winner'

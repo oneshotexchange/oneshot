@@ -141,7 +141,21 @@ type RankedRow = {
   projectedTop500Tokens: number;
 };
 
-async function computeRankings(tx: AirdropTransaction): Promise<Map<string, RankedRow>> {
+function hasLeaderboardActivity(participant: AirdropParticipant): boolean {
+  return Boolean(
+    participant.boxUnlockedAt ||
+      participant.checks.follow?.state === 'verified' ||
+      participant.checks.repost?.state === 'verified' ||
+      participant.checks.create_token?.state === 'verified' ||
+      participant.checks.trade_token?.state === 'verified' ||
+      participant.posts.length >= 1,
+  );
+}
+
+async function computeRankings(
+  tx: AirdropTransaction,
+  options: { unlockedOnly?: boolean } = {},
+): Promise<Map<string, RankedRow>> {
   const [all, referralMap] = await Promise.all([tx.allParticipants(), tx.referralCounts()]);
   const rows: RankedRow[] = all.map(participant => {
     const referralStats = referralMap[participant.id];
@@ -161,11 +175,18 @@ async function computeRankings(tx: AirdropTransaction): Promise<Map<string, Rank
   });
 
   const eligible = rows
-    .filter(row => Boolean(row.participant.boxUnlockedAt && row.participant.wallet))
+    .filter(row =>
+      options.unlockedOnly
+        ? Boolean(row.participant.boxUnlockedAt && row.participant.wallet)
+        : hasLeaderboardActivity(row.participant),
+    )
     .sort((a, b) => {
       if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-      const tA = Date.parse(a.participant.boxUnlockedAt!);
-      const tB = Date.parse(b.participant.boxUnlockedAt!);
+      const unlockedDiff =
+        Number(Boolean(b.participant.boxUnlockedAt)) - Number(Boolean(a.participant.boxUnlockedAt));
+      if (unlockedDiff !== 0) return unlockedDiff;
+      const tA = Date.parse(a.participant.boxUnlockedAt || a.participant.createdAt);
+      const tB = Date.parse(b.participant.boxUnlockedAt || b.participant.createdAt);
       if (tA !== tB) return tA - tB;
       return a.participant.id.localeCompare(b.participant.id);
     });
@@ -1005,11 +1026,11 @@ export function createAirdropService(options: {
           if (parsed.publish && campaign.claimingOpen) {
             fail('AIRDROP_CLAIMS_ACTIVE', 'Cannot overwrite published Merkle proofs while claiming is open.');
           }
-          const ranked = await computeRankings(tx);
+          const ranked = await computeRankings(tx, { unlockedOnly: true });
           const rawEntries: { wallet: string; amountRaw: bigint; generalTokens: number; top500Tokens: number }[] = [];
           for (const row of ranked.values()) {
             const wallet = row.participant.wallet;
-            if (!wallet) continue;
+            if (!row.participant.boxUnlockedAt || !wallet) continue;
             const totalWhole = row.participant.reservedGeneralTokens + row.projectedTop500Tokens;
             if (totalWhole <= 0) continue;
             rawEntries.push({

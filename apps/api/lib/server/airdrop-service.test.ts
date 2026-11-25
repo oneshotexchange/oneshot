@@ -358,13 +358,18 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
     expect(unlocked.participant?.rank).toBe(1);
     expect(unlocked.participant?.slotReserved).toBe(true);
 
-    // Switch to community wallet before Merkle publish -> create_token cleared, box re-locks, rank dropped
+    // Switch to community wallet before Merkle publish -> create_token cleared, box re-locks, excluded from Merkle export
     const switched = await bind(f.service, s, accCommunity);
     expect(switched.participant?.checks.create_token).toBeUndefined();
     expect(switched.participant?.boxUnlockedAt).toBeNull();
-    expect(switched.participant?.rank).toBeNull();
+    expect(switched.participant?.rank).toBe(1);
     expect(switched.participant?.slotReserved).toBe(false);
     expect(switched.participant?.reservedGeneralTokens).toBe(0);
+    const previewLocked = await f.service.exportMerkle(
+      { chainId: 84532, distributor: '0x4444444444444444444444444444444444444444', publish: false },
+      'admin:1',
+    );
+    expect(previewLocked.recipientCount).toBe(0);
 
     // Re-verifying create_token on new wallet re-unlocks and ranks cleanly
     const relisted = await f.service.verifyMission(s, 'create_token');
@@ -632,5 +637,69 @@ describe('Airdrop service: LayerZero tiers, missions, lock-in caps, Top 500, and
       if (prevClientId === undefined) delete process.env.X_OAUTH_CLIENT_ID;
       else process.env.X_OAUTH_CLIENT_ID = prevClientId;
     }
+  });
+
+  it('ranks social-phase participants with X avatars on live leaderboard while excluding locked boxes from Merkle export', async () => {
+    const f = makeFixture();
+    await setupOpenCampaign(f);
+    await f.service.importSnapshot(
+      { mode: 'replace', entries: [{ wallet: accWinner.address, tier: 'lz_winner' }] },
+      'admin:1',
+    );
+
+    const sSocial1 = {
+      ...createSession(31),
+      xAccount: {
+        id: '31',
+        username: 'DustswapOnBase',
+        name: 'Dustswap',
+        avatarUrl: 'https://pbs.twimg.com/profile_images/2109647989174423552/ItLB-GLC_normal.jpg',
+      },
+    };
+    const sSocial2 = {
+      ...createSession(32),
+      xAccount: {
+        id: '32',
+        username: 'Mega_El_Gato',
+        name: 'El Gato',
+        avatarUrl: 'https://pbs.twimg.com/profile_images/2103353428114116608/1AwPYy05_normal.jpg',
+      },
+    };
+
+    await f.service.enroll(sSocial1, AIRDROP_CONSENT_VERSION);
+    await f.service.enroll(sSocial2, AIRDROP_CONSENT_VERSION);
+    await bind(f.service, sSocial1, accWinner);
+    await bind(f.service, sSocial2, accCommunity);
+
+    await f.service.verifyMission(sSocial1, 'follow');
+    await f.service.verifyMission(sSocial1, 'repost');
+    await f.service.verifyMission(sSocial2, 'follow');
+
+    const board = await f.service.leaderboard(0, 10);
+    expect(board.totalRanked).toBe(2);
+    expect(board.entries).toHaveLength(2);
+    expect(board.entries[0]).toMatchObject({
+      rank: 1,
+      username: 'DustswapOnBase',
+      avatarUrl: 'https://pbs.twimg.com/profile_images/2109647989174423552/ItLB-GLC_normal.jpg',
+      tier: 'lz_winner',
+      totalScore: 200,
+      projectedTop500Tokens: 1_500_000,
+    });
+    expect(board.entries[1]).toMatchObject({
+      rank: 2,
+      username: 'Mega_El_Gato',
+      avatarUrl: 'https://pbs.twimg.com/profile_images/2103353428114116608/1AwPYy05_normal.jpg',
+      tier: 'community',
+      totalScore: 50,
+      projectedTop500Tokens: 1_500_000,
+    });
+
+    await expect(
+      f.service.exportMerkle(
+        { chainId: 84532, distributor: '0x4444444444444444444444444444444444444444', publish: true },
+        'admin:1',
+      ),
+    ).rejects.toMatchObject({ code: 'AIRDROP_NO_RECIPIENTS' });
   });
 });
